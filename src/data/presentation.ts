@@ -34,6 +34,10 @@ const presentation: Presentation = {
       label: "Stack Overflow",
       link: "https://stackoverflow.com/users/18449412/eren-g%c3%bcn",
     },
+    {
+      label: "Resume",
+      link: "https://drive.google.com/file/d/15STnxPXJfzzjb6T62ZBQu7r_KbGg7ESR/view?usp=sharing",
+    }
   ],
 };
 
