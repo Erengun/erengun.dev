@@ -1,3 +1,10 @@
+---
+title: "Making Texts Selectable in Your Flutter Web App"
+publishedAt: 2024-03-05
+description: "With the continuous evolution of Flutter and the demand for visually appealing, high-quality icons in mobile applications, integrating Google's Material Symbols Icons into your Flutter project has become a must-have for developers. The `material_symbols_icons` package by hiveright.tech offers a seamless way to incorporate these icons into your Flutter applications, providing a wide range of options for customization and compatibility with future Flutter updates."
+slug: "using-material-library-icons-in-flutter-app"
+isPublish: true
+---
 # Material Symbols Icons for Flutter: A Comprehensive Guide
 
 ## Introduction
