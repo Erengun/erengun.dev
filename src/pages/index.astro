@@ -1,105 +1,247 @@
 ---
-import { getCollection } from "astro:content";
-import { Image } from "astro:assets"
+import { getCollection } from "astro:content"
+import PageLayout from "@layouts/PageLayout.astro"
+import ArrowCard from "@components/ArrowCard"
+import StackCard from "@components/StackCard.astro"
+import { SITE, SOCIALS } from "@consts"
+import TwinklingStars from "@components/TwinklingStars.astro"
+import MeteorShower from "@components/MeteorShower.astro"
 
-import Layout from "@/layouts/Layout.astro";
-import SocialLinks from "@/components/SocialLinks.astro";
-import PostCard from "@/components/PostCard.astro";
-import ProjectCard from "@/components/ProjectCard.astro";
-import Link from "@/components/shared/Link.astro";
-import convertAsteriskToStrongTag from "@/utils/convertAsteriskToStrongTag";
+const posts = (await getCollection("blog"))
+  .filter(post => !post.data.draft)
+  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime())
+  .slice(0,3)
 
-import presentation from "@/data/presentation";
-import projects from "@/data/projects";
+const projects = (await getCollection("projects"))
+  .filter(project => !project.data.draft)
+  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime())
+  .slice(0,3)
 
-const posts = (await getCollection("posts")).sort(function (first, second) {
-  return second.data.publishedAt.getTime() - first.data.publishedAt.getTime();
-});
+const stack = [
+  {
+    text: "Flutter",
+    icon: "flutter",
+    href: "https://flutter.dev"
+  },
+  {
+    text: "Node.Js",
+    icon: "node",
+    href: "https://nodejs.org"
+  },
+  {
+    text: "Go",
+    icon: "go",
+    href: "htttps://go.dev",
+  },
+  {
+    text: "Python",
+    icon: "python",
+    href: "https://www.python.org",
+  },
+  { 
+    text: "Astro", 
+    icon: "astro", 
+    href: "https://astro.build" 
+  },
+  { 
+    text: "Javascript", 
+    icon: "javascript", 
+    href: "https://www.javascript.com" 
+  },
+  { 
+    text: "Typescript", 
+    icon: "typescript", 
+    href: "https://www.typescriptlang.org" 
+  },
+]
 ---
 
-<Layout>
-  <main class="flex flex-col gap-20">
-    <article
-      class="flex flex-col gap-8 md:flex-row-reverse md:justify-end md:gap-12"
-    >
-      {
-        presentation.profile && (
-          <Image
-            src={presentation.profile}
-            class="w-1/4 self-center rounded-full"
-            alt="Your Profile"
-            width="200"
-            height="200"
-          />
-        )
-      }
+<PageLayout title="Home" description={SITE.DESCRIPTION}>
 
-      <div class="flex flex-col gap-8">
-        <h1 class="text-3xl text-neutral-100">
-          {presentation.title}
-        </h1>
+  <!-- Light Mode: Particles -->
+  <div class='absolute inset-0 block dark:hidden'>
+    <div id='particles1' class='fixed inset-0'></div>
+    <div id='particles2' class='fixed inset-0'></div>
+    <div id='particles3' class='fixed inset-0'></div>
+  </div>
 
-        <h2
-          class="w-auto max-w-[60ch] leading-6"
-          set:html={convertAsteriskToStrongTag(presentation.description)}
-        />
+  <!-- Dark Theme: Stars -->
+  <div class='absolute inset-0 bg-black hidden dark:block'>
+    <div id='stars1' class='fixed inset-0'></div>
+    <div id='stars2' class='fixed inset-0'></div>
+    <div id='stars3' class='fixed inset-0'></div>
+  </div>
 
-        <SocialLinks />
+  <!-- Dark Theme: Twinkling Stars / Metors -->
+  <div id="galaxy" class="fixed inset-0">
+    <div class="hidden dark:block">
+      <TwinklingStars/>
+      <MeteorShower/>
+    </div>
+  </div>
+
+  <script is:inline src="/js/bg.js"></script>
+  
+  <!-- HERO -->
+  <section class="relative h-screen w-full">
+    <div id="planetcont" class='animate absolute inset-0 top-1/4 overflow-hidden'>
+      <div id="crescent" class='absolute top-0 left-1/2 -translate-x-1/2 w-[250vw] min-h-[100vh] aspect-square rounded-full p-[1px] bg-gradient-to-b from-black/25 dark:from-white/75 from-0% to-transparent to-5%'>
+        <div id="planet" class='w-full h-full bg-white dark:bg-black rounded-full p-[1px] overflow-hidden flex justify-center'>
+          <div id="blur" class='w-full h-20 rounded-full bg-neutral-900/25 dark:bg-white/25 blur-3xl'/>
+        </div>
       </div>
-    </article>
+    </div>
+    <div class="animate absolute h-full w-full flex items-center justify-center">
+      <div class='relative w-full h-full flex items-center justify-center'>
+        <div class='p-5 text-center'>
+          <p class='animated text-lg md:text-xl lg:text-2xl font-semibold opacity-75'>
+            Hello, I am ...
+          </p>
+          <p class='animated text-2xl md:text-3xl lg:text-4xl font-bold uppercase text-black dark:text-white'>
+            Eren Gün
+          </p>
+          <!-- <p class='animated text-sm md:text-base lg:text-lg opacity-75'>
+            Currently designing products for humans.
+          </p> -->
+          <p class='animated text-sm md:text-base lg:text-lg opacity-75'>
+            Senior Full-Stack Developer & Mobile Specialist.
+          </p>
+          <div id="ctaButtons" class='animated flex flex-wrap gap-4 justify-center mt-5'>
+            <a href='/work' class='py-2 px-4 rounded truncate text-xs md:text-sm lg:text-base bg-black dark:bg-white text-white dark:text-black hover:opacity-75 blend'>
+              View my work
+            </a>
+            <a href='/blog' class='py-2 px-4 truncate rounded text-xs md:text-sm lg:text-base border border-black/25 dark:border-white/25 hover:bg-black/5 hover:dark:bg-white/15 blend'>
+              Read my blog
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-    <article class="flex flex-col gap-8">
-      <header class="flex w-full flex-row justify-between gap-2">
-        <h3 class="text-lg text-neutral-100">Latest posts</h3>
-        <Link href="/posts" label="See all posts" isUnderline target="_self" />
-      </header>
-      {posts.length === 0 && <p>Soon, stay connected 👀...</p>}
+  <div class="relative bg-white dark:bg-black">
+    <div class="mx-auto max-w-screen-sm p-5 space-y-24 pb-16">
 
-      <section class="flex flex-col gap-4 md:flex-row md:flex-wrap">
-        {
-          posts.length !== 0 &&
-            posts
-              .slice(0, 2)
-              .map((post) => (
-                <PostCard
-                  publishedAt={post.data.publishedAt}
-                  title={post.data.title}
-                  description={post.data.description}
-                  slug={post.slug}
-                />
-              ))
-        }
+      <!-- About Section -->
+      <section class="animate">
+        <article>
+          <!-- <p>I am a <b><i>software engineer</i></b>, <b><i>ui/ux designer</i></b>, <b><i>product planner</i></b>, <b><i>mentor</i></b>, <b><i>student</i></b>, <b><i>minimalist</i></b>, <b><i>eternal optimist</i></b>, <b><i>crypto enthusiast</i></b> and <b><i>sarcasm connoisseur</i></b>.</p>
+          <p>I love to both build and break things. I am motivated by challenging projects with self-guided research and dynamic problem solving. My true passion is crafting creative front end designs with unique takes on color, typography and motion.</p>
+          <p>During my career</p>
+          <p>I have built products ranging from marketing and ecommerce websites to complex enterprise apps with focus on delivering fast, elegant code along with delightful user interfaces.</p>
+          <p>Now</p>
+          <p>I currently work as a software engineer at StreamlineFS, where I do product planning, design and development.</p> -->
+          <!-- As a Mobile Application Developer; I create and maintain web and mobile applications that provide a seamless user experience and robust data handling capabilities. I have led the development of a full-stack mobile application from scratch, implemented a state management solution using Riverpod, and integrated multiple micro-services and third-party modules. 
+ -->
+          <p>I'm a <i>open-source enjoyer</i> specializing in Flutter and full-stack development. </p>
+          <p>I work at DevOpen as a Senior Developer, leading the development of LegalLens and RescuPaws with expertise in both Flutter and Node.js.</p>
+          <b>I’m open to new opportunities and can help individuals and companies with both mobile and web development. Feel free to reach out!</b>
+          <p> During my career</p>
+          <p>Worked on B2B projects like <i>Shipgrande</i> and <i>Jointact</i>, as well as B2C projects such as <i>Tinywall</i>, <i>LegalLens</i>, and <i>RescuPaws</i> (formerly <i>Pati Pati</i>). Created two open-source projects for the Flutter community: <i>Flutter Riverpod template</i> and <i>Rider package</i>, and contributed to open-source web and mobile projects. Shared the development process on LinkedIn and wrote blog posts.</p>
+          <p>Gained a <i>Store Listing</i> certificate for app and Play Store marketing and a <i>Project Management</i> certificate from Google. Applied this education to lead small teams, manage store listings, and create CI/CD pipelines using <i>GitHub Actions</i> and <i>Fastlane</i>.</p>
+          <p>Behind the Scenes </p>
+          <p>Did you know I played a key role in developing AI-driven algorithms for UAVs, UGVs, and USVs? My contributions were instrumental in achieving a second-place finish at Teknofest, a prestigious technology competition.</p>
+        </article>
       </section>
-    </article>
 
-    <article class="flex flex-col gap-8">
-      <header class="flex w-full flex-row justify-between gap-2">
-        <h3 class="text-lg text-neutral-100">
-          Selected projects ({projects.length})
-        </h3>
-      </header>
-      {projects.length === 0 && <p>Oops, I must work^^^^^</p>}
-
-      <section class="flex flex-col gap-4">
-        {
-          projects.length !== 0 &&
-            projects.map((project) => <ProjectCard {...project} />)
-        }
+      <!-- Blog Preview Section -->
+      <section class="animate">
+        <div class="space-y-4">
+          <div class="flex justify-between">
+            <p class="font-semibold text-black dark:text-white">
+              Recent posts
+            </p>
+            <a href="/blog" class="w-fit col-span-3 group flex gap-1 items-center underline decoration-[.5px] decoration-black/25 dark:decoration-white/50 hover:decoration-black dark:hover:decoration-white text-black dark:text-white underline-offset-2 blend">
+              <span class="text-black/75 dark:text-white/75 group-hover:text-black group-hover:dark:text-white blend">
+                All posts
+              </span>
+            </a>
+          </div>
+          <ul class="space-y-4">
+            {posts.map((post) => (
+              <li>
+                <ArrowCard entry={post} />
+              </li>
+            ))}
+          </ul>
+        </div>
       </section>
-    </article>
 
-    <article class="flex flex-col gap-8">
-      <header class="flex w-full flex-row justify-between gap-2">
-        <h3 class="text-lg text-neutral-100">Get in touch</h3>
-      </header>
-      <p>
-        Email me at <Link
-          href={`mailto:${presentation.mail}`}
-          label={presentation.mail}
-        /> or follow me via my social links.
-      </p>
+      <!-- Tech Stack Section -->
+      <section class="animate">
+        <div class="space-y-4">
+          <p class="font-semibold text-black dark:text-white">
+            Tech Stack
+          </p>
+          <div class="flex flex-wrap items-center gap-2 mt-5">
+            {stack.map(item => (
+              <StackCard 
+                text={item.text}
+                icon={item.icon}
+                href={item.href}
+              />
+            ))}
+          </div>
+          <!-- <div>
+            Performing reactivity and statefulness, special guest
+            <a href="https://www.solidjs.com/" target="_blank" class="w-fit group underline decoration-[.5px] decoration-black/25 dark:decoration-white/50 hover:decoration-black dark:hover:decoration-white text-black dark:text-white underline-offset-2 blend">
+              <span class="text-black/75 dark:text-white/75 group-hover:text-black group-hover:dark:text-white blend">
+                SolidJS
+              </span>
+            </a>
+          </div> -->
+        </div>
+      </section>
 
-      <SocialLinks />
-    </article>
-  </main>
-</Layout>
+      <!-- Project Preview Section -->
+      <section class="animate">
+        <div class="space-y-4">
+          <div class="flex justify-between">
+            <p class="font-semibold text-black dark:text-white">
+              Recent projects
+            </p>
+            <a href="/projects" class="w-fit col-span-3 group flex gap-1 items-center underline decoration-[.5px] decoration-black/25 dark:decoration-white/50 hover:decoration-black dark:hover:decoration-white text-black dark:text-white underline-offset-2 blend">
+              <span class="text-black/75 dark:text-white/75 group-hover:text-black group-hover:dark:text-white blend">
+                All projects
+              </span>
+            </a>
+          </div>
+          <ul class="space-y-4">
+            {projects.map((project) => (
+              <li>
+                <ArrowCard entry={project} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <!-- Contact Section -->
+      <section class="animate">
+        <div>
+          <p class="font-semibold text-black dark:text-white">
+            Let's Connect
+          </p>
+          <p>
+            Reach out to me via email or on social media.
+          </p>
+          <div class="grid grid-cols-4 gap-y-2 mt-4 auto-cols-min">
+            {SOCIALS.map(social => (
+              <div class="col-span-1 flex items-center gap-1">
+                <span class="whitespace-nowrap truncate">
+                  {social.NAME}
+                </span>
+              </div>
+              <div class="col-span-3 truncate">
+                <a href={social.HREF} target="_blank" class="w-fit col-span-3 group flex gap-1 items-center underline decoration-[.5px] decoration-black/25 dark:decoration-white/50 hover:decoration-black dark:hover:decoration-white text-black dark:text-white underline-offset-2 blend">
+                  <span class="text-black/75 dark:text-white/75 group-hover:text-black group-hover:dark:text-white blend">
+                    {social.TEXT}
+                  </span>
+                </a>
+              </div>
+            ))}
+        </div>
+      </section>
+    </div>
+  </div>
+</PageLayout>
