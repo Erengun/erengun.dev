@@ -2,9 +2,9 @@ import type { Site, Page, Links, Socials } from "@types"
 
 // Global
 export const SITE: Site = {
-  TITLE: "Eren Gün",
-  DESCRIPTION: "Hi, I'm Eren. I'm a software developer based in Istanbul, Turkey.",
-  AUTHOR: "Eren Gün",
+  TITLE: "Fatih Cloud",
+  DESCRIPTION: "Hi, I'm Fatih. I'm a software developer based in Ankara, Turkey.",
+  AUTHOR: "Fatih Cloud",
 }
 
 // Work Page
@@ -56,26 +56,20 @@ export const SOCIALS: Socials = [
   { 
     NAME: "Email",
     ICON: "email", 
-    TEXT: "hi@erengun.dev",
-    HREF: "mailto:hi@erengun.dev",
+    TEXT: "hi@fatihcloud.com",
+    HREF: "mailto:hi@fatihcloud.com",
   },
   { 
     NAME: "Github",
     ICON: "github",
-    TEXT: "erengun",
-    HREF: "https://github.com/erengun"
+    TEXT: "Fatih Cloud",
+    HREF: "https://github.com/Fatihcloud"
   },
   { 
     NAME: "LinkedIn",
     ICON: "linkedin",
-    TEXT: "erengun",
-    HREF: "https://www.linkedin.com/in/erengun/",
-  },
-  { 
-    NAME: "Mastodon",
-    ICON: "mastodon",
-    TEXT: "erengun",
-    HREF: "https://mastodon.social/@erengun",
+    TEXT: "Fatih Cloud",
+    HREF: "https://www.linkedin.com/in/fatihcloud/",
   },
 ]
 
