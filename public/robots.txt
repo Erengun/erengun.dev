@@ -164,7 +164,7 @@ User-agent: yoozBot
 # youdao.com chinese search engine
 User-agent: YoudaoBot
 # crawling rule(s) for above bots
-Disallow:
+Disallow: /
 # disallow all other bots
 User-agent: *
 Disallow: /
