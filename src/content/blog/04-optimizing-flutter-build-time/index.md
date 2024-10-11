@@ -11,6 +11,8 @@ tags:
 Why is Flutter Build Taking So Long? Tips to Speed Up Your Flutter Build Time
 =============================================================================
 
+<div style="width:100%;height:0;padding-bottom:56%;position:relative;"><iframe src="https://giphy.com/embed/QMHoU66sBXqqLqYvGO" width="100%" height="100%" style="position:absolute" frameBorder="0" class="giphy-embed" allowFullScreen></iframe></div><p><a href="https://giphy.com/gifs/this-is-fine-QMHoU66sBXqqLqYvGO">via GIPHY</a></p>
+
 As your project grows, long build times can slow down productivity. As a 2017 MBP user in 2024 myself. I’ve been through the pain of waiting for builds that felt like they would never end. So, after diving deep into optimization strategies, I found a few key things that can speed up the process.
 
 1\. Pre-Compiled Firestore iOS SDK: A Life Saver
@@ -54,6 +56,8 @@ Once you run `pod install`, CocoaPods will retrieve the pre-compiled binary and 
 ==============================
 
 When working with devices during development, emulators really slow downs the computer. I fount the solution with using [scrcpy](https://github.com/Genymobile/scrcpy), a lightweight and fast tool that allows you to mirror and control your Android device via USB or Wifi Debugging. So basically instead of using your computers resources for emulator you can use your phone. It’s an efficient alternative to traditional emulators and helps you test changes easily.
+
+<div style="width:100%;height:0;padding-bottom:56%;position:relative;"><iframe src="https://giphy.com/embed/7rGC9Ee1MlIv4hn9Ze" width="100%" height="100%" style="position:absolute" frameBorder="0" class="giphy-embed" allowFullScreen></iframe></div><p><a href="https://giphy.com/gifs/cbs-young-sheldon-youngsheldon-good-thinking-7rGC9Ee1MlIv4hn9Ze">via GIPHY</a></p>
 
 You can also optimize the scrcpy too by configuring. This is the command I use:
 
@@ -144,3 +148,5 @@ Conclusion
 As we reach the end of this journey through optimizing Flutter build times, I hope you’ve found a few valuable tools to help you navigate the complexities of development.
 
 If you appreciate the insights shared here and want to see more content and projects, consider following me or sponsoring my work on [GitHub](https://github.com/Erengun). Together, we can explore new horizons in development and craft solutions that resonate with our community.
+
+<div style="width:100%;height:0;padding-bottom:75%;position:relative;"><iframe src="https://giphy.com/embed/XxHVJxuogNP32" width="100%" height="100%" style="position:absolute" frameBorder="0" class="giphy-embed" allowFullScreen></iframe></div><p><a href="https://giphy.com/gifs/XxHVJxuogNP32">via GIPHY</a></p>
