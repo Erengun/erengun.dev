@@ -234,12 +234,8 @@ By adapting these rules to Flutter, we retain the core philosophy: writing code 
 
 ---
 
-## Credits & Validation
+## Credits
 
-**Validation Credit:**  
-This post has been validated against the latest Flutter team guidelines and migration guides, including resources from [Flutter Documentation on Performance Best Practices](citeturn1search0), [Breaking Changes and Migration Guides](citeturn1search1, citeturn1search2), and community recommendations. No deprecated APIs or examples are used, ensuring that the guidance is accurate and up-to-date.
-
-**Original Guidelines Credit:**  
 The original “Power of 10: Rules for Developing Safety-Critical Code” by Gerard J. Holzmann (NASA/JPL) provided the inspiration for these adapted rules.
 
 ---
@@ -249,7 +245,3 @@ The original “Power of 10: Rules for Developing Safety-Critical Code” by Ger
 By embracing these ten rules in your Flutter development workflow, you create a codebase that is simple, reliable, and maintainable—qualities that are as crucial in safety-critical C systems as they are in modern mobile applications. Whether you’re breaking down complex widget trees, managing asynchronous operations with clear bounds, or enforcing strict linting rules, these practices pave the way for robust, scalable, and high-performance Flutter apps.
 
 Happy coding, and may your Flutter projects thrive!
-
----
-
-This final version now includes detailed insights into the origins in C, validation credits from Flutter’s guidelines, and final touches to ensure accuracy and adherence to current best practices.
