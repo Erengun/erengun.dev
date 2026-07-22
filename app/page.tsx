@@ -1,502 +1,440 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
-const achievements = [
-  {
-    index: "01",
-    metric: "100",
-    kicker: "T3 VAKFI",
-    title: "Yükselen Yıldız",
-    detail: "Selected as one of Türkiye’s 100 rising technology talents.",
-    className: "acid",
+const projects = {
+  subzilla: {
+    number: "01",
+    title: "SubZilla",
+    type: "MOBILE PRODUCT",
+    tagline: "Know where the money goes before it goes.",
+    description:
+      "A private-first subscription manager for recurring expenses, visual analytics, payment calendars and smart reminders — built with Flutter and stored locally.",
+    tags: ["Flutter", "Riverpod", "Local-first", "Analytics"],
+    link: "https://github.com/DevOpen-io/SubZilla",
   },
-  {
-    index: "02",
-    metric: "#09",
-    kicker: "CODINGAME",
-    title: "Worldwide",
-    detail: "A world top-10 finish where algorithms meet speed and nerve.",
-    className: "blue",
+  dondurma: {
+    number: "02",
+    title: "Dondurma",
+    type: "OPEN-SOURCE READER",
+    tagline: "News without the machine deciding for you.",
+    description:
+      "A polished RSS/Atom reader that is algorithm-free, tracking-free and available across Android, iOS, web and desktop platforms.",
+    tags: ["Flutter", "Material 3", "RSS / Atom", "6 platforms"],
+    link: "https://github.com/DevOpen-io/dondurma-rss-reader",
   },
-  {
-    index: "03",
-    metric: "AWD",
-    kicker: "TEKNOFEST",
-    title: "Karma Sürü",
-    detail: "Award-winning autonomous swarm simulation and coordination.",
-    className: "orange",
-  },
-  {
-    index: "04",
-    metric: "1ST",
-    kicker: "MOBILE",
-    title: "Serial winner",
-    detail: "Years of first-place finishes in mobile development challenges.",
-    className: "violet",
-  },
+} as const;
+
+const awards = [
+  { code: "T3/100", title: "100 Yükselen Yıldız", label: "SELECTED TALENT", note: "T3 Vakfı" },
+  { code: "WW/09", title: "World #9", label: "ALGORITHM RANK", note: "CodinGame" },
+  { code: "TF/AWD", title: "Karma Sürü", label: "AWARD WINNER", note: "TEKNOFEST" },
+  { code: "MB/1ST", title: "Serial first", label: "MOBILE CHALLENGES", note: "Multi-year" },
 ];
 
-const ticker = [
-  "SOFTWARE DEVELOPMENT",
-  "OPEN SOURCE",
-  "FLUTTER",
-  "AUTONOMOUS SYSTEMS",
-  "CREATIVE ENGINEERING",
-  "ÉCOLE 42",
-];
+let windowLayer = 20;
 
-function SwarmCanvas() {
+function WindowControls() {
+  return (
+    <span className="window-controls" aria-hidden="true">
+      <i /><i /><i />
+    </span>
+  );
+}
+
+function DraggableWindow({
+  title,
+  className,
+  children,
+}: {
+  title: string;
+  className: string;
+  children: ReactNode;
+}) {
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [layer, setLayer] = useState(10);
+  const drag = useRef<{ id: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+
+  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (window.matchMedia("(max-width: 820px)").matches) return;
+    windowLayer += 1;
+    setLayer(windowLayer);
+    drag.current = {
+      id: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: position.x,
+      originY: position.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!drag.current || drag.current.id !== event.pointerId) return;
+    setPosition({
+      x: drag.current.originX + event.clientX - drag.current.startX,
+      y: drag.current.originY + event.clientY - drag.current.startY,
+    });
+  };
+
+  const stopDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!drag.current || drag.current.id !== event.pointerId) return;
+    drag.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  return (
+    <article
+      className={`os-window ${className}`}
+      style={{
+        "--drag-x": `${position.x}px`,
+        "--drag-y": `${position.y}px`,
+        zIndex: layer,
+      } as React.CSSProperties}
+      onPointerDown={() => {
+        windowLayer += 1;
+        setLayer(windowLayer);
+      }}
+    >
+      <div
+        className="window-bar"
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={stopDrag}
+        onPointerCancel={stopDrag}
+        tabIndex={0}
+        role="button"
+        aria-label={`Drag ${title} window`}
+      >
+        <WindowControls />
+        <span>{title}</span>
+        <span className="window-grip">::::::::::::::::</span>
+      </div>
+      {children}
+    </article>
+  );
+}
+
+function CursorTrail() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    type Dot = { x: number; y: number; life: number; size: number; color: string };
+    let dots: Dot[] = [];
     let frame = 0;
-    let width = 0;
-    let height = 0;
-    let pointer = { x: 0, y: 0, active: false };
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let last = { x: -100, y: -100 };
+    const colors = ["#ff5c39", "#ffd54a", "#ff8fc7", "#ffffff"];
 
-    type Agent = { x: number; y: number; vx: number; vy: number; size: number; seed: number };
-    let agents: Agent[] = [];
-
-    const reset = () => {
-      const rect = canvas.getBoundingClientRect();
-      const scale = Math.min(window.devicePixelRatio || 1, 2);
-      width = rect.width;
-      height = rect.height;
-      canvas.width = Math.floor(width * scale);
-      canvas.height = Math.floor(height * scale);
-      context.setTransform(scale, 0, 0, scale, 0, 0);
-      const count = width < 700 ? 38 : 82;
-      agents = Array.from({ length: count }, (_, index) => ({
-        x: Math.random() * width,
-        y: Math.random() * height,
-        vx: (Math.random() - 0.5) * 0.7,
-        vy: (Math.random() - 0.5) * 0.7,
-        size: index % 11 === 0 ? 3.8 : index % 5 === 0 ? 2.4 : 1.35,
-        seed: Math.random() * Math.PI * 2,
-      }));
-      pointer = { x: width * 0.62, y: height * 0.45, active: false };
+    const resize = () => {
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(window.innerWidth * ratio);
+      canvas.height = Math.floor(window.innerHeight * ratio);
+      canvas.style.width = `${window.innerWidth}px`;
+      canvas.style.height = `${window.innerHeight}px`;
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
     };
 
-    const movePointer = (event: globalThis.PointerEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      pointer.x = event.clientX - rect.left;
-      pointer.y = event.clientY - rect.top;
-      pointer.active = true;
+    const move = (event: globalThis.PointerEvent) => {
+      const distance = Math.hypot(event.clientX - last.x, event.clientY - last.y);
+      if (distance < 11) return;
+      last = { x: event.clientX, y: event.clientY };
+      dots.push({
+        x: event.clientX,
+        y: event.clientY,
+        life: 1,
+        size: 5 + Math.random() * 8,
+        color: colors[Math.floor(Math.random() * colors.length)],
+      });
+      if (dots.length > 65) dots = dots.slice(-65);
     };
 
-    const releasePointer = () => {
-      pointer.active = false;
+    const draw = () => {
+      context.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      dots = dots.filter((dot) => dot.life > 0.03);
+      dots.forEach((dot, index) => {
+        dot.life *= 0.92;
+        dot.y += 0.22;
+        context.globalAlpha = dot.life;
+        context.fillStyle = dot.color;
+        context.save();
+        context.translate(dot.x, dot.y);
+        context.rotate(index * 0.12);
+        context.fillRect(-dot.size / 2, -dot.size / 2, dot.size, dot.size);
+        context.restore();
+      });
+      context.globalAlpha = 1;
+      frame = requestAnimationFrame(draw);
     };
 
-    const draw = (time: number) => {
-      context.clearRect(0, 0, width, height);
-      const centerX = pointer.active ? pointer.x : width * 0.58 + Math.cos(time * 0.00028) * width * 0.13;
-      const centerY = pointer.active ? pointer.y : height * 0.48 + Math.sin(time * 0.00036) * height * 0.16;
-
-      for (const agent of agents) {
-        const dx = centerX - agent.x;
-        const dy = centerY - agent.y;
-        const distance = Math.max(Math.hypot(dx, dy), 1);
-        const orbit = Math.min(0.028, 2 / distance);
-        agent.vx += (dx / distance) * orbit + (-dy / distance) * 0.009;
-        agent.vy += (dy / distance) * orbit + (dx / distance) * 0.009;
-        agent.vx += Math.cos(time * 0.0007 + agent.seed) * 0.003;
-        agent.vy += Math.sin(time * 0.0008 + agent.seed) * 0.003;
-        agent.vx *= 0.992;
-        agent.vy *= 0.992;
-        const speed = Math.hypot(agent.vx, agent.vy);
-        if (speed > 1.6) {
-          agent.vx = (agent.vx / speed) * 1.6;
-          agent.vy = (agent.vy / speed) * 1.6;
-        }
-        agent.x += agent.vx;
-        agent.y += agent.vy;
-
-        if (agent.x < -20) agent.x = width + 20;
-        if (agent.x > width + 20) agent.x = -20;
-        if (agent.y < -20) agent.y = height + 20;
-        if (agent.y > height + 20) agent.y = -20;
-      }
-
-      context.lineWidth = 0.65;
-      for (let i = 0; i < agents.length; i += 1) {
-        const current = agents[i];
-        for (let j = i + 1; j < agents.length; j += 1) {
-          const other = agents[j];
-          const distance = Math.hypot(current.x - other.x, current.y - other.y);
-          if (distance < 92) {
-            context.strokeStyle = `rgba(194, 255, 80, ${(1 - distance / 92) * 0.22})`;
-            context.beginPath();
-            context.moveTo(current.x, current.y);
-            context.lineTo(other.x, other.y);
-            context.stroke();
-          }
-        }
-      }
-
-      for (const agent of agents) {
-        context.beginPath();
-        context.arc(agent.x, agent.y, agent.size, 0, Math.PI * 2);
-        context.fillStyle = agent.size > 3 ? "#c2ff50" : agent.size > 2 ? "#67d7ff" : "rgba(244, 242, 234, .72)";
-        context.fill();
-      }
-
-      context.beginPath();
-      context.arc(centerX, centerY, 28, 0, Math.PI * 2);
-      context.strokeStyle = "rgba(194, 255, 80, .34)";
-      context.lineWidth = 1;
-      context.stroke();
-      context.beginPath();
-      context.arc(centerX, centerY, 4, 0, Math.PI * 2);
-      context.fillStyle = "#c2ff50";
-      context.fill();
-
-      if (!reduced) frame = requestAnimationFrame(draw);
-    };
-
-    reset();
-    draw(0);
-    window.addEventListener("resize", reset);
-    canvas.addEventListener("pointermove", movePointer);
-    canvas.addEventListener("pointerleave", releasePointer);
-
+    resize();
+    draw();
+    window.addEventListener("resize", resize);
+    window.addEventListener("pointermove", move, { passive: true });
     return () => {
       cancelAnimationFrame(frame);
-      window.removeEventListener("resize", reset);
-      canvas.removeEventListener("pointermove", movePointer);
-      canvas.removeEventListener("pointerleave", releasePointer);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("pointermove", move);
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="swarm-canvas" aria-label="Interactive autonomous swarm visualization" />;
+  return <canvas ref={canvasRef} className="cursor-trail" aria-hidden="true" />;
 }
 
 export default function Home() {
-  const [clock, setClock] = useState("--:--:--");
-  const cursorRef = useRef<HTMLDivElement>(null);
+  const [activeProject, setActiveProject] = useState<keyof typeof projects>("subzilla");
+  const [boot, setBoot] = useState<"visible" | "exit" | "gone">("visible");
+  const [time, setTime] = useState("--:--");
 
   useEffect(() => {
-    document.documentElement.classList.add("motion-ready");
-    const tick = () => {
-      setClock(
+    document.documentElement.classList.add("js-ready");
+    const bootExit = window.setTimeout(() => setBoot("exit"), 850);
+    const bootGone = window.setTimeout(() => setBoot("gone"), 1350);
+    const updateTime = () => {
+      setTime(
         new Intl.DateTimeFormat("en-GB", {
           timeZone: "Europe/Istanbul",
           hour: "2-digit",
           minute: "2-digit",
-          second: "2-digit",
           hour12: false,
         }).format(new Date()),
       );
     };
-    tick();
-    const timer = window.setInterval(tick, 1000);
-
-    const handleScroll = () => {
-      const max = document.documentElement.scrollHeight - window.innerHeight;
-      document.documentElement.style.setProperty("--scroll", `${max > 0 ? window.scrollY / max : 0}`);
-    };
-
-    const handlePointer = (event: globalThis.PointerEvent) => {
-      cursorRef.current?.style.setProperty("transform", `translate3d(${event.clientX}px, ${event.clientY}px, 0)`);
-    };
-
+    updateTime();
+    const clock = window.setInterval(updateTime, 30000);
     const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) entry.target.classList.add("is-visible");
-        });
-      },
-      { threshold: 0.12 },
+      (entries) => entries.forEach((entry) => entry.isIntersecting && entry.target.classList.add("seen")),
+      { threshold: 0.1 },
     );
     document.querySelectorAll(".reveal").forEach((element) => observer.observe(element));
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("pointermove", handlePointer, { passive: true });
-    handleScroll();
-
     return () => {
-      window.clearInterval(timer);
+      window.clearTimeout(bootExit);
+      window.clearTimeout(bootGone);
+      window.clearInterval(clock);
       observer.disconnect();
-      window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("pointermove", handlePointer);
-      document.documentElement.classList.remove("motion-ready");
+      document.documentElement.classList.remove("js-ready");
     };
   }, []);
 
-  const handleTilt = (event: PointerEvent<HTMLElement>) => {
-    const element = event.currentTarget;
-    const rect = element.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width - 0.5;
-    const y = (event.clientY - rect.top) / rect.height - 0.5;
-    element.style.setProperty("--rx", `${y * -5}deg`);
-    element.style.setProperty("--ry", `${x * 7}deg`);
-    element.style.setProperty("--mx", `${(x + 0.5) * 100}%`);
-    element.style.setProperty("--my", `${(y + 0.5) * 100}%`);
-  };
-
-  const resetTilt = (event: PointerEvent<HTMLElement>) => {
-    event.currentTarget.style.setProperty("--rx", "0deg");
-    event.currentTarget.style.setProperty("--ry", "0deg");
-  };
+  const project = projects[activeProject];
 
   return (
     <main>
-      <div className="scroll-progress" aria-hidden="true" />
-      <div ref={cursorRef} className="cursor-orb" aria-hidden="true" />
-
-      <header className="site-header">
-        <a className="monogram" href="#top" aria-label="Eren Gün — back to top">
-          EG<span>®</span>
-        </a>
-        <nav className="desktop-nav" aria-label="Main navigation">
-          <a href="#work">Work</a>
-          <a href="#proof">Proof</a>
-          <a href="#about">About</a>
-        </nav>
-        <div className="header-status">
-          <span className="status-dot" />
-          <span>IST {clock}</span>
+      {boot !== "gone" && (
+        <div className={`boot-screen ${boot === "exit" ? "boot-exit" : ""}`}>
+          <div className="boot-mark">EG</div>
+          <div className="boot-copy"><span>EREN_OS</span><span>LOADING IDEAS...</span></div>
+          <div className="boot-line"><i /></div>
         </div>
-        <a className="header-link" href="https://www.linkedin.com/in/erengun/" target="_blank" rel="noreferrer">
-          Let&apos;s talk <span>↗</span>
-        </a>
-      </header>
+      )}
+      <CursorTrail />
 
-      <section className="hero" id="top">
-        <div className="hero-grid" aria-hidden="true" />
-        <SwarmCanvas />
-        <div className="hero-meta hero-meta-left">
-          <span>41.0082° N</span>
-          <span>28.9784° E</span>
-          <span>ISTANBUL / TR</span>
-        </div>
-        <div className="hero-meta hero-meta-right">
-          <span>SOFTWARE DEVELOPER</span>
-          <span>OPEN-SOURCE BUILDER</span>
-          <span>COMPETITIVE CODER</span>
-        </div>
+      <section className="desktop-hero" id="top">
+        <div className="hero-cloud cloud-one" aria-hidden="true" />
+        <div className="hero-cloud cloud-two" aria-hidden="true" />
+        <div className="hero-dots" aria-hidden="true" />
 
-        <div className="hero-copy">
-          <p className="eyebrow"><span /> EREN GÜN · SELECTED WORK 2026</p>
-          <h1 aria-label="I build the unlikely">
-            <span className="line"><span>I BUILD</span></span>
-            <span className="line outline"><span>THE</span></span>
-            <span className="line accent"><span>UNLIKELY.</span></span>
-          </h1>
-          <div className="hero-bottom">
-            <p>
-              Award-winning software developer turning ambitious ideas into
-              <strong> fast, elegant, real products.</strong>
-            </p>
-            <a className="round-link" href="#work" aria-label="Explore selected work">
-              <span>EXPLORE</span>
-              <b>↓</b>
-            </a>
+        <header className="menu-bar">
+          <a className="menu-logo" href="#top">EREN_OS <b>9.0</b></a>
+          <nav aria-label="Main navigation">
+            <a href="#work">Projects</a>
+            <a href="#proof">Awards</a>
+            <a href="#collective">DevOpen</a>
+          </nav>
+          <div className="menu-right">
+            <span>IST {time}</span>
+            <a href="https://www.linkedin.com/in/erengun/" target="_blank" rel="noreferrer">Say hello ↗</a>
           </div>
-        </div>
+        </header>
 
-        <div className="portrait-chip" aria-label="Portrait of Eren Gün">
-          <img src="/eren-gun.jpg" alt="Eren Gün skiing in the mountains" />
-          <span>OFFLINE / ONLINE</span>
+        <div className="desktop-label"><span>CREATIVE ENGINEERING DESKTOP</span><span>DRAG THE WINDOWS</span></div>
+
+        <DraggableWindow title="about_eren.app" className="profile-window">
+          <div className="profile-window-body">
+            <div className="profile-photo">
+              <img src="/eren-gun.jpg" alt="Eren Gün skiing in the mountains" />
+              <span>ISTANBUL, TR</span>
+            </div>
+            <div className="profile-copy">
+              <p className="tiny-label">SOFTWARE DEVELOPER / OPEN-SOURCE BUILDER</p>
+              <h1>Software is my favorite <em>material.</em></h1>
+              <p className="profile-intro">
+                I turn difficult systems into useful products — from autonomous swarms to mobile apps people actually keep.
+              </p>
+              <div className="profile-actions">
+                <a href="#work">Open projects</a>
+                <a href="https://github.com/Erengun" target="_blank" rel="noreferrer">GitHub ↗</a>
+              </div>
+            </div>
+          </div>
+          <div className="window-status"><span>48 REPOSITORIES</span><span>ÉCOLE 42</span><span>OPEN FOR COLLABORATION</span></div>
+        </DraggableWindow>
+
+        <DraggableWindow title="achievements.log" className="rank-window">
+          <div className="rank-header"><span>GLOBAL_RANK</span><strong>#09</strong></div>
+          <ul>
+            <li><span>CodinGame</span><b>WORLD TOP 10</b></li>
+            <li><span>T3 Vakfı</span><b>100 RISING STARS</b></li>
+            <li><span>TEKNOFEST</span><b>AWARD WINNER</b></li>
+          </ul>
+        </DraggableWindow>
+
+        <DraggableWindow title="currently_building.txt" className="note-window">
+          <div className="note-paper">
+            <span>NOW</span>
+            <p>Making open-source software with friends at <b>DevOpen.io</b></p>
+            <i>✦</i>
+          </div>
+        </DraggableWindow>
+
+        <DraggableWindow title="hello_world.exe" className="hello-window">
+          <div className="hello-body"><span>HELLO</span><b>WORLD!</b><small>STATUS: SHIPPING</small></div>
+        </DraggableWindow>
+
+        <div className="desktop-dock" aria-label="Quick links">
+          <a href="#work"><span className="dock-icon folder-icon" /><small>Work</small></a>
+          <a href="#proof"><span className="dock-icon medal-icon">★</span><small>Proof</small></a>
+          <a href="https://github.com/DevOpen-io" target="_blank" rel="noreferrer"><span className="dock-icon team-icon">DO</span><small>DevOpen</small></a>
+          <a href="https://github.com/Erengun" target="_blank" rel="noreferrer"><span className="dock-icon code-icon">&lt;/&gt;</span><small>GitHub</small></a>
         </div>
-        <div className="swarm-label"><span /> LIVE SWARM / MOVE YOUR CURSOR</div>
       </section>
 
-      <div className="ticker" aria-label="Areas of expertise">
-        <div className="ticker-track">
-          {[...ticker, ...ticker].map((item, index) => (
-            <span key={`${item}-${index}`}>{item}<b>✦</b></span>
+      <div className="system-ticker" aria-hidden="true">
+        <div>
+          {["MOBILE PRODUCTS", "AUTONOMOUS SYSTEMS", "OPEN SOURCE", "COMPETITIVE CODING", "FLUTTER", "GOOD TROUBLE", "MOBILE PRODUCTS", "AUTONOMOUS SYSTEMS", "OPEN SOURCE", "COMPETITIVE CODING", "FLUTTER", "GOOD TROUBLE"].map((item, index) => (
+            <span key={`${item}-${index}`}>{item}<b>◉</b></span>
           ))}
         </div>
       </div>
 
-      <section className="intro section-shell" id="about">
-        <div className="section-index reveal">( 00—ABOUT )</div>
-        <div className="intro-content reveal">
-          <p className="intro-lead">
-            Not a framework collector.
-            <br />
-            <em>A builder who ships.</em>
-          </p>
-          <div className="intro-aside">
-            <p>
-              I&apos;m Eren — an École 42-trained developer working where mobile,
-              autonomous systems and open source collide.
-            </p>
-            <p>
-              My favorite problems have unclear edges, impossible deadlines,
-              and a result people can actually touch.
-            </p>
-            <div className="social-row">
-              <a href="https://github.com/Erengun" target="_blank" rel="noreferrer">GitHub ↗</a>
-              <a href="https://www.linkedin.com/in/erengun/" target="_blank" rel="noreferrer">LinkedIn ↗</a>
+      <section className="file-explorer" id="work">
+        <div className="explorer-window reveal">
+          <div className="explorer-topbar">
+            <WindowControls />
+            <div className="breadcrumbs"><span>EREN_OS</span><b>›</b><span>PROJECTS</span><b>›</b><strong>{project.title.toUpperCase()}</strong></div>
+            <span className="view-mode">◫ LIST / ◧ GRID</span>
+          </div>
+
+          <div className="explorer-layout">
+            <aside className="explorer-sidebar">
+              <p>FAVORITES</p>
+              <button className={activeProject === "subzilla" ? "active" : ""} onClick={() => setActiveProject("subzilla")} aria-pressed={activeProject === "subzilla"}>
+                <span className="mini-folder purple" /> SubZilla <b>01</b>
+              </button>
+              <button className={activeProject === "dondurma" ? "active" : ""} onClick={() => setActiveProject("dondurma")} aria-pressed={activeProject === "dondurma"}>
+                <span className="mini-folder blue" /> Dondurma <b>02</b>
+              </button>
+              <p>LOCATIONS</p>
+              <a href="https://github.com/DevOpen-io" target="_blank" rel="noreferrer"><span>◎</span> DevOpen.io</a>
+              <a href="https://github.com/Erengun" target="_blank" rel="noreferrer"><span>⌘</span> GitHub</a>
+              <div className="disk-space"><span>OPEN-SOURCE DRIVE</span><i><b /></i><small>9 projects · public</small></div>
+            </aside>
+
+            <div className="project-preview" key={activeProject}>
+              <div className={`project-stage ${activeProject}`}>
+                <div className="stage-sticker">{project.number} / FEATURED</div>
+                {activeProject === "subzilla" ? (
+                  <>
+                    <div className="app-phone"><img src="/subzilla-home.png" alt="SubZilla subscription dashboard" /></div>
+                    <div className="spend-widget"><small>MONTHLY</small><strong>$90</strong><span>5 ACTIVE</span></div>
+                    <div className="calendar-widget"><b>21</b><span>NEXT PAYMENT</span></div>
+                  </>
+                ) : (
+                  <>
+                    <div className="icecream-logo"><img src="/dondurma-logo.png" alt="Dondurma RSS Reader logo" /></div>
+                    <div className="article-widget article-a"><span>DESIGN</span><b>Read what you choose.</b><small>08 MIN</small></div>
+                    <div className="article-widget article-b"><span>TECH</span><b>No algorithm needed.</b><small>04 MIN</small></div>
+                  </>
+                )}
+              </div>
+              <div className="project-details">
+                <div className="project-meta"><span>{project.type}</span><span>DEVOPEN.IO</span></div>
+                <h2>{project.title}</h2>
+                <p className="project-tagline">{project.tagline}</p>
+                <p className="project-description">{project.description}</p>
+                <div className="project-tags">{project.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+                <a className="repo-button" href={project.link} target="_blank" rel="noreferrer">OPEN REPOSITORY <b>↗</b></a>
+              </div>
             </div>
           </div>
+          <div className="explorer-footer"><span>2 ITEMS</span><span>OPEN SOURCE · MIT</span><span>SYNCED JUST NOW</span></div>
         </div>
       </section>
 
-      <section className="proof section-shell" id="proof">
-        <div className="section-heading reveal">
-          <div className="section-index">( 01—PROOF )</div>
-          <h2>THE RECEIPTS.</h2>
-          <p>Recognition is a side effect.<br />The work comes first.</p>
+      <section className="scoreboard" id="proof">
+        <div className="scoreboard-title reveal">
+          <span>AWARDS_DIRECTORY / 04 ITEMS</span>
+          <h2>Proof,<br /><em>not pixels.</em></h2>
+          <p>Recognition earned by solving hard things under real pressure.</p>
         </div>
-        <div className="achievement-grid">
-          {achievements.map((achievement, index) => (
-            <article className={`achievement-card ${achievement.className} reveal`} key={achievement.title} style={{ transitionDelay: `${index * 70}ms` }}>
-              <div className="card-top">
-                <span>{achievement.index}</span>
-                <span>VERIFIED SIGNAL</span>
-              </div>
-              <div className="metric">{achievement.metric}</div>
-              <div className="achievement-copy">
-                <span>{achievement.kicker}</span>
-                <h3>{achievement.title}</h3>
-                <p>{achievement.detail}</p>
-              </div>
-              <div className="card-cross" aria-hidden="true">+</div>
+        <div className="award-list">
+          {awards.map((award, index) => (
+            <article className="award-row reveal" key={award.code} style={{ transitionDelay: `${index * 60}ms` }}>
+              <span className="award-index">0{index + 1}</span>
+              <span className="award-code">{award.code}</span>
+              <div><small>{award.label}</small><h3>{award.title}</h3></div>
+              <span className="award-note">{award.note}</span>
+              <b className="award-seal">VERIFIED</b>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="work section-shell" id="work">
-        <div className="section-heading work-heading reveal">
-          <div className="section-index">( 02—SELECTED WORK )</div>
-          <h2>BUILT IN PUBLIC.</h2>
-          <p>Two open-source products.<br />One belief: useful beats loud.</p>
+      <section className="collective" id="collective">
+        <div className="collective-burst" aria-hidden="true" />
+        <div className="collective-copy reveal">
+          <span className="collective-kicker">FRIENDS_SHIP.SO</span>
+          <h2>DEV<br /><em>OPEN</em><sup>.IO</sup></h2>
+          <p>
+            A group of friends turning side conversations into public software. No gatekeeping. No black boxes. Just things worth sharing.
+          </p>
+          <a href="https://github.com/DevOpen-io" target="_blank" rel="noreferrer">VISIT THE COLLECTIVE <b>↗</b></a>
         </div>
-
-        <article className="project project-subzilla reveal" onPointerMove={handleTilt} onPointerLeave={resetTilt}>
-          <div className="project-info">
-            <div className="project-number">01 / PRODUCT</div>
-            <div>
-              <div className="project-title-row">
-                <h3>SUBZILLA</h3>
-                <span>OPEN SOURCE</span>
-              </div>
-              <p className="project-tagline">Subscriptions, tamed.</p>
-              <p className="project-description">
-                A private-first Flutter app for tracking recurring expenses,
-                visualizing spending and catching the next payment before it catches you.
-              </p>
-              <div className="tag-list">
-                <span>FLUTTER</span><span>RIVERPOD</span><span>LOCAL-FIRST</span><span>ANALYTICS</span>
-              </div>
-            </div>
-            <a className="project-link" href="https://github.com/DevOpen-io/SubZilla" target="_blank" rel="noreferrer">
-              View repository <b>↗</b>
-            </a>
-          </div>
-          <div className="project-visual subzilla-visual">
-            <div className="visual-noise" />
-            <div className="phone phone-back"><img src="/subzilla-home.png" alt="SubZilla app home screen in dark mode" /></div>
-            <div className="phone phone-front"><img src="/subzilla-home.png" alt="" /></div>
-            <div className="orbit orbit-one" />
-            <div className="orbit orbit-two" />
-            <div className="visual-caption">KEEP YOUR MONEY / KEEP YOUR DATA</div>
-          </div>
-        </article>
-
-        <article className="project project-dondurma reveal" onPointerMove={handleTilt} onPointerLeave={resetTilt}>
-          <div className="project-info">
-            <div className="project-number">02 / PRODUCT</div>
-            <div>
-              <div className="project-title-row">
-                <h3>DONDURMA</h3>
-                <span>OPEN SOURCE</span>
-              </div>
-              <p className="project-tagline">Your feeds. Your rules.</p>
-              <p className="project-description">
-                A premium RSS/Atom reader across six platforms — private,
-                customizable and refreshingly algorithm-free.
-              </p>
-              <div className="tag-list">
-                <span>FLUTTER</span><span>MATERIAL 3</span><span>RSS / ATOM</span><span>6 PLATFORMS</span>
-              </div>
-            </div>
-            <a className="project-link" href="https://github.com/DevOpen-io/dondurma-rss-reader" target="_blank" rel="noreferrer">
-              View repository <b>↗</b>
-            </a>
-          </div>
-          <div className="project-visual dondurma-visual">
-            <div className="sunburst" aria-hidden="true" />
-            <div className="dondurma-logo-wrap"><img src="/dondurma-logo.png" alt="Dondurma RSS Reader app icon" /></div>
-            <div className="feed-card feed-one"><span>DESIGN</span><b>Ideas worth keeping.</b><small>8 min read</small></div>
-            <div className="feed-card feed-two"><span>TECH</span><b>No algorithms here.</b><small>4 min read</small></div>
-            <div className="visual-caption dark">NO TRACKING / NO NOISE / JUST FEEDS</div>
-          </div>
-        </article>
-      </section>
-
-      <section className="devopen" aria-labelledby="devopen-title">
-        <div className="devopen-grid" aria-hidden="true" />
-        <div className="devopen-inner section-shell">
-          <div className="section-index reveal">( 03—COLLECTIVE )</div>
-          <div className="devopen-copy reveal">
-            <p className="eyebrow"><span /> FRIENDS WHO SHIP TOGETHER</p>
-            <h2 id="devopen-title">DEV<span>OPEN</span><sup>.IO</sup></h2>
-            <p>
-              A small open-source collective built with friends. We turn
-              late-night ideas into public tools — useful, transparent and yours to fork.
-            </p>
-            <a href="https://github.com/DevOpen-io" target="_blank" rel="noreferrer">Enter the collective ↗</a>
-          </div>
-          <div className="constellation reveal" aria-label="DevOpen project constellation">
-            <div className="constellation-line line-a" />
-            <div className="constellation-line line-b" />
-            <div className="constellation-line line-c" />
-            <div className="node node-main">DO<span>CORE</span></div>
-            <div className="node node-a">SZ<span>SUBZILLA</span></div>
-            <div className="node node-b">DR<span>DONDURMA</span></div>
-            <div className="node node-c">OS<span>OPEN SOURCE</span></div>
-            <div className="node node-d">09<span>REPOS</span></div>
-          </div>
+        <div className="collective-cards reveal">
+          <div className="friend-card card-one"><span>01</span><b>BUILD</b><small>Useful things</small></div>
+          <div className="friend-card card-two"><span>02</span><b>OPEN</b><small>The source</small></div>
+          <div className="friend-card card-three"><span>03</span><b>SHARE</b><small>The progress</small></div>
+          <div className="collective-stamp">9<br /><span>PUBLIC REPOS</span></div>
         </div>
       </section>
 
-      <section className="code-philosophy section-shell">
-        <div className="section-index reveal">( 04—OPERATING SYSTEM )</div>
-        <div className="philosophy-layout">
-          <h2 className="reveal">THINK.<br /><span>BREAK.</span><br />BUILD.<br /><em>REPEAT.</em></h2>
-          <div className="principles">
-            {[
-              ["01", "Clarity over cleverness", "The best systems explain themselves."],
-              ["02", "Ship the hard part", "Polish is worthless without a working core."],
-              ["03", "Open by default", "Shared code compounds into shared progress."],
-              ["04", "Play to win", "Competition is a laboratory for focus."],
-            ].map(([number, title, copy]) => (
-              <div className="principle reveal" key={number}>
-                <span>{number}</span><h3>{title}</h3><p>{copy}</p><b>↗</b>
-              </div>
-            ))}
+      <section className="manifesto">
+        <div className="manifesto-top reveal"><span>README.MD</span><span>LAST UPDATED: TODAY</span></div>
+        <div className="manifesto-grid">
+          <div className="manifesto-heading reveal">
+            <p>MY DEFAULT SETTINGS</p>
+            <h2>Curious<br />enough to <em>break it.</em><br />Stubborn enough<br />to <span>ship it.</span></h2>
           </div>
+          <ol className="principle-list">
+            <li className="reveal"><span>01</span><div><b>Clarity over cleverness</b><p>The best system explains itself.</p></div></li>
+            <li className="reveal"><span>02</span><div><b>Build the hard part first</b><p>Polish cannot rescue a hollow core.</p></div></li>
+            <li className="reveal"><span>03</span><div><b>Open by default</b><p>Shared code compounds into shared progress.</p></div></li>
+            <li className="reveal"><span>04</span><div><b>Play to win</b><p>Competition is a laboratory for focus.</p></div></li>
+          </ol>
         </div>
       </section>
 
-      <section className="contact" id="contact">
-        <div className="contact-orb" aria-hidden="true" />
-        <div className="contact-content section-shell reveal">
-          <div className="section-index">( 05—NEXT MISSION )</div>
-          <p>Have an ambitious problem?</p>
-          <h2>LET&apos;S MAKE<br />THE IMPOSSIBLE<br /><span>FEEL OBVIOUS.</span></h2>
-          <div className="contact-actions">
-            <a href="https://www.linkedin.com/in/erengun/" target="_blank" rel="noreferrer">Start a conversation <b>↗</b></a>
-            <a href="https://github.com/Erengun" target="_blank" rel="noreferrer">Explore 48 repositories <b>↗</b></a>
+      <section className="contact-panel" id="contact">
+        <div className="contact-marquee" aria-hidden="true"><span>LET&apos;S BUILD SOMETHING UNREASONABLE · LET&apos;S BUILD SOMETHING UNREASONABLE ·</span></div>
+        <div className="contact-inner reveal">
+          <p>NEW_MESSAGE.COMPOSE</p>
+          <h2>Got a difficult idea?</h2>
+          <p className="contact-lead">Good. Those are the interesting ones.</p>
+          <div className="contact-buttons">
+            <a href="https://www.linkedin.com/in/erengun/" target="_blank" rel="noreferrer">START A CONVERSATION <b>↗</b></a>
+            <a href="https://github.com/Erengun" target="_blank" rel="noreferrer">BROWSE THE CODE <b>↗</b></a>
           </div>
         </div>
+        <div className="contact-face"><img src="/eren-gun.jpg" alt="Eren Gün" /><span>AVAILABLE<br />FOR IDEAS</span></div>
       </section>
 
-      <footer className="site-footer">
-        <div>EREN GÜN © 2026</div>
-        <div>DESIGNED TO MOVE · BUILT TO LAST</div>
-        <a href="#top">BACK TO TOP ↑</a>
+      <footer className="os-footer">
+        <span>© 2026 EREN GÜN</span>
+        <span>MADE WITH CURIOSITY IN ISTANBUL</span>
+        <a href="#top">RESTART ↑</a>
       </footer>
     </main>
   );
