@@ -367,6 +367,7 @@ export default function Home() {
             <a href="#teknofest">TEKNOFEST</a>
             <a href="#community">Community</a>
             <a href="#collective">DevOpen</a>
+            <a href="/blog">Blog</a>
           </nav>
           <div className="menu-right">
             <span>IST {time}</span>
@@ -420,6 +421,7 @@ export default function Home() {
 
         <div className="desktop-dock" aria-label="Quick links">
           <a href="#work"><span className="dock-icon folder-icon" /><small>Work</small></a>
+          <a href="/blog"><span className="dock-icon team-icon">BL</span><small>Blog</small></a>
           <a href="https://github.com/DevOpen-io" target="_blank" rel="noreferrer"><span className="dock-icon team-icon">DO</span><small>DevOpen</small></a>
           <a href="https://github.com/Erengun" target="_blank" rel="noreferrer"><span className="dock-icon code-icon">&lt;/&gt;</span><small>GitHub</small></a>
         </div>
