@@ -1,89 +1,55 @@
-![Astro Sphere Lighthouse Score](_astrosphere.jpg)
+# erengun.dev
 
-Astro Sphere is a static, minimalist, lightweight, lightning fast portfolio and blog theme based on my personal website.
+Eren Gün's personal site — "EREN_OS", a bold neo-brutalist desktop-themed
+portfolio, plus a blog with an RSS feed.
 
-It is primarily Astro, Tailwind and Typescript, with a very small amount of SolidJS for stateful components.
+Built with [Next.js](https://nextjs.org/) on [vinext](https://github.com/cloudflare/vinext)
+(the Next.js API surface reimplemented on Vite), statically exported and
+deployed to GitHub Pages.
 
-## 🚀 Deploy your own
+## Stack
 
-[![Deploy with Vercel](_deploy_vercel.svg)](https://vercel.com/new/clone?repository-url=https://github.com/markhorn-dev/astro-sphere)  [![Deploy with Netlify](_deploy_netlify.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/markhorn-dev/astro-sphere)
+- Next.js App Router (`output: "export"` static export)
+- Markdown content collection for blog posts (`content/blog/*.md`, parsed with
+  `gray-matter` + `marked`)
+- Static `robots.txt`, `sitemap.xml` and `rss.xml` generated at build time by
+  `scripts/generate-feeds.mjs`
+- No client-side framework beyond React — plain CSS, no Tailwind
 
-## 📋 Features
+## Commands
 
-- ✅ 100/100 Lighthouse performance
-- ✅ Responsive
-- ✅ Accessible
-- ✅ SEO-friendly
-- ✅ Typesafe
-- ✅ Minimal style
-- ✅ Light/Dark Theme
-- ✅ Animated UI
-- ✅ Tailwind styling
-- ✅ Auto generated sitemap
-- ✅ Auto generated RSS Feed
-- ✅ Markdown support
-- ✅ MDX Support (components in your markdown)
-- ✅ Searchable content (posts and projects)
+```bash
+npm install
+npm run dev      # local dev server
+npm run build    # static export to dist/client
+npm run check    # typecheck + lint
+```
 
-## 💯 Lighthouse score
-![Astro Sphere Lighthouse Score](_lighthouse.png)
+## Deployment
 
-## 🕊️ Lightweight
-All pages under 100kb (including fonts)
+Pushing to `main` triggers `.github/workflows/deploy.yaml`, which builds the
+static export and publishes `dist/client` to GitHub Pages. The custom domain
+is configured via `public/CNAME`.
 
-## ⚡︎ Fast
-Rendered in ~40ms on localhost
+## Adding a blog post
 
-## 📄 Configuration
+Add a new Markdown file to `content/blog/` with frontmatter:
 
-The blog posts on the demo serve as the documentation and configuration.
+```md
+---
+slug: "my-post-slug"
+title: "Post Title"
+summary: "One or two sentence summary."
+date: "2026-01-01"
+tags: ["Flutter", "Whatever"]
+---
 
-## 💻 Commands
+Post content in Markdown.
+```
 
-All commands are run from the root of the project, from a terminal:
+Then add the corresponding `?raw` import in `lib/blog.ts`. The post picks up
+routing, the blog index, RSS feed and sitemap automatically.
 
-Replace npm with your package manager of choice. `npm`, `pnpm`, `yarn`, `bun`, etc
-
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run dev:network`     | Starts dev server on local network               |
-| `npm run sync`            | Generates TypeScript types for all Astro modules.|
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run preview:network` | Starts preview server on local network           |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-| `npm run lint`            | Run ESLint                                       |
-| `npm run lint:fix`        | Auto-fix ESLint issues                           |
-
-## 🗺️ Roadmap
-
-A few features I plan to implement
-- ⬜ Code Blocks - copy to clipboard
-- ⬜ Article Pages - Table of Contents
-- ⬜ Article Pages - Share on social media
-
-## ✨ Acknowledgement
-
-Theme inspired by [Paco Coursey](https://paco.me/), [Lee Robinson](https://leerob.io/) and [Hayden Bleasel](https://www.haydenbleasel.com/)
-
-
-## 🏛️ License
+## License
 
 MIT
-
-
-# 1.0.1 Update
-
-Added ability to run dev and preview on local network.
-added npm run dev:network
-added npm run preview:network
-
-Added slightly more particle density in both light and dark mode.
-
-Added subtle dark mode star and meteor animations.
-
-Removed eslint config
-
