@@ -25,12 +25,133 @@ const projects = {
   },
 } as const;
 
-const awards = [
-  { code: "T3/100", title: "100 Yükselen Yıldız", label: "SELECTED TALENT", note: "T3 Vakfı" },
-  { code: "WW/09", title: "World #9", label: "ALGORITHM RANK", note: "CodinGame" },
-  { code: "TF/AWD", title: "Karma Sürü", label: "AWARD WINNER", note: "TEKNOFEST" },
-  { code: "MB/1ST", title: "Serial first", label: "MOBILE CHALLENGES", note: "Multi-year" },
-];
+const teknofest = {
+  kicker: "TEKNOFEST · KARMA SÜRÜ SİMÜLASYON YARIŞMASI · ORDU",
+  description:
+    "Competed with team VORFEX42 in TEKNOFEST's Karma Sürü (Mixed Swarm) Simulation Competition, building swarm software for UAVs and UGVs to share tasks, back each other up and coordinate under a simulated disaster-relief scenario — delivering healthcare across a city as fast as possible. Finished 2nd among the finalists in Ordu, taking home a 30,000₺ prize.",
+  stats: [
+    { label: "TEAM", value: "VORFEX42" },
+    { label: "RESULT", value: "2nd place · 30,000₺ prize" },
+    { label: "FLEET", value: "UAV + UGV mixed swarm" },
+  ],
+  link: "https://www.teknofest.org/tr/yarismalar/karma-suru-simulasyon-yarismasi/",
+  linkLabel: "VIEW THE COMPETITION",
+  resultLink:
+    "https://www.linkedin.com/posts/42turkiye_i%CC%87%C3%A7inde-ana-e%C4%9Fitim-ve-havuz-%C3%B6%C4%9Frencilerimizi-activity-6960678538244960256-3vJD",
+  resultLinkLabel: "READ THE ANNOUNCEMENT",
+} as const;
+
+const risingStar = {
+  kicker: "T3 VAKFI · YÜKSELEN YILDIZ BURS PROGRAMI",
+  description:
+    "Selected into T3 Vakfı's Yükselen Yıldız (\"Rising Star\") scholarship program, part of the Milli Teknoloji Hamlesi vision founded in Özdemir Bayraktar's name. Beyond the monthly scholarship, the program invests in scholars with specialized training, mentorship and access to national technology projects.",
+  stats: [
+    { label: "PROGRAM", value: "T3 Vakfı · Milli Teknoloji Hamlesi" },
+    { label: "FOCUS", value: "Personal, academic & professional growth" },
+    { label: "ACCESS", value: "Mentorship, TEKNOFEST & volunteering projects" },
+  ],
+  certificates: [
+    { issuer: "GOOGLE", title: "Project Management", note: "Professional Certificate" },
+    { issuer: "GOOGLE", title: "Play Store Listing", note: "Certificate" },
+    { issuer: "TRAINING", title: "Public Speaking", note: "By Mennan Şahin — later put to use at the BAU codelab" },
+  ],
+  link: "https://bursiyer.t3vakfi.org/programlar/yukselen-yildiz",
+  linkLabel: "VIEW THE PROGRAM",
+} as const;
+
+const codingame = {
+  kicker: "CODINGAME · GENERAL GLOBAL LEADERBOARD",
+  description:
+    "Ranked #9 in Turkey on CodinGame's general global leaderboard — out of 4.8M+ registered developers worldwide, climbing leagues from Bronze to Legend on algorithmic puzzles, bot-programming contests and optimization challenges, scored purely on code performance.",
+  stats: [
+    { label: "RANK", value: "TR #9 · General Leaderboard" },
+    { label: "FIELD", value: "4.8M+ registered developers" },
+    { label: "LEAGUES", value: "Bronze → Silver → Gold → Legend" },
+  ],
+  link: "https://www.codingame.com/leaderboards/general/global",
+  linkLabel: "VIEW THE LEADERBOARD",
+  resultLink:
+    "https://www.linkedin.com/pulse/codingame-global-leaderboard-snapshot-rare-top-5-daniel-g%C3%B3rski-qxsaf/",
+  resultLinkLabel: "WHY THIS RANK IS RARE",
+} as const;
+
+const community = [
+  {
+    id: "gdg",
+    accent: "blue",
+    kicker: "TECH COMMUNITY",
+    title: "GDG Istanbul",
+    role: "Volunteer · DevFest Co-Organizer",
+    period: "2022 — 2023",
+    description:
+      "Volunteer with GDG Istanbul, the community bringing together people interested in Google technologies — Android, Polymer, Angular and Google APIs — and co-organizer of DevFest Istanbul '22 and '23, one of Europe's largest Google Developer Group events.",
+    tags: ["Android", "Angular", "Google APIs", "DevFest '22 & '23"],
+    link: "http://gdgistanbul-slack.herokuapp.com/",
+    linkLabel: "JOIN THE SLACK",
+    images: [
+      { src: "/gdg-devfest-1.jpg", alt: "An Angular talk on stage at DevFest Istanbul 2022" },
+      { src: "/gdg-devfest-2.jpg", alt: "Eren Gün with the GDG Istanbul crew at DevFest Istanbul 2022" },
+    ],
+  },
+  {
+    id: "bau",
+    accent: "pink",
+    kicker: "CODELAB · GDSC BAU",
+    title: "Bahçeşehir University",
+    role: "Codelab Speaker — Firebase Auth in Flutter",
+    period: "Guest Session",
+    description:
+      "Gave a codelab for the GDSC BAU (Bahçeşehir University) team on integrating Firebase Authentication into Flutter apps — email/password and Google Sign-In, setting up a Firebase project, and initializing Firebase in a Flutter app.",
+    quote:
+      "“We would like to express our sincere gratitude to all participants, supporters, and especially to Eren Gün for contributing to the success of our recent event... The insights and expertise shared by Eren Gün on Firebase Authentication were invaluable.”",
+    quoteAttribution: "— GDSC BAU team",
+    tags: ["Flutter", "Firebase Auth", "Google Sign-In", "GDSC BAU"],
+    images: [
+      { src: "/bau-codelab-2.jpg", alt: "Eren Gün presenting Firebase Authentication in Flutter at Bahçeşehir University" },
+      { src: "/bau-codelab-3.jpg", alt: "Students following along with the Flutter Firebase codelab at BAU" },
+      { src: "/bau-codelab-1.jpg", alt: "Group photo with the GDSC BAU team after the codelab" },
+    ],
+  },
+  {
+    id: "itobot",
+    accent: "coral",
+    kicker: "STUDENT ROBOTICS",
+    title: "ITOBOT — Team 6038",
+    role: "Team Member, FIRST Robotics Competition",
+    period: "High School",
+    description:
+      "Built competition robots through six-week build seasons with FRC Team 6038 of Istanbul, competing at the Istanbul Regional and on to the FIRST Championship in Houston.",
+    tags: ["FIRST Robotics", "Team 6038", "Build Season"],
+    link: "https://www.thebluealliance.com/team/6038",
+    linkLabel: "VIEW TEAM 6038",
+    images: [{ src: "/itobot-frc.jpg", alt: "ITOBOT Team 6038 at the Istanbul Regional FIRST Robotics Competition" }],
+  },
+  {
+    id: "thk",
+    accent: "green",
+    kicker: "AVIATION & AEROSPACE",
+    title: "Türk Hava Kurumu",
+    role: "Member",
+    period: "Est. 1925",
+    description:
+      "Member of the Turkish Aeronautical Association — \"The Starting Point of Aviation\" — the century-old national body behind Turkey's air sports and youth aviation and aerospace programs.",
+    tags: ["Aviation", "Aerospace", "Air Sports"],
+    link: "https://en.wikipedia.org/wiki/Turkish_Aeronautical_Association",
+    linkLabel: "ABOUT THK",
+    images: [{ src: "/thk-aviation.jpg", alt: "With fellow Turkish Aeronautical Association members at an aviation event" }],
+  },
+] as const;
+
+function UavIcon({ className }: { className: string }) {
+  return (
+    <div className={`uav ${className}`}>
+      <i className="uav-rotor tl" />
+      <i className="uav-rotor tr" />
+      <i className="uav-rotor bl" />
+      <i className="uav-rotor br" />
+    </div>
+  );
+}
 
 let windowLayer = 20;
 
@@ -241,7 +362,10 @@ export default function Home() {
           <a className="menu-logo" href="#top">EREN_OS <b>9.0</b></a>
           <nav aria-label="Main navigation">
             <a href="#work">Projects</a>
-            <a href="#proof">Awards</a>
+            <a href="#rising-star">Yükselen Yıldız</a>
+            <a href="#codingame">CodinGame</a>
+            <a href="#teknofest">TEKNOFEST</a>
+            <a href="#community">Community</a>
             <a href="#collective">DevOpen</a>
           </nav>
           <div className="menu-right">
@@ -274,10 +398,10 @@ export default function Home() {
         </DraggableWindow>
 
         <DraggableWindow title="achievements.log" className="rank-window">
-          <div className="rank-header"><span>GLOBAL_RANK</span><strong>#09</strong></div>
+          <div className="rank-header"><span>CODINGAME_RANK</span><strong>TR #09</strong></div>
           <ul>
-            <li><span>CodinGame</span><b>WORLD TOP 10</b></li>
-            <li><span>T3 Vakfı</span><b>100 RISING STARS</b></li>
+            <li><span>CodinGame</span><b>TURKEY TOP 10</b></li>
+            <li><span>T3 Vakfı</span><b>YÜKSELEN YILDIZ</b></li>
             <li><span>TEKNOFEST</span><b>AWARD WINNER</b></li>
           </ul>
         </DraggableWindow>
@@ -296,7 +420,6 @@ export default function Home() {
 
         <div className="desktop-dock" aria-label="Quick links">
           <a href="#work"><span className="dock-icon folder-icon" /><small>Work</small></a>
-          <a href="#proof"><span className="dock-icon medal-icon">★</span><small>Proof</small></a>
           <a href="https://github.com/DevOpen-io" target="_blank" rel="noreferrer"><span className="dock-icon team-icon">DO</span><small>DevOpen</small></a>
           <a href="https://github.com/Erengun" target="_blank" rel="noreferrer"><span className="dock-icon code-icon">&lt;/&gt;</span><small>GitHub</small></a>
         </div>
@@ -364,20 +487,134 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="scoreboard" id="proof">
-        <div className="scoreboard-title reveal">
-          <span>AWARDS_DIRECTORY / 04 ITEMS</span>
-          <h2>Proof,<br /><em>not pixels.</em></h2>
-          <p>Recognition earned by solving hard things under real pressure.</p>
+      <section className="rising-star" id="rising-star">
+        <div className="rising-star-copy reveal">
+          <span className="rising-star-kicker">{risingStar.kicker}</span>
+          <h2>Yükselen<br /><em>Yıldız.</em></h2>
+          <p>{risingStar.description}</p>
+          <div className="rising-star-stats">
+            {risingStar.stats.map((stat) => (
+              <div key={stat.label}><span>{stat.label}</span><b>{stat.value}</b></div>
+            ))}
+          </div>
+          <a href={risingStar.link} target="_blank" rel="noreferrer">{risingStar.linkLabel} <b>↗</b></a>
         </div>
-        <div className="award-list">
-          {awards.map((award, index) => (
-            <article className="award-row reveal" key={award.code} style={{ transitionDelay: `${index * 60}ms` }}>
-              <span className="award-index">0{index + 1}</span>
-              <span className="award-code">{award.code}</span>
-              <div><small>{award.label}</small><h3>{award.title}</h3></div>
-              <span className="award-note">{award.note}</span>
-              <b className="award-seal">VERIFIED</b>
+        <div className="cert-stack reveal">
+          <span className="cert-stack-badge">⭐ SELECTED SCHOLAR</span>
+          {risingStar.certificates.map((cert, index) => (
+            <article className={`cert-card cert-${index}`} key={cert.title}>
+              <span className="cert-issuer">{cert.issuer}</span>
+              <h4>{cert.title}</h4>
+              <p>{cert.note}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="codingame" id="codingame">
+        <div className="codingame-copy reveal">
+          <span className="codingame-kicker">{codingame.kicker}</span>
+          <h2>Top 10<br /><em>in Turkey.</em></h2>
+          <p>{codingame.description}</p>
+          <div className="codingame-stats">
+            {codingame.stats.map((stat) => (
+              <div key={stat.label}><span>{stat.label}</span><b>{stat.value}</b></div>
+            ))}
+          </div>
+          <div className="codingame-links">
+            <a href={codingame.link} target="_blank" rel="noreferrer">{codingame.linkLabel} <b>↗</b></a>
+            <a href={codingame.resultLink} target="_blank" rel="noreferrer" className="codingame-link-ghost">{codingame.resultLinkLabel} <b>↗</b></a>
+          </div>
+        </div>
+        <div className="codingame-visual reveal">
+          <div className="tech-grid" aria-hidden="true" />
+          <span className="hud-label cg-hud-label">LEADERBOARD: TURKEY · GENERAL</span>
+          <div className="rank-board" aria-hidden="true">
+            <div className="rank-row"><span>07</span><span className="rank-name blurred">▇▇▇▇▇▇▇▇▇▇</span></div>
+            <div className="rank-row"><span>08</span><span className="rank-name blurred">▇▇▇▇▇▇▇▇▇▇▇▇</span></div>
+            <div className="rank-row highlight"><span>09</span><span className="rank-name">EREN GÜN 🇹🇷</span></div>
+            <div className="rank-row"><span>10</span><span className="rank-name blurred">▇▇▇▇▇▇▇▇▇</span></div>
+            <div className="rank-row"><span>11</span><span className="rank-name blurred">▇▇▇▇▇▇▇▇▇▇▇▇▇</span></div>
+          </div>
+          <div className="teknofest-hud cg-hud" aria-hidden="true">
+            <span>4.8M+ PLAYERS</span>
+            <span>SCORING: TRUESKILL</span>
+            <span>STATUS: LEGEND-BOUND</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="teknofest" id="teknofest">
+        <div className="teknofest-copy reveal">
+          <span className="teknofest-kicker">{teknofest.kicker}</span>
+          <h2>Karma Sürü<br /><em>Award Winner.</em></h2>
+          <p>{teknofest.description}</p>
+          <div className="teknofest-stats">
+            {teknofest.stats.map((stat) => (
+              <div key={stat.label}><span>{stat.label}</span><b>{stat.value}</b></div>
+            ))}
+          </div>
+          <div className="teknofest-links">
+            <a href={teknofest.link} target="_blank" rel="noreferrer">{teknofest.linkLabel} <b>↗</b></a>
+            <a href={teknofest.resultLink} target="_blank" rel="noreferrer" className="teknofest-link-ghost">{teknofest.resultLinkLabel} <b>↗</b></a>
+          </div>
+        </div>
+        <div className="teknofest-visual reveal">
+          <div className="teknofest-decor" aria-hidden="true">
+            <div className="radar-rings" />
+            <div className="tech-grid" />
+            <span className="hud-label">SWARM_STATUS: ACTIVE</span>
+            <UavIcon className="uav-a" />
+            <UavIcon className="uav-b" />
+            <UavIcon className="uav-d" />
+            <UavIcon className="uav-e" />
+          </div>
+          <div className="teknofest-photo-frame">
+            <img
+              src="/teknofest-vorfex42.jpg"
+              alt="Team VORFEX42 at the TEKNOFEST Karma Sürü Simulation Competition finals in Ordu"
+              loading="lazy"
+            />
+            <span className="teknofest-badge">🏆 2ND PLACE<br />30.000₺</span>
+          </div>
+          <div className="teknofest-hud" aria-hidden="true">
+            <span>TEAM: VORFEX42</span>
+            <span>ORDU, TR</span>
+            <span>RESULT: 2ND PLACE</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="field-notes" id="community">
+        <div className="field-notes-title reveal">
+          <span>COMMUNITY_LOG / {String(community.length).padStart(2, "0")} ENTRIES</span>
+          <h2>Built with<br /><em>other people.</em></h2>
+          <p>Long before the products, there were classrooms, codelabs and hangars — where I learned to build in public.</p>
+        </div>
+        <div className="field-notes-grid">
+          {community.map((entry, index) => (
+            <article className={`field-card accent-${entry.accent} reveal`} key={entry.id} style={{ transitionDelay: `${index * 70}ms` }}>
+              <div className={`field-photos count-${entry.images.length}`}>
+                {entry.images.map((image) => (
+                  <img key={image.src} src={image.src} alt={image.alt} loading="lazy" />
+                ))}
+              </div>
+              <div className="field-copy">
+                <div className="field-meta"><span>{entry.kicker}</span><span>{entry.period}</span></div>
+                <h3>{entry.title}</h3>
+                <p className="field-role">{entry.role}</p>
+                <p className="field-description">{entry.description}</p>
+                {"quote" in entry && entry.quote && (
+                  <blockquote className="field-quote">
+                    <p>{entry.quote}</p>
+                    <cite>{entry.quoteAttribution}</cite>
+                  </blockquote>
+                )}
+                <div className="field-tags">{entry.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+                {"link" in entry && entry.link && (
+                  <a className="field-link" href={entry.link} target="_blank" rel="noreferrer">{entry.linkLabel} <b>↗</b></a>
+                )}
+              </div>
             </article>
           ))}
         </div>
