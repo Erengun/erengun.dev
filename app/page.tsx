@@ -62,9 +62,9 @@ const risingStar = {
 const codingame = {
   kicker: "CODINGAME · GENERAL GLOBAL LEADERBOARD",
   description:
-    "Ranked #9 in Turkey on CodinGame's general global leaderboard — out of 4.8M+ registered developers worldwide, climbing leagues from Bronze to Legend on algorithmic puzzles, bot-programming contests and optimization challenges, scored purely on code performance.",
+    "Peaked at #9 in Turkey on CodinGame's general global leaderboard (Aug 2022) — out of 4.8M+ registered developers worldwide, climbing leagues from Bronze to Legend on algorithmic puzzles, bot-programming contests and optimization challenges, scored purely on code performance. No longer actively competing, so live rank may differ from this peak result.",
   stats: [
-    { label: "RANK", value: "TR #9 · General Leaderboard" },
+    { label: "PEAK RANK", value: "TR #9 · Aug 2022" },
     { label: "FIELD", value: "4.8M+ registered developers" },
     { label: "LEAGUES", value: "Bronze → Silver → Gold → Legend" },
   ],
@@ -73,6 +73,8 @@ const codingame = {
   resultLink:
     "https://www.linkedin.com/pulse/codingame-global-leaderboard-snapshot-rare-top-5-daniel-g%C3%B3rski-qxsaf/",
   resultLinkLabel: "WHY THIS RANK IS RARE",
+  certificateLink: "https://www.codingame.com/certification/C-FpjsH60bLG6ln3UEATwA",
+  certificateLinkLabel: "VIEW CERTIFICATE",
 } as const;
 
 const community = [
@@ -399,7 +401,7 @@ export default function Home() {
         </DraggableWindow>
 
         <DraggableWindow title="achievements.log" className="rank-window">
-          <div className="rank-header"><span>CODINGAME_RANK</span><strong>TR #09</strong></div>
+          <div className="rank-header"><span>CODINGAME_PEAK_RANK · 2022</span><strong>TR #09</strong></div>
           <ul>
             <li><span>CodinGame</span><b>TURKEY TOP 10</b></li>
             <li><span>T3 Vakfı</span><b>YÜKSELEN YILDIZ</b></li>
@@ -526,11 +528,12 @@ export default function Home() {
           <div className="codingame-links">
             <a href={codingame.link} target="_blank" rel="noreferrer">{codingame.linkLabel} <b>↗</b></a>
             <a href={codingame.resultLink} target="_blank" rel="noreferrer" className="codingame-link-ghost">{codingame.resultLinkLabel} <b>↗</b></a>
+            <a href={codingame.certificateLink} target="_blank" rel="noreferrer" className="codingame-link-ghost">{codingame.certificateLinkLabel} <b>↗</b></a>
           </div>
         </div>
         <div className="codingame-visual reveal">
           <div className="tech-grid" aria-hidden="true" />
-          <span className="hud-label cg-hud-label">LEADERBOARD: TURKEY · GENERAL</span>
+          <span className="hud-label cg-hud-label">PEAK SNAPSHOT · TURKEY · AUG 2022</span>
           <div className="rank-board" aria-hidden="true">
             <div className="rank-row"><span>07</span><span className="rank-name blurred">▇▇▇▇▇▇▇▇▇▇</span></div>
             <div className="rank-row"><span>08</span><span className="rank-name blurred">▇▇▇▇▇▇▇▇▇▇▇▇</span></div>
@@ -541,7 +544,7 @@ export default function Home() {
           <div className="teknofest-hud cg-hud" aria-hidden="true">
             <span>4.8M+ PLAYERS</span>
             <span>SCORING: TRUESKILL</span>
-            <span>STATUS: LEGEND-BOUND</span>
+            <span>STATUS: PEAK ACHIEVED</span>
           </div>
         </div>
       </section>
