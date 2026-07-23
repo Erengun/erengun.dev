@@ -11,6 +11,12 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # vinext >=0.2.0 (through at least 1.0.0-beta.3) breaks static export
+      # for dynamic routes when trailingSlash: true is set (RSC handler
+      # returns 308, prerender fails). Confirmed via bisect. Remove this
+      # once fixed upstream: https://github.com/cloudflare/vinext
+      - dependency-name: "vinext"
 
   - package-ecosystem: "github-actions"
     directory: "/"
