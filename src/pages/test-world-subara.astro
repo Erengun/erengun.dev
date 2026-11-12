@@ -1,0 +1,121 @@
+---
+// Test page for the Subara project world (src/scene/worlds/subara.ts).
+// Query: ?t=0.5 local progress | ?slide=1 | ?webgl force WebGL2 | ?post fish-eye + camcorder chain
+//        ?placeholder world-side manifest fallback | ?fixture generated app-like screenshots (legibility check) | ?panel show the DOM panel footprint
+//        ?nodrag hide the slider | ?time=12 freeze the clock
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>test-world-subara</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 12px Menlo, monospace; color: #ccc; }
+      #c { position: fixed; inset: 0; }
+      #ui { position: fixed; left: 12px; right: 12px; top: 10px; display: flex; gap: 10px; align-items: center; z-index: 2; }
+      #ui input { flex: 1; }
+      #panel { position: fixed; left: 0; right: 0; bottom: 0; height: 28%; background: linear-gradient(transparent, rgba(0,0,0,.75) 30%); border-top: 1px dashed rgba(255,255,255,.25); display: none; }
+      body.hide-ui #ui { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="c"></div>
+    <div id="panel"></div>
+    <div id="ui"><span id="lbl">t</span><input id="s" type="range" min="-0.02" max="1.02" step="0.001" /><span id="info"></span></div>
+    <script>
+      import { WebGPURenderer, RenderTarget, HalfFloatType, QuadMesh, MeshBasicNodeMaterial } from 'three/webgpu';
+      import { texture, screenUV, uniform, vec4 } from 'three/tsl';
+      import { PROJECTS } from '../lib/content';
+      import { createWorld } from '../scene/worlds/subara';
+      import { fishEye } from '../scene/post/fisheye';
+      import { createCamcorder } from '../scene/post/camcorder';
+      import type { SlideImage } from '../scene/journey/types';
+
+      const q = new URLSearchParams(location.search);
+      if (q.has('nodrag')) document.body.classList.add('hide-ui');
+      if (q.has('panel')) document.getElementById('panel')!.style.display = 'block';
+      const container = document.getElementById('c')!;
+      const renderer = new WebGPURenderer({ antialias: false, forceWebGL: q.has('webgl') });
+      await renderer.init();
+      container.appendChild(renderer.domElement);
+      const backend = (renderer.backend as any).isWebGPUBackend ? 'webgpu' : 'webgl2';
+      document.body.dataset.backend = backend;
+
+      const fixture: SlideImage[] = [
+        { src: 'gen:0', w: 1179, h: 2556, kind: 'phone', caption: 'fixture phone' },
+        { src: 'gen:1', w: 2016, h: 1200, kind: 'desktop', caption: 'fixture desktop' },
+        { src: 'gen:2', w: 1179, h: 2556, kind: 'phone', caption: 'fixture phone 2' },
+      ];
+      const stage = createWorld({ renderer, isPhone: false, quality: 'high', project: PROJECTS[4], index: 4, slides: q.has('fixture') ? fixture : q.has('placeholder') ? [] : await fetch('/projects/subara/manifest.json').then((r) => (r.ok ? r.json() : [])).catch(() => []) });
+
+      const rt = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true });
+      const blitMat = new MeshBasicNodeMaterial();
+      const rtTex = texture(rt.texture);
+      let post: ReturnType<typeof createCamcorder> | null = null;
+      if (q.has('post')) {
+        const uFish = uniform(0.1), uOverscan = uniform(1);
+        const uvFish = fishEye(screenUV, uFish, uOverscan);
+        const sampled = rtTex.sample(uvFish);
+        post = createCamcorder({ renderer, source: sampled, sourceTexture: rtTex as any, uvFish, uFish, uOverscan });
+        blitMat.colorNode = post.output;
+      } else blitMat.colorNode = vec4(rtTex.sample(screenUV).rgb, 1);
+      const blit = new QuadMesh(blitMat);
+
+      const s = document.getElementById('s') as HTMLInputElement;
+      const info = document.getElementById('info')!;
+      let t = q.has('t') ? +q.get('t')! : 0.5;
+      s.value = String(t);
+      s.addEventListener('input', () => (t = +s.value));
+      let slide = q.has('slide') ? +q.get('slide')! : 0;
+      addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') slide++; if (e.key === 'ArrowLeft') slide--; });
+      const pointer = { x: 0, y: 0, inside: false, down: false };
+      addEventListener('pointermove', (e) => { pointer.x = (e.clientX / innerWidth) * 2 - 1; pointer.y = -((e.clientY / innerHeight) * 2 - 1); pointer.inside = true; });
+
+      function resize() {
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+        renderer.setSize(innerWidth, innerHeight, false);
+        renderer.domElement.style.width = '100%'; renderer.domElement.style.height = '100%';
+        const w = Math.round(innerWidth * renderer.getPixelRatio()), h = Math.round(innerHeight * renderer.getPixelRatio());
+        rt.setSize(w, h);
+        stage.camera.aspect = innerWidth / innerHeight;
+        stage.camera.updateProjectionMatrix();
+        post?.setSize(w, h);
+      }
+      resize();
+      addEventListener('resize', resize);
+
+      let err: any = null;
+      await stage.ready.catch((e) => { err = e; console.error(e); });
+      const t0 = performance.now();
+      let last = t0, frames = 0;
+      const freeze = q.has('time') ? +q.get('time')! : null;
+      renderer.setAnimationLoop(() => {
+        const now = performance.now();
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        const time = freeze ?? (now - t0) / 1000 + 3;
+        stage.update({
+          dt, time, t, enter: 1, exit: 0, vp: 0, pointer, parallax: { x: pointer.x, y: pointer.y }, aspect: innerWidth / innerHeight,
+          isPhone: false, quality: 'high', slide, gateOpen: true,
+        });
+        renderer.setRenderTarget(rt);
+        if (stage.render) stage.render(renderer, rt);
+        else renderer.render(stage.scene, stage.camera);
+        renderer.setRenderTarget(null);
+        post?.update(dt, time, { isHome: false, isPhone: false, inside: true, idx: 4, sceneT: 0, lastOpen: 0 });
+        blit.render(renderer);
+        const calls = (renderer.info.render as any).drawCalls ?? (renderer.info.render as any).calls;
+        if (frames % 10 === 0) info.textContent = `t=${t.toFixed(3)} slide=${slide} ${backend} draws=${calls}`;
+        if (++frames === 40 && !err) document.body.dataset.ready = '1';
+      });
+      (window as any).__w = {
+        renderer, stage, backend,
+        setT: (v: number) => { t = v; s.value = String(v); },
+        setSlide: (v: number) => (slide = v),
+        quad: () => stage.portalQuad?.(),
+      };
+    </script>
+  </body>
+</html>

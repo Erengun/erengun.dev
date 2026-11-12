@@ -1,0 +1,135 @@
+---
+// Test page for the Cached Network Image CE world (src/scene/worlds/cached-network-image-ce*.ts).
+// Query: ?t=0.5 local progress (else the slider) | ?time=12 freeze clock | ?slide=1 | ?webgl force WebGL2
+//        ?post fish-eye + camcorder chain | ?panel show a mock of the DOM panel (bottom 28%) | ?clean hide UI
+//        ?px=0.5&py=-0.3 fixed parallax | ?play animate t 0→1
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>test-world-cached-network-image-ce</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 12px Menlo, monospace; color: #cde; }
+      #c { position: fixed; inset: 0; }
+      #ui { position: fixed; left: 12px; top: 10px; display: flex; gap: 10px; align-items: center; background: rgba(0,0,0,.45); padding: 6px 10px; border-radius: 6px; }
+      #ui input { width: 340px; }
+      #panel { position: fixed; left: 0; right: 0; bottom: 0; height: 28%; background: linear-gradient(transparent, rgba(0,0,0,.75) 30%); display: none; }
+      #panel div { position: absolute; left: 48px; bottom: 40px; font: 600 42px Helvetica, Arial, sans-serif; color: #fff; }
+    </style>
+  </head>
+  <body>
+    <div id="c"></div>
+    <div id="panel"><div>Cached Network Image CE</div></div>
+    <div id="ui"><span id="be">…</span><input id="s" type="range" min="-0.1" max="1.1" step="0.001" value="0.5" /><span id="tv"></span><span id="sl"></span></div>
+    <script>
+      import { WebGPURenderer, RenderPipeline, Vector2 } from 'three/webgpu';
+      import { pass, screenUV, uniform, vec4 } from 'three/tsl';
+      import { fishEye, overscanScale } from '../scene/post/fisheye';
+      import { createCamcorder } from '../scene/post/camcorder';
+      import { PROJECTS } from '../lib/content';
+      import type { StageFrame } from '../scene/journey/types';
+
+      const mods = import.meta.glob('../scene/worlds/cached-network-image-ce*.ts') as Record<string, () => Promise<any>>;
+      const key = Object.keys(mods).find((k) => !k.endsWith('.wip.ts')) ?? Object.keys(mods)[0];
+      const { createWorld } = await mods[key]();
+
+      const q = new URLSearchParams(location.search);
+      const container = document.getElementById('c')!;
+      const renderer = new WebGPURenderer({ antialias: false, forceWebGL: q.has('webgl') });
+      await renderer.init();
+      container.appendChild(renderer.domElement);
+      const backend = (renderer.backend as any).isWebGPUBackend ? 'WebGPU' : 'WebGL2';
+      console.log('backend', backend);
+      document.getElementById('be')!.textContent = backend + ' · ' + key.split('/').pop();
+      if (q.has('clean')) document.getElementById('ui')!.style.display = 'none';
+      if (q.has('panel')) document.getElementById('panel')!.style.display = 'block';
+
+      const project = PROJECTS.find((p) => p.id === 'cached-network-image-ce')!;
+      const isPhone = innerWidth < 760;
+      const stage = createWorld({ renderer, isPhone, quality: 'high', project, index: 2, slides: [] });
+      const camera = stage.camera;
+
+      // post chain (mirrors test-post.astro)
+      const usePost = q.has('post');
+      const FOV0 = 50;
+      const passCamera = camera.clone();
+      const uFish = uniform(0.1), uOverscan = uniform(1);
+      let pipeline: RenderPipeline | null = null;
+      let cam: ReturnType<typeof createCamcorder> | null = null;
+      if (usePost) {
+        const scenePass = pass(stage.scene, passCamera);
+        const src = scenePass.getTextureNode('output');
+        const uvFish = fishEye(screenUV, uFish, uOverscan);
+        const sampled = src.sample(uvFish);
+        pipeline = new RenderPipeline(renderer);
+        cam = createCamcorder({ renderer, source: sampled, sourceTexture: src as any, uvFish, uFish, uOverscan });
+        pipeline.outputNode = cam ? cam.output : vec4(sampled.rgb, 1);
+      }
+
+      const size = new Vector2();
+      function resize() {
+        const w = container.clientWidth, h = container.clientHeight;
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.getDrawingBufferSize(size);
+        cam?.setSize(size.x, size.y);
+      }
+      resize();
+      addEventListener('resize', resize);
+
+      const slider = document.getElementById('s') as HTMLInputElement;
+      if (q.has('t')) slider.value = q.get('t')!;
+      let slide = q.has('slide') ? +q.get('slide')! : 0;
+      addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') slide++; if (e.key === 'ArrowLeft') slide--; });
+      const ptr = { x: 0, y: 0, inside: false, down: false };
+      const par = { x: q.has('px') ? +q.get('px')! : 0, y: q.has('py') ? +q.get('py')! : 0 };
+      if (!q.has('px')) addEventListener('pointermove', (e) => {
+        ptr.x = (e.clientX / innerWidth) * 2 - 1; ptr.y = -((e.clientY / innerHeight) * 2 - 1); ptr.inside = true;
+        par.x = ptr.x; par.y = ptr.y;
+      });
+
+      await stage.ready;
+      const t0 = performance.now();
+      let last = t0, frames = 0;
+      const frozen = q.has('time') ? +q.get('time')! : null;
+      renderer.setAnimationLoop(() => {
+        const now = performance.now();
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        const time = frozen ?? (now - t0) / 1000;
+        if (q.has('play')) slider.value = String(((now - t0) / 12000) % 1.1);
+        const t = +slider.value;
+        document.getElementById('tv')!.textContent = 't=' + t.toFixed(3);
+        document.getElementById('sl')!.textContent = 'slide ' + slide;
+        const f: StageFrame = {
+          dt: frozen != null ? 1 / 60 : dt, time, t, enter: 1, exit: 0, vp: 0, pointer: ptr, parallax: par,
+          aspect: camera.aspect, isPhone, quality: 'high', slide, gateOpen: true,
+        };
+        stage.update(f);
+        if (pipeline) {
+          const s = (uOverscan.value = overscanScale(camera.aspect, uFish.value));
+          passCamera.position.copy(camera.position);
+          passCamera.quaternion.copy(camera.quaternion);
+          passCamera.fov = (2 * Math.atan(Math.tan((camera.fov * Math.PI) / 360) * s) * 180) / Math.PI;
+          passCamera.aspect = camera.aspect / s;
+          passCamera.near = camera.near; passCamera.far = camera.far;
+          passCamera.updateProjectionMatrix();
+          passCamera.updateMatrixWorld();
+          cam?.update(frozen != null ? 0.5 : dt, time, { isHome: false, isPhone, inside: true, idx: 2, sceneT: 0, lastOpen: 0 });
+          pipeline.render();
+        } else {
+          renderer.setRenderTarget(null);
+          renderer.render(stage.scene, camera);
+        }
+        if (++frames === 40) document.body.dataset.ready = '1';
+      });
+      (window as any).__w = { stage, renderer };
+      void FOV0;
+    </script>
+  </body>
+</html>

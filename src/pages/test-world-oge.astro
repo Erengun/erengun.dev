@@ -1,0 +1,138 @@
+---
+// Test page for the Öge project world (src/scene/worlds/oge*.ts).
+// Query: ?t=<local progress, may be <0 or >1> | ?ui (slider) | ?slide=<n> | ?webgl (force WebGL2)
+//        ?post (fish-eye + camcorder chain) | ?panel (mask the bottom 28% like the DOM panel) | ?px=&py= parallax
+//        ?play (animate t through the stage) | ?quality=medium
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>test: world oge</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      #app, canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+      .ui { position: fixed; left: 12px; right: 12px; top: 12px; display: flex; gap: 10px; align-items: center;
+        font: 12px/1 monospace; color: #fff; background: #0008; padding: 8px; z-index: 3; }
+      .ui input[type=range] { flex: 1; }
+      .ui[hidden] { display: none; }
+      .panel { position: fixed; left: 0; right: 0; bottom: 0; height: 28%; background: linear-gradient(#0000, #000c 30%);
+        color: #f4f1ea; font: 14px/1.4 monospace; padding: 40px 48px; box-sizing: border-box; z-index: 2; }
+      .panel h2 { font: 600 44px/1 Helvetica, Arial, sans-serif; margin: 0 0 12px; }
+      .panel[hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div class="ui" hidden>
+      <span>t</span><input type="range" min="-0.2" max="1.2" step="0.001" /><b>0</b>
+      <button data-s="-1">◀</button><button data-s="1">▶</button>
+    </div>
+    <div class="panel" hidden><h2>Öge</h2>The supervision layer for coding agents. It runs Claude Code, Codex or Antigravity on your task, checks the work with independent QA, and brings you in only when your judgment is needed.</div>
+    <script>
+      import { WebGPURenderer, RenderTarget, HalfFloatType, MeshBasicNodeMaterial, QuadMesh, RenderPipeline } from 'three/webgpu';
+      import { texture, screenUV, uniform, vec4 } from 'three/tsl';
+      import { PROJECTS } from '../lib/content';
+      import type { StageFrame } from '../scene/journey/types';
+      import { fishEye } from '../scene/post/fisheye';
+      import { createCamcorder } from '../scene/post/camcorder';
+
+      const mods = (import.meta as any).glob(['../scene/worlds/oge.ts', '../scene/worlds/oge.wip.ts'], { eager: true }) as Record<string, any>;
+      const mod = mods['../scene/worlds/oge.ts'] ?? mods['../scene/worlds/oge.wip.ts'];
+
+      const q = new URLSearchParams(location.search);
+      const renderer = new WebGPURenderer({ antialias: false, forceWebGL: q.has('webgl') });
+      await renderer.init();
+      document.getElementById('app')!.appendChild(renderer.domElement);
+      const isWebGPU = !!(renderer.backend as any).isWebGPUBackend;
+      console.log('backend', isWebGPU ? 'WebGPU' : 'WebGL2');
+      document.body.dataset.backend = isWebGPU ? 'webgpu' : 'webgl2';
+      const quality = (q.get('quality') as any) ?? (isWebGPU ? 'high' : 'medium');
+      const isPhone = innerWidth < 768 || innerWidth / innerHeight < 1;
+
+      const stage = mod.createWorld({ renderer, isPhone, quality, project: PROJECTS[0], index: 0, slides: [] });
+
+      let t = q.has('t') ? +q.get('t')! : 0.5;
+      let slide = q.has('slide') ? +q.get('slide')! : 0;
+      const ui = document.querySelector('.ui') as HTMLElement;
+      const slider = ui.querySelector('input') as HTMLInputElement;
+      const label = ui.querySelector('b')!;
+      if (q.has('ui')) {
+        ui.hidden = false;
+        slider.value = String(t);
+        slider.oninput = () => { t = +slider.value; };
+        ui.querySelectorAll('button').forEach((b) => (b.onclick = () => { slide += +(b as HTMLElement).dataset.s!; }));
+      }
+      if (q.has('panel')) (document.querySelector('.panel') as HTMLElement).hidden = false;
+      addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') slide++; if (e.key === 'ArrowLeft') slide--; });
+
+      const rt = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true });
+      const blitMat = new MeshBasicNodeMaterial();
+      blitMat.colorNode = texture(rt.texture, screenUV);
+      const blit = new QuadMesh(blitMat);
+      let pipeline: RenderPipeline | null = null;
+      let cam: ReturnType<typeof createCamcorder> | null = null;
+      if (q.has('post')) {
+        const uFish = uniform(0.1), uOverscan = uniform(1);
+        const src = texture(rt.texture);
+        const uvFish = fishEye(screenUV, uFish, uOverscan);
+        cam = createCamcorder({ renderer, source: src.sample(uvFish), sourceTexture: src as any, uvFish, uFish, uOverscan });
+        pipeline = new RenderPipeline(renderer);
+        pipeline.outputNode = cam.output ?? vec4(src.sample(uvFish).rgb, 1);
+      }
+
+      const pointer = { x: 0, y: 0, inside: false, down: false };
+      const parallax = { x: +(q.get('px') ?? 0), y: +(q.get('py') ?? 0) };
+      const damped = { x: parallax.x, y: parallax.y };
+      function resize() {
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+        renderer.setSize(innerWidth, innerHeight, false);
+        rt.setSize(renderer.domElement.width, renderer.domElement.height);
+        stage.camera.aspect = innerWidth / innerHeight;
+        stage.camera.updateProjectionMatrix();
+        cam?.setSize(renderer.domElement.width, renderer.domElement.height);
+      }
+      resize();
+      addEventListener('resize', resize);
+      addEventListener('pointermove', (e) => {
+        pointer.x = (e.clientX / innerWidth) * 2 - 1; pointer.y = 1 - (e.clientY / innerHeight) * 2; pointer.inside = true;
+        if (!q.has('px')) { parallax.x = pointer.x; parallax.y = pointer.y; }
+      });
+
+      await stage.ready;
+      (window as any).__setT = (v: number) => { t = v; };
+      (window as any).__setSlide = (v: number) => { slide = v; };
+      let last = performance.now();
+      const t0 = last;
+      let frames = 0, fpsN = 0, fpsT = 0;
+      const postState = { isHome: false, isPhone, inside: true, idx: 1, sceneT: 0, lastOpen: 0 };
+      renderer.setAnimationLoop(() => {
+        const now = performance.now();
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        if (q.has('play')) { t += dt / 14; if (t > 1.1) t = -0.1; }
+        damped.x += (parallax.x - damped.x) * (1 - Math.exp(-dt * 4));
+        damped.y += (parallax.y - damped.y) * (1 - Math.exp(-dt * 4));
+        const f: StageFrame = {
+          dt, time: (now - t0) / 1000, t, enter: 1, exit: 0, vp: 0, pointer, parallax: damped,
+          aspect: innerWidth / innerHeight, isPhone, quality, slide, gateOpen: true,
+        };
+        stage.update(f);
+        renderer.setRenderTarget(rt);
+        if (stage.render) stage.render(renderer as any, rt);
+        else renderer.render(stage.scene, stage.camera);
+        renderer.setRenderTarget(null);
+        if (pipeline) { cam!.update(dt, now / 1000, postState); pipeline.render(); }
+        else blit.render(renderer);
+        frames++; fpsN++; fpsT += dt;
+        if (fpsT > 1) { (window as any).__fps = fpsN / fpsT; fpsN = 0; fpsT = 0; }
+        if (frames === 40) document.body.dataset.ready = '1';
+        label.textContent = t.toFixed(3);
+      });
+      (window as any).__stage = stage;
+      (window as any).__renderer = renderer;
+    </script>
+  </body>
+</html>

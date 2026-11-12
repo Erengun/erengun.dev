@@ -1,0 +1,17 @@
+{
+ "cols": 3,
+ "rows": 3,
+ "pad": 0.01171875,
+ "count": 9,
+ "names": [
+  "alpine-sunset",
+  "ocean-horizon",
+  "dunes",
+  "aurora",
+  "bauhaus",
+  "misty-forest",
+  "night-city",
+  "bokeh",
+  "mirror-lake"
+ ]
+}
