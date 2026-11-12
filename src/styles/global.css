@@ -42,7 +42,7 @@
 html {
   font-size: clamp(16px, .555556vw + 9.33333px, 32px);
   overflow: hidden;
-  height: 100dvh;
+  height: 100vh; height: 100lvh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -97,7 +97,7 @@ html.is-tabbing :is(a, button, input):focus-visible {
 }
 .is--loading .page-scroll { overflow: hidden; }
 .perspective-root {
-  position: sticky; top: 0; width: 100%; height: 100svh;
+  position: sticky; top: 0; width: 100%; height: 100vh; height: 100lvh; /* lvh: cover the screen when mobile browser bars collapse */
   perspective: 1000px; perspective-origin: 50% 50%; overflow: hidden;
 }
 .scene-tilt {
