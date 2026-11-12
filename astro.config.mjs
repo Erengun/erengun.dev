@@ -23,6 +23,8 @@ const devTestPages = {
 };
 
 export default defineConfig({
+  // the repo's existing Pages workflow uploads dist/client
+  outDir: 'dist/client',
   integrations: [devTestPages],
   vite: {
     plugins: [tailwindcss()],
