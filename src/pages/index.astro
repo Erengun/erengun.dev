@@ -4,6 +4,28 @@ import { SITE, SOCIALS, MENU, PROJECTS, LAST } from '../lib/content';
 import { TOTAL_VP } from '../lib/timeline';
 const pad = (n: number) => String(n).padStart(2, '0');
 const plus = `data:image/svg+xml,${encodeURIComponent('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 23.5V0M0 11.5H24" stroke="white" stroke-opacity="0.5"/></svg>')}`;
+const URL_BASE = 'https://erengun.dev/';
+const TITLE = `${SITE.name} — Software Engineer · Flutter, Rust & Developer Tools`;
+const DESC = 'Eren Gün is a software engineer from Istanbul building developer tools, update infrastructure and fast Flutter apps: Öge, Ferman, Cached Network Image CE, Elek and Subara.';
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    { '@type': 'WebSite', '@id': URL_BASE + '#website', url: URL_BASE, name: SITE.name, inLanguage: 'en' },
+    {
+      '@type': 'Person', '@id': URL_BASE + '#person', name: SITE.name, url: URL_BASE, jobTitle: 'Software Engineer',
+      image: URL_BASE + 'og.jpg', email: 'mailto:' + SITE.email,
+      address: { '@type': 'PostalAddress', addressLocality: 'Istanbul', addressCountry: 'TR' },
+      knowsAbout: ['Flutter', 'Dart', 'Rust', 'Go', 'Developer tools', 'Mobile apps', 'Code push / live updates', 'AI coding agents'],
+      sameAs: SOCIALS.filter((s) => s.href.startsWith('http')).map((s) => s.href),
+    },
+    ...PROJECTS.map((p) => ({
+      '@type': p.id === 'subara' ? 'SoftwareApplication' : 'SoftwareSourceCode',
+      name: p.title, description: p.info, author: { '@id': URL_BASE + '#person' },
+      ...(p.url ? { url: p.url } : {}),
+      ...(p.id === 'subara' ? { applicationCategory: 'FinanceApplication', operatingSystem: 'iOS' } : {}),
+    })),
+  ],
+};
 const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 9h23M16 1l8 8-8 8" stroke="white" stroke-width="1.5"/></svg>`;
 ---
 <!doctype html>
@@ -12,9 +34,31 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#000" />
-    <meta name="robots" content="noindex, nofollow" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="description" content={DESC} />
+    <meta name="author" content={SITE.name} />
+    <link rel="canonical" href={URL_BASE} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={SITE.name} />
+    <meta property="og:url" content={URL_BASE} />
+    <meta property="og:title" content={TITLE} />
+    <meta property="og:description" content={DESC} />
+    <meta property="og:image" content={URL_BASE + 'og.jpg'} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Eren Gün skiing, in the site's VHS-styled 3D intro scene" />
+    <meta property="og:locale" content="en_US" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={TITLE} />
+    <meta name="twitter:description" content={DESC} />
+    <meta name="twitter:image" content={URL_BASE + 'og.jpg'} />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="sitemap" href="/sitemap.xml" />
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Ccircle cx='8' cy='8' r='3' fill='%2311ff00'/%3E%3C/svg%3E" />
-    <title>{SITE.name} — lab</title>
+    <title>{TITLE}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Doto:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
@@ -23,8 +67,25 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
   <body class="is--loading">
     <a class="sr-only" href="#about">Skip to content</a>
     <main id="content" class="sr-only">
-      <h1>{SITE.name} — Software Developer</h1>
+      <h1>{SITE.name} — Software Engineer</h1>
       <p>{SITE.tagline}</p>
+      <section aria-labelledby="seo-about">
+        <h2 id="seo-about">About</h2>
+        {LAST.map((l) => (<><h3>{l.h}</h3><p>{l.b1}</p>{l.b2 && <p>{l.b2}</p>}</>))}
+      </section>
+      <section aria-labelledby="seo-work">
+        <h2 id="seo-work">Selected work</h2>
+        <ol>
+          {PROJECTS.map((p) => (
+            <li><article><h3>{p.url ? <a href={p.url}>{p.title}</a> : p.title}</h3><p>{p.info}</p><p>Role: {p.roles.join(', ')}</p></article></li>
+          ))}
+        </ol>
+      </section>
+      <section aria-labelledby="seo-contact">
+        <h2 id="seo-contact">Contact</h2>
+        <p>Let's talk about your next project: <a href={`mailto:${SITE.email}`}>{SITE.email}</a></p>
+        <ul>{SOCIALS.map((s) => <li><a href={s.href} rel="me">{s.label}</a></li>)}</ul>
+      </section>
     </main>
 
     <div class="preloader" data-preloader role="status" aria-live="polite">
@@ -96,7 +157,7 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
                   <p class="b1">{s.b1}</p>
                   {s.b2 && <p class="b2">{s.b2}</p>}
                 </div>
-                <a class="last-more" href="https://erengun.dev/work"><span style="opacity:.5">&gt; </span><span data-scramble-text>learn more</span></a>
+                <a class="last-more" href="/#work"><span style="opacity:.5">&gt; </span><span data-scramble-text>learn more</span></a>
               </div>
             </div>
           ))}
@@ -121,7 +182,7 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
             <div class="last-bottom">
               <button class="scroll-back uc" data-scroll-back data-talk-reveal>&gt; <span data-scramble-text>scroll back</span> &lt;</button>
               <div class="container footer-row" data-talk-reveal>
-                <a href="https://erengun.dev/legal/privacy"><span data-scramble-text>privacy policy</span></a>
+                <a href="/privacy"><span data-scramble-text>privacy policy</span></a>
                 <span>{SITE.name} all rights reserved</span>
                 <span><span class="c">©</span> {SITE.year}</span>
               </div>
@@ -171,7 +232,7 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
           </div>
         </div>
       </div>
-      <div class="menu-footer"><div class="container footer-row"><a href="https://erengun.dev/legal/privacy"><span data-scramble-text>privacy policy</span></a><span>{SITE.name} all rights reserved</span><span><span class="c">©</span> {SITE.year}</span></div></div>
+      <div class="menu-footer"><div class="container footer-row"><a href="/privacy"><span data-scramble-text>privacy policy</span></a><span>{SITE.name} all rights reserved</span><span><span class="c">©</span> {SITE.year}</span></div></div>
     </header>
 
     <div class="page-fade" data-page-fade></div>

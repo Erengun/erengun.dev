@@ -11,7 +11,6 @@ export const SOCIALS = [
   { label: 'Email', short: 'mail', href: 'mailto:hi@erengun.dev' },
   { label: 'Linkedin', short: 'linkedin', href: 'https://www.linkedin.com/in/erengun/' },
   { label: 'Github', short: 'github', href: 'https://github.com/Erengun' },
-  { label: 'Blog', short: 'blog', href: 'https://erengun.dev/blog' },
 ];
 
 export const MENU = [
@@ -19,8 +18,8 @@ export const MENU = [
   { label: 'about', href: '/#about' },
   { label: 'work', href: '/#work' },
   { label: 'contact', href: '/#contact' },
-  { label: 'blog', href: 'https://erengun.dev/blog' },
-  { label: 'projects', href: 'https://erengun.dev/projects' },
+  { label: 'github', href: 'https://github.com/Erengun' },
+  { label: 'linkedin', href: 'https://www.linkedin.com/in/erengun/' },
 ];
 
 export type Project = {
@@ -29,6 +28,8 @@ export type Project = {
   info: string;
   roles: string[];
   slides: number;
+  /** public link (repo / package / store); omitted for private projects */
+  url?: string;
   /** palette used by the procedural slide generator (stand-in for screenshots) */
   palette: [string, string, string];
 };
@@ -36,6 +37,7 @@ export type Project = {
 export const PROJECTS: Project[] = [
   {
     id: 'oge',
+    url: 'https://github.com/Erengun/oge',
     title: 'Öge',
     info: 'The supervision layer for coding agents. It runs Claude Code, Codex or Antigravity on your task, checks the work with independent QA, and brings you in only when your judgment is needed.',
     roles: ['Design', 'Development', 'Go'],
@@ -52,6 +54,7 @@ export const PROJECTS: Project[] = [
   },
   {
     id: 'cached-network-image-ce',
+    url: 'https://pub.dev/packages/cached_network_image_ce',
     title: 'Cached Network Image CE',
     info: 'Zero-jank image caching for Flutter. The maintained fork of cached_network_image, rebuilt on hive_ce: 8× faster cache reads, web support, same API.',
     roles: ['Maintainer', 'Development', 'Open Source'],
@@ -60,6 +63,7 @@ export const PROJECTS: Project[] = [
   },
   {
     id: 'elek',
+    url: 'https://pub.dev/packages/elek',
     title: 'Elek',
     info: 'Your coding agent is fast. Your test suite isn’t. An incremental test runner for Dart and Flutter that skips what is already green: up to 107× faster loops.',
     roles: ['Design', 'Development', 'Dart'],
@@ -68,6 +72,7 @@ export const PROJECTS: Project[] = [
   },
   {
     id: 'subara',
+    url: 'https://apps.apple.com/us/app/subara-subscription-manager/id6777425387',
     title: 'Subara',
     info: 'A subscription manager for iPhone and iPad, built with Flutter: spending charts, a payment calendar, reminders before renewals, widgets and Live Activities. Data stays on device.',
     roles: ['Design', 'Development', 'iOS'],
