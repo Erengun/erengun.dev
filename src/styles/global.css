@@ -421,6 +421,9 @@ body.is--last .last { visibility: visible; opacity: 1; }
 }
 .page-fade[data-fading] { opacity: 1; }
 
+.scroll-back { display: none; margin: 0 auto 1.75rem; font-size: .875rem; font-weight: 700; color: #fff; }
+@media (max-width: 47.99rem), (max-aspect-ratio: 4/3) { .scroll-back { display: block; } }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0s !important; animation: none !important; }
 }

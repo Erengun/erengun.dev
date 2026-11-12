@@ -128,6 +128,7 @@ addEventListener('keydown', (e) => {
 // ---------------------------------------------------------------- selected work nav
 const workList = $('.work__list');
 $$('[data-work-item]').forEach((b, i) => b.addEventListener('click', () => scrollToVp(i + 1, true)));
+$('[data-scroll-back]').addEventListener('click', () => scrollToVp(SCENE_START + SCENE_VP * 0.79, true));
 
 // ---------------------------------------------------------------- last section
 const lastStages = $$('[data-last-stage]');

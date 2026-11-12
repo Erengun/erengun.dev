@@ -98,7 +98,8 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     const u = (e.clientX - r.left) / r.width;
     const v = 1 - (e.clientY - r.top) / r.height;
     // screen → pass uv through the fish-eye → pass NDC
-    const [pu, pv] = fishEyeCPU(u, v, uFish.value, size.x / size.y, uOverscan.value);
+    const [su, sv] = post.toSource(u, v);
+    const [pu, pv] = fishEyeCPU(su, sv, uFish.value, size.x / size.y, uOverscan.value);
     ndc.x = pu * 2 - 1;
     ndc.y = pv * 2 - 1;
     ndc.inside = true;
@@ -214,7 +215,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     const lift = isPhone ? 2 : 1.7;
     carousel.rotation.y = -rot;
     carousel.position.y = idx * lift;
-    const tileScale = isPhone ? clamp(0.4497 * camera.aspect, 0.8019, 1) : 1;
+    const tileScale = clamp(0.4497 * camera.aspect, 0.8019, 1);
 
     // parallax input
     const k = damp(5, dt);
@@ -339,7 +340,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
       overlays.labelHidden[p] = hidden;
       if (hidden) continue;
       corner.set(0, -PORTAL_H * 0.5 - 0.12, 0).applyMatrix4(t.plane.matrixWorld).project(passCamera);
-      const [u, v] = fishEyeInverseCPU(corner.x * 0.5 + 0.5, corner.y * 0.5 + 0.5, uFish.value, size.x / size.y, uOverscan.value);
+      const [u, v] = post.fromSource(...fishEyeInverseCPU(corner.x * 0.5 + 0.5, corner.y * 0.5 + 0.5, uFish.value, size.x / size.y, uOverscan.value));
       const x = (u - 0.5) * w, y = (0.5 - v) * h;
       const sc = clamp(1 - Math.abs(idx - t.i) * 0.5, 0.5, 1);
       const m = overlays.labelMatrices;

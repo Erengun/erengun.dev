@@ -18,12 +18,18 @@ export function createPostChain(o: {
   const src = o.scenePass.getTextureNode('output');
   const sampled = src.sample(uvFish);
   let output: Node = vec4(sampled.rgb, 1);
-  let cam: { update: (dt: number, t: number, s: PostState) => void; setSize: (w: number, h: number) => void } | null = null;
+  let cam: {
+    update: (dt: number, t: number, s: PostState) => void;
+    setSize: (w: number, h: number) => void;
+    toSource?: (u: number, v: number) => [number, number];
+    fromSource?: (u: number, v: number) => [number, number];
+    debug?: { zoomOut: number };
+  } | null = null;
   try {
     // camcorder module is optional until it exists
     const mod = (import.meta as any).glob('./camcorder.ts', { eager: true })['./camcorder.ts'] as any;
     if (mod?.createCamcorder) {
-      const c = mod.createCamcorder({ renderer: o.renderer, source: sampled, sourceTexture: src, uvFish });
+      const c = mod.createCamcorder({ renderer: o.renderer, source: sampled, sourceTexture: src, uvFish, uFish: o.uFish, uOverscan: o.uOverscan });
       output = c.output;
       cam = c;
     }
@@ -34,5 +40,9 @@ export function createPostChain(o: {
     output,
     update: (dt: number, t: number, s: PostState) => cam?.update(dt, t, s),
     setSize: (w: number, h: number) => cam?.setSize(w, h),
+    /** screen uv → uv fed into the fish-eye (undo CRT bulge/zoom/handheld) */
+    toSource: (u: number, v: number): [number, number] => cam?.toSource?.(u, v) ?? [u, v],
+    /** inverse of toSource */
+    fromSource: (u: number, v: number): [number, number] => cam?.fromSource?.(u, v) ?? [u, v],
   };
 }

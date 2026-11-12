@@ -1,0 +1,192 @@
+---
+// Test page for the project portals (src/scene/portals/project*.ts). Query params:
+//   ?p=0..3              which project (default 0)
+//   ?mode=carousel|inside  start resting on the carousel (default) or flown into the project
+//   ?slide=n             initial slide when inside
+//   ?webgl               force the WebGL2 backend
+//   ?px=..&py=..         fixed parallax input (-1..1) instead of the mouse
+//   ?roomonly            hide the slide strip (inspect the room)
+//   ?all                 show all four portals side by side on the carousel (helix like the app)
+// Keys: o = toggle open/close, ←/→ = slide, 0-3 = project
+import { PROJECTS } from '../lib/content';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>test: project portal</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
+      #c { position: fixed; inset: 0; touch-action: none; }
+      #hud { position: fixed; left: 8px; bottom: 8px; color: #888; font: 11px/1.3 monospace; z-index: 2; white-space: pre; pointer-events: none; }
+      #thumbs { position: fixed; right: 8px; bottom: 8px; display: flex; gap: 6px; z-index: 2; }
+      #thumbs img { width: 50px; height: 30px; border: 1px solid #fff; object-fit: cover; background: #333; }
+    </style>
+  </head>
+  <body>
+    <div id="c"></div>
+    <div id="hud"></div>
+    <div id="thumbs">
+      {PROJECTS.map((p) => Array.from({ length: p.slides }).map((_, s) => <img alt="" data-thumb-img={`${p.id}:${s}`} />))}
+    </div>
+    <script>
+      import {
+        WebGPURenderer, PerspectiveCamera, Scene, RenderTarget, HalfFloatType, Mesh, PlaneGeometry,
+        MeshBasicNodeMaterial, Group, Matrix4, Timer,
+      } from 'three/webgpu';
+      import { texture, screenUV, mix, color } from 'three/tsl';
+      import { createProjectPortal } from '../scene/portals/project.wip';
+      import { PROJECTS } from '../lib/content';
+      import { PORTAL_W, PORTAL_H, type PortalFrame } from '../scene/types';
+      import { $route } from '../lib/stores';
+
+      const q = new URLSearchParams(location.search);
+      let pi = Number(q.get('p') ?? 0);
+      let inside = q.get('mode') === 'inside';
+      const all = q.has('all');
+      const FOV = 110;
+      const hud = document.getElementById('hud')!;
+      const container = document.getElementById('c')!;
+
+      const renderer = new WebGPURenderer({ antialias: false, forceWebGL: q.has('webgl') });
+      await renderer.init();
+      container.appendChild(renderer.domElement);
+      const isPhone = matchMedia('(max-width: 47.99rem), (max-aspect-ratio: 4/3)').matches;
+      const ctx = { renderer, isPhone, quality: 'high' as const };
+
+      const camera = new PerspectiveCamera(FOV, 1, 0.1, 1000);
+      const inner = new PerspectiveCamera(FOV, 1, 0.01, 1000);
+      const scene = new Scene();
+      scene.backgroundNode = mix(color(0xffffff), color(0xd2d2d2), screenUV.y);
+
+      const STEP = Math.PI / 12;
+      const portals = PROJECTS.map((p, i) => createProjectPortal(ctx, p, i));
+      const carousel = new Group();
+      scene.add(carousel);
+      const tiles = PROJECTS.map((_, i) => {
+        const ti = i + 1; // tile index like the app
+        const group = new Group();
+        group.position.set(3 * Math.sin(ti * STEP), -ti * 1.7, 3 * Math.cos(ti * STEP));
+        group.rotation.y = ti * STEP;
+        const frame = new Group();
+        group.add(frame);
+        const rt = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true });
+        const mat = new MeshBasicNodeMaterial();
+        mat.colorNode = texture(rt.texture, screenUV);
+        mat.toneMapped = false;
+        const plane = new Mesh(new PlaneGeometry(PORTAL_W, PORTAL_H), mat);
+        frame.add(plane);
+        carousel.add(group);
+        return { ti, group, frame, plane, rt, openness: inside && i === pi ? 1 : 0 };
+      });
+
+      function resize() {
+        const w = innerWidth, h = innerHeight;
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.position.set(0, 0, isPhone ? 5 : 4);
+        camera.updateProjectionMatrix();
+        for (const t of tiles) t.rt.setSize(renderer.domElement.width, renderer.domElement.height);
+      }
+      addEventListener('resize', resize);
+      resize();
+
+      // pointer → NDC (+ down)
+      const ndc = { x: 0, y: 0, inside: false, down: false };
+      const parallax = { x: Number(q.get('px') ?? 0), y: Number(q.get('py') ?? 0) };
+      const fixedParallax = q.has('px') || q.has('py');
+      const toNdc = (e: PointerEvent) => {
+        ndc.x = (e.clientX / innerWidth) * 2 - 1;
+        ndc.y = 1 - (e.clientY / innerHeight) * 2;
+        ndc.inside = true;
+      };
+      container.addEventListener('pointermove', toNdc);
+      container.addEventListener('pointerdown', (e) => { toNdc(e); ndc.down = true; });
+      addEventListener('pointerup', () => (ndc.down = false));
+      addEventListener('keydown', (e) => {
+        const n = PROJECTS[pi].slides;
+        const s = $route.get().slide;
+        if (e.key === 'o') setInside(!inside);
+        if (e.key === 'ArrowRight') $route.setKey('slide', (s + 1) % n);
+        if (e.key === 'ArrowLeft') $route.setKey('slide', (s - 1 + n) % n);
+        if (/^[0-3]$/.test(e.key)) { setInside(false); pi = Number(e.key); }
+      });
+      function setInside(v: boolean) {
+        inside = v;
+        $route.set({ ...$route.get(), route: v ? (`project-${pi}` as any) : null, slide: v ? $route.get().slide : 0 });
+      }
+      $route.set({ ...$route.get(), route: inside ? (`project-${pi}` as any) : null, slide: inside ? Number(q.get('slide') ?? 0) : 0 });
+
+      await Promise.all(portals.map((p) => p.ready));
+      if (q.has('roomonly')) for (const p of portals) { const s = p.scene.getObjectByName('strip'); if (s) s.visible = false; }
+      for (const p of portals) await renderer.compileAsync(p.scene, inner);
+      (window as any).__ready = true;
+
+      const timer = new Timer();
+      const tmpM = new Matrix4();
+      let frames = 0, fpsT = 0, fps = 0;
+      renderer.setAnimationLoop((ts) => {
+        timer.update(ts);
+        const dt = Math.min(timer.getDelta(), 0.05);
+        const time = timer.getElapsed();
+        frames++; fpsT += dt; if (fpsT > 1) { fps = frames / fpsT; frames = 0; fpsT = 0; }
+        if (!fixedParallax) {
+          const k = 1 - Math.exp(-5 * dt);
+          parallax.x += (ndc.x - parallax.x) * k;
+          parallax.y += (ndc.y - parallax.y) * k;
+        }
+        // carousel faces the current project's tile
+        const idx = pi + 1;
+        carousel.rotation.y = -idx * STEP;
+        carousel.position.y = idx * 1.7;
+        carousel.updateMatrixWorld(true);
+        const t = Math.tan((FOV * Math.PI) / 360);
+        const cover = Math.min(PORTAL_H / (2 * t), PORTAL_W / (2 * t * camera.aspect));
+        const restDist = camera.position.z - 3;
+        const anyOpen = tiles.find((tl) => tl.openness > 0.98);
+        for (const tl of tiles) {
+          const i = tl.ti - 1;
+          const target = inside && i === pi ? 1 : 0;
+          tl.openness += (target - tl.openness) * (1 - Math.exp(-5.66 * dt));
+          if (Math.abs(target - tl.openness) < 1e-4) tl.openness = target;
+          const o = tl.openness;
+          const push = Math.min(1, o) * 0.12 + (o < 0.6 ? 0 : ((x) => x * x * (3 - 2 * x))(Math.min(1, (o - 0.6) / 0.4))) * 0.08;
+          const ease = o * o * (3 - 2 * o);
+          tl.frame.position.z = (restDist - cover * (1 - push)) * ease;
+          tl.plane.visible = (!anyOpen || anyOpen === tl) && (all || i === pi || o > 0.01);
+        }
+        carousel.updateMatrixWorld(true);
+        camera.updateMatrixWorld();
+        for (const tl of tiles) {
+          const i = tl.ti - 1;
+          tmpM.copy(tl.plane.matrixWorld).invert().multiply(camera.matrixWorld);
+          inner.matrixWorld.copy(tmpM);
+          inner.matrixWorld.decompose(inner.position, inner.quaternion, inner.scale);
+          inner.projectionMatrix.copy(camera.projectionMatrix);
+          inner.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
+          inner.fov = camera.fov;
+          inner.aspect = camera.aspect;
+          inner.matrixWorldInverse.copy(inner.matrixWorld).invert();
+          const isIn = inside && i === pi;
+          const f: PortalFrame = {
+            dt, time, openness: tl.openness, focus: 1 - Math.min(1, Math.abs(i - pi)), camera: inner,
+            pointer: ndc, parallax, vp: idx, sceneT: 0, isPhone, gateOpen: true,
+            slide: isIn ? $route.get().slide : 0, inside: isIn,
+          };
+          portals[i].update(f);
+          if (!tl.plane.visible) continue;
+          renderer.setRenderTarget(tl.rt);
+          renderer.setClearColor(portals[i].background, 1);
+          renderer.clear();
+          renderer.render(portals[i].scene, inner);
+        }
+        renderer.setRenderTarget(null);
+        renderer.render(scene, camera);
+        hud.textContent = `project ${pi} ${PROJECTS[pi].id}  ${inside ? 'inside' : 'carousel'}  open ${tiles[pi].openness.toFixed(2)}  slide ${$route.get().slide}  ${fps.toFixed(0)} fps  ${(renderer.backend as any).isWebGLBackend ? 'webgl2' : 'webgpu'}  calls ${renderer.info.render.drawCalls}`;
+      });
+    </script>
+  </body>
+</html>
