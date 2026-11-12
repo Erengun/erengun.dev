@@ -203,7 +203,7 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
       const infl = select(along.greaterThan(0), float(1).sub(smoothstep(0, R, dist)), float(0)).mul(uPush).toVar();
       const ph = c.mul(9.0).add(time.mul(vec3(2.1, 2.7, 1.9)));
       const swirl = vec3(sin(ph.y), sin(ph.z), sin(ph.x));
-      c.addAssign(perp.div(max(dist, R.mul(0.25))).mul(R.mul(0.55)).add(swirl.mul(R.mul(0.12))).mul(infl));
+      c.addAssign(perp.div(max(dist, R.mul(0.25))).mul(R.mul(0.32)).add(swirl.mul(R.mul(0.08))).mul(infl));
 
       // ---- projection
       const v = modelViewMatrix.mul(vec4(c, 1)).xyz.toVar();
@@ -341,7 +341,7 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
     tmp.set((pointer.x + P[8]) / P[0], (pointer.y + P[9]) / P[5], -1).transformDirection(camera.matrixWorld).transformDirection(invObj);
     uRayO.value.copy(camPos);
     uRayD.value.copy(tmp);
-    uRadPerDepth.value = (isPhone ? 0.252 : 0.42) / P[5];
+    uRadPerDepth.value = (isPhone ? 0.16 : 0.24) / P[5]; // gentler than spec .42: a resting cursor otherwise punches a hole in the alley
 
     const moved = Math.hypot(pointer.x - lastPX, pointer.y - lastPY);
     lastPX = pointer.x; lastPY = pointer.y;
