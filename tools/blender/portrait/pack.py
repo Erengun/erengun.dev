@@ -23,9 +23,9 @@ F = len(colors)
 N = Image.open(colors[0]).size[0]
 COLS = 8
 ROWS = (F + COLS - 1) // COLS
-ROOTS_X, ROOTS_Y, MAXD = 12, 7, 4
-QW, QH = ROOTS_X * 2 ** MAXD, ROOTS_Y * 2 ** MAXD  # 192 x 112
-LEVEL_SCALE = 60
+ROOTS_X, ROOTS_Y, MAXD = 12, 7, 5
+QW, QH = ROOTS_X * 2 ** MAXD, ROOTS_Y * 2 ** MAXD  # 384 x 224
+LEVEL_SCALE = 50
 D_SPLIT, L_SPLIT = 0.016, 0.25   # plane-fit residual (depth), luma range
 
 col_atlas = Image.new('RGB', (COLS * N, ROWS * N))

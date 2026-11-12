@@ -4,7 +4,7 @@
  * Source: an original Blender-rendered bust (tools/blender/portrait), 54 frames of colour + depth packed into
  * atlases in /public/portrait (no WebCodecs video). Played ping-pong at 30 fps.
  *
- *  - voxels: ONE instanced draw (Sprite with count = 151·151·layers, SpriteNodeMaterial). No per-instance
+ *  - voxels: ONE instanced draw (Sprite with count = G·G·layers, G = 221 high / 151 medium; SpriteNodeMaterial). No per-instance
  *    attributes: the cell + layer come from instanceIndex; colour/depth/neighbour-min are fetched in the vertex
  *    shader with textureLoad. Each voxel is a camera-facing rounded quad with a fake bevel normal (stands in for
  *    the reference's octahedral impostor; at ~5–8 px per voxel the result is the same), lit by hand with the
@@ -29,29 +29,32 @@ import type { Portal, PortalContext, PortalFrame } from '../types';
 
 // ------------------------------------------------------------------ constants (spec §5)
 const BASE = '/portrait/';
-const N = 151;                 // xCount = yCount = floor(13.7·11)+1
+const N = 221;                 // atlas frame size (texels); the voxel grid G is 221 (high) or 151 (medium, subsampled)
 const EXTENT = 13.7;           // grid units across the frame
-const CELL = EXTENT / (N - 1); // voxel pitch
+const CELL_A = EXTENT / (N - 1); // atlas texel pitch in grid units
+const HALF_A = (N - 1) / 2;
 const CUTOFF = 0.35;
 const OPACITY = 0.66;
-const GROUP_SCALE = 0.31;      // grid units → portal units (tuned for the FOV-110 inner camera)
+const GROUP_SCALE = 0.40;      // grid units → portal units (tuned for the FOV-110 inner camera)
 const FRAME_DIST = 2.2;        // distance camera → frame baseline when fully open
 const CAM_OPEN = 0.406;        // inner camera distance to the portal plane when open (coverDepth·0.8)
-const GROUP_Y = 0.1;
+const GROUP_Y = 0.0;
 const TEAL = new Color().setRGB(121 / 255, 199 / 255, 199 / 255); // sRGB → linear handled by Color
 // spec ends the grid at #222; the lead asked for the grid to stay the main read, so it rests at a dim teal-grey
 const GRID_ROOT = 0.035;  // linear grey of root-level lines at rest (~55/255): background grid stays dim
 const GRID_FINE = 0.15;   // linear grey of the finest lines (~120/255): the figure's contour reads brightest
 // per-frame quadtree layout (must match tools/blender/portrait/pack.py)
-const QT = { rootsX: 12, rootsY: 7, maxDepth: 4, w: 192, h: 112, levelScale: 60 };
-const LIGHT = new Color('#E0FFFF');
+const QT = { rootsX: 12, rootsY: 7, maxDepth: 5, w: 384, h: 224, levelScale: 50 };
+// three directional lights (#E0FFFF, spec intensities/directions); used as grey modulation of the photo luma
 const LIGHTS: [number, [number, number, number]][] = [
   [1.95, [1, 0.17, -0.05]], // top
   [0.9, [-1, -0.01, -0.46]], // left
   [1.25, [1, 0.25, 0.45]],  // right
 ];
 
-const relief = (d: number) => (Math.floor(Math.max(d, CUTOFF) * 100) / 100 - CUTOFF) * 3 + CUTOFF;
+// spec relief gain is 3; the ultra-close photo portrait uses less so the FOV-110 camera doesn't balloon the face
+const RELIEF = 1.6;
+const relief = (d: number) => (Math.floor(Math.max(d, CUTOFF) * 100) / 100 - CUTOFF) * RELIEF + CUTOFF;
 const inOutQuart = (t: number) => (t < 0.5 ? 8 * t ** 4 : 1 - (-2 * t + 2) ** 4 / 2);
 const outQuad = (t: number) => 1 - (1 - t) * (1 - t);
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
@@ -70,6 +73,8 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 export function createIntroPortal(ctx: PortalContext): Portal {
   const layers = ctx.quality === 'high' ? 3 : 2;
+  const G = ctx.quality === 'high' ? 221 : 151;   // voxels per side (spec: 151; ultra-close portrait wants more on high)
+  const CELL = EXTENT / (G - 1);                   // voxel pitch
   const scene = new Scene();
   const background = new Color('#000000');
   const group = new Group();
@@ -97,8 +102,8 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const uWaveP = uniform(1);
 
   // ------------------------------------------------------------------ voxel material
-  const NN = N * N;
-  const half = (N - 1) / 2;
+  const NN = G * G;
+  const half = (G - 1) / 2;
   const load = (tex: Texture, p: any) => textureLoad(tex, p, int(0));
   const voxel = new SpriteNodeMaterial({ transparent: true, depthWrite: true, depthTest: true });
   voxel.sizeAttenuation = true;
@@ -107,20 +112,21 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const idx = instanceIndex.toInt();
   const layer = idx.div(NN);
   const k = idx.mod(NN);
-  const ix = k.mod(N);
-  const iy = k.div(N);
+  const ix = k.mod(G);
+  const iy = k.div(G);
   const base = ivec2(uFrameOff);
-  const tc = ivec2(ix, iy).add(base);
+  const toTexel = (i: any) => i.toFloat().mul((N - 1) / (G - 1)).add(0.5).toInt();
+  const tc = ivec2(toTexel(ix), toTexel(iy)).add(base);
   const d4 = load(dataTex, tc);
   const depth = d4.r;
   const nmin = d4.g;
   // relief gradient (for the ≤10° normal tilt)
   const dxp = load(dataTex, tc.add(ivec2(1, 0))).r, dxm = load(dataTex, tc.sub(ivec2(1, 0))).r;
   const dyp = load(dataTex, tc.sub(ivec2(0, 1))).r, dym = load(dataTex, tc.add(ivec2(0, 1))).r; // image rows go down
-  const grad = vec2(dxp.sub(dxm), dyp.sub(dym)).mul(3.0 / (2 * CELL) * 0.06);
+  const grad = vec2(dxp.sub(dxm), dyp.sub(dym)).mul(3.0 / (2 * CELL_A) * 0.06);
 
   const dC = max(depth, CUTOFF);
-  const rel = floor(dC.mul(100)).div(100).sub(CUTOFF).mul(3).add(CUTOFF);
+  const rel = floor(dC.mul(100)).div(100).sub(CUTOFF).mul(RELIEF).add(CUTOFF);
   const visible = select(nmin.greaterThanEqual(CUTOFF - 0.002), float(1), float(0));
   const weight = smoothstep(uThreshold.sub(0.03), uThreshold.add(0.03), depth).mul(visible);
   const cxy = vec2(ix.toFloat().sub(half), float(half).sub(iy.toFloat())).mul(CELL);
@@ -174,12 +180,12 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   // the face/head interior (coarse cells) stays dark, like the reference
   const qOff = ivec2(uQtOff);
   const qtc = ivec2(
-    clamp(ix.toFloat().div(N - 1).mul(QT.w), 0, QT.w - 1).toInt(),
-    clamp(iy.toFloat().div(N - 1).mul(QT.h), 0, QT.h - 1).toInt(),
+    clamp(ix.toFloat().div(G - 1).mul(QT.w), 0, QT.w - 1).toInt(),
+    clamp(iy.toFloat().div(G - 1).mul(QT.h), 0, QT.h - 1).toInt(),
   ).add(qOff);
   const vLevel = load(qtTex, qtc).r.mul(255 / QT.levelScale);
-  const edgeF = smoothstep(1.6, 3.2, vLevel);
-  const vBright = varying(mix(0.07, 1.0, edgeF).add(moving.mul(0.5)), 'vBright');
+  const edgeF = smoothstep(2.0, 4.2, vLevel);
+  const vBright = varying(mix(0.5, 1.0, edgeF).add(moving.mul(0.5)), 'vBright');
   const vColor = varying(gradeFn(colRaw, moving), 'vColor');
   const vGrad = varying(grad, 'vGrad');
   const vMoving = varying(moving, 'vMoving');
@@ -198,10 +204,13 @@ export function createIntroPortal(ctx: PortalContext): Portal {
       lam = lam.add(max(dot(n, L), 0).mul(I));
     }
     // dim, low-contrast voxels: the quadtree grid is the main read (reference vp0_5)
-    let lit: any = vColor.mul(vec3(LIGHT.r, LIGHT.g, LIGHT.b)).mul(lam.mul(1 / Math.PI)).mul(1.4);
-    // neutral grey (no tint), flat/dim; brightness follows the contour factor
-    const grey = dot(mix(lit, vColor.mul(0.7).add(0.03), vMoving.mul(0.35)), vec3(0.2126, 0.7152, 0.0722));
-    return vec4(vec3(grey.mul(0.75).add(0.008).mul(vBright)), 1);
+    // neutral grey: the photo's own luma carries the likeness (beard/brows/hair dark, skin light); the three
+    // lights only modulate it (bevel highlights), then the contour factor dims the interior
+    const lumC = dot(vColor, vec3(0.2126, 0.7152, 0.0722));
+    const shade = float(0.5).add(clamp(lam.mul(1 / 2.2), 0, 1).mul(0.6));
+    const base = float(0.18).add(smoothstep(0.08, 0.6, lumC).mul(0.82)).mul(0.36).mul(shade); // floor: dark hair/beard still read as volume
+    const grey = mix(base, lumC.mul(0.6).add(0.05), vMoving.mul(0.35));
+    return vec4(vec3(grey.mul(vBright).add(0.004)), 1);
   })();
   voxel.opacityNode = Fn(() => {
     const q = uv().mul(2).sub(1);
@@ -228,7 +237,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const inside = uvF.x.greaterThanEqual(0).and(uvF.x.lessThanEqual(1)).and(uvF.y.greaterThanEqual(0)).and(uvF.y.lessThanEqual(1));
   const gtc = ivec2(clamp(uvF.x.mul(N - 1).add(0.5), 0, N - 1).toInt(), clamp(float(1).sub(uvF.y).mul(N - 1).add(0.5), 0, N - 1).toInt()).add(base);
   const gd = select(inside, load(dataTex, gtc).r, float(0));
-  const gRel = max(gd, CUTOFF).sub(CUTOFF).mul(3).add(CUTOFF).sub(CELL * 1.2);
+  const gRel = max(gd, CUTOFF).sub(CUTOFF).mul(RELIEF).add(CUTOFF).sub(CELL * 1.2);
   gridMat.positionNode = vec3(positionGeometry.xy, gRel);
   const vUvF = varying(uvF, 'vUvF');
   const vGd = varying(gd, 'vGd');
@@ -248,7 +257,10 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     const dd = min(f, float(1).sub(f)).div(max(w, vec2(1e-6)));
     const line = float(1).sub(smoothstep(0.35, 0.85, min(dd.x, dd.y)));
     // reveal: teal (spec) → rest: neutral grey, brighter for finer levels (contour lines) than for root lines
-    const rest = vec3(mix(GRID_ROOT, GRID_FINE, smoothstep(0.0, 3.0, lv)));
+    // inside the subject only the fine contour cells stay bright; coarse interior lines dim so the face reads
+    const inSubject = select(vGd.greaterThan(CUTOFF), float(1), float(0));
+    const interiorDim = mix(1.0, mix(0.3, 1.0, smoothstep(2.5, 4.0, lv)), inSubject);
+    const rest = vec3(mix(GRID_ROOT, GRID_FINE, smoothstep(0.0, 3.0, lv)).mul(interiorDim));
     const gridCol = mix(vec3(TEAL.r, TEAL.g, TEAL.b).mul(0.6), rest, uReveal);
     const band = float(1).sub(smoothstep(0.0, 0.06, abs(vGd.sub(uThreshold)))).mul(select(vGd.greaterThan(CUTOFF), float(1), float(0)));
     const c = gridCol.add(vec3(TEAL.r, TEAL.g, TEAL.b).mul(band.mul(1.2).mul(float(1).sub(uReveal))));
@@ -360,7 +372,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
 
   function depthAt(gx: number, gy: number): number {
     if (!cpuDepth) return 0;
-    const ix = Math.round(gx / CELL + half), iy = Math.round(half - gy / CELL);
+    const ix = Math.round(gx / CELL_A + HALF_A), iy = Math.round(HALF_A - gy / CELL_A);
     if (ix < 0 || iy < 0 || ix >= N || iy >= N) return 0;
     const ox = (frameIdx % meta.cols) * N, oy = Math.floor(frameIdx / meta.cols) * N;
     return cpuDepth[(oy + iy) * atlasW + ox + ix] / 255;
