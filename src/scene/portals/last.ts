@@ -23,9 +23,8 @@ import {
 } from 'three/tsl';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import type { Portal, PortalContext, PortalFrame } from '../types';
-import { PORTAL_H, PORTAL_W } from '../types';
-import { SCENE_START, SCENE_VP, WIPES, invLerp, clamp as clampN, lerp, smoothstep as smoothN, damp, stageBlend } from '../../lib/timeline';
+import type { Stage, StageContext, StageFrame } from '../journey/types';
+import { SCENE_VP, WIPES, CORRIDOR_LEGACY, CITY_LEGACY, invLerp, lerp, smoothstep as smoothN, damp } from '../../lib/timeline';
 
 type N = any; // TSL node (loosely typed on purpose)
 
@@ -58,7 +57,7 @@ const SUN_DIR = new Vector3(-0.3215, 0.9186, 0.2297).normalize();
 
 const splatMods = (import.meta as any).glob('../splat/splat.ts') as Record<string, () => Promise<any>>;
 
-export function createLastPortal(ctx: PortalContext): Portal {
+export function createLastStages(ctx: StageContext): { corridor: Stage; city: Stage; alley: Stage } {
   const { renderer } = ctx;
   const high = ctx.quality === 'high';
   const PAIRS = high ? 32 : 20;
@@ -500,201 +499,122 @@ export function createLastPortal(ctx: PortalContext): Portal {
     }
   }
 
-  // =========================================================== composite (spec §7.3)
-  const rtOpts = { type: HalfFloatType, depthBuffer: true };
-  const rts = [new RenderTarget(1, 1, rtOpts), new RenderTarget(1, 1, rtOpts), new RenderTarget(1, 1, rtOpts)];
-  const uBlend = uniform(0);
-  const uQuadOn = uniform(0);
-  const uQ = [uniform(new Vector2()), uniform(new Vector2()), uniform(new Vector2()), uniform(new Vector2())];
-  const compMat = new MeshBasicNodeMaterial();
-  compMat.toneMapped = false;
-  compMat.colorNode = Fn(() => {
-    const p = screenUV;
-    // inside the (convex) projected quad?
-    const edge = (a: N, b: N) => {
-      const e = b.sub(a), q = p.sub(a);
-      return e.x.mul(q.y).sub(e.y.mul(q.x));
-    };
-    const e0 = edge(uQ[0], uQ[1]), e1 = edge(uQ[1], uQ[2]), e2 = edge(uQ[2], uQ[3]), e3 = edge(uQ[3], uQ[0]);
-    const allPos = step(0, e0).mul(step(0, e1)).mul(step(0, e2)).mul(step(0, e3));
-    const allNeg = step(e0, 0).mul(step(e1, 0)).mul(step(e2, 0)).mul(step(e3, 0));
-    const inQuad = max(allPos, allNeg).mul(uQuadOn);
-    // wipe: stage 1 comes down from the top of the screen
-    const s01 = step(p.y, uBlend);
-    const sel2 = max(inQuad, step(2, uBlend));
-    const c0: N = texture(rts[0].texture, p).rgb;
-    const c1: N = texture(rts[1].texture, p).rgb;
-    const c2: N = texture(rts[2].texture, p).rgb;
-    const grade = (c: N, tint: number[], pw: number, sat: number) =>
-      saturation(pow(max(c.mul(vec3(tint[0], tint[1], tint[2])).div(0.18), 0), vec3(pw)).mul(0.18), sat);
-    const g0 = agxToneMapping(grade(c0, [0.93, 1, 1.08], 0.9, 1.05), float(1));
-    const g1 = agxToneMapping(grade(c1, [1, 1, 1], 1.2, 1), float(1));
-    // spec: splat pixels skip AgX and get a neutral grade (the asset's grade is baked); slight exposure trim
-    // The VHS/camcorder post pushes saturated reds further, so the splat gets a small exposure and
-    // saturation trim to land on the reference's mean colour, and is clamped to display range.
-    const g2 = clamp(saturation(c2.mul(SPLAT_EXPOSURE), SPLAT_SAT), 0, 1);
-    let c: N = mix(g0 as N, g1 as N, s01);
-    c = mix(c, g2, sel2);
-    const vig = float(1).sub(smoothstep(0.25, 0.95, length(p.sub(0.5))).mul(0.8));
-    return vec4(c.mul(vig), 1);
-  })();
-  const quad = new QuadMesh(compMat);
-
-  // =========================================================== per-frame state
-  const state = {
-    t: 0, corridor: 0, cityTarget: 0, travel: 0, blend: 0, quadOpen: 0, splatT: 0,
-    renderCorridor: true, renderCity: false, renderSplat: false, ready: false, first: true,
-  };
-  const rel = new Matrix4();
+  // =========================================================== stages
   const tmp = new Matrix4();
+  const off = new Matrix4();
   const v3 = new Vector3();
-  const content = new Vector3();
   const p4 = new Vector4();
 
-  function relativePose(f: PortalFrame, scale: number) {
-    // inner camera in the content frame (content is pushed back by openness and panned by the parallax)
-    rel.copy(f.camera.matrixWorld);
-    const e = rel.elements;
-    e[12] -= content.x; e[13] -= content.y; e[14] -= content.z;
-    // relative to the reference "fully open" pose
-    const t = Math.tan((f.camera.fov * Math.PI) / 360);
-    const cover = Math.min(PORTAL_H / (2 * t), PORTAL_W / (2 * t * f.camera.aspect));
-    const refZ = cover * 0.8 + 1;
-    e[14] -= refZ;
-    e[12] *= scale; e[13] *= scale; e[14] *= scale;
-    return rel;
-  }
-
-  function poseCamera(cam: PerspectiveCamera, pose: Matrix4, f: PortalFrame, scale: number, fov: number) {
-    tmp.multiplyMatrices(pose, relativePose(f, scale));
+  /** pose a stage camera on its path, panned by the pointer/tilt parallax (spec §3 "pan" mode) */
+  function pose(cam: PerspectiveCamera, M: Matrix4, f: StageFrame, scale: number, fov: number, weight = 1) {
+    off.makeTranslation(f.parallax.x * 0.15 * weight * scale, -f.parallax.y * 0.075 * weight * scale, 0);
+    tmp.multiplyMatrices(M, off);
     tmp.decompose(cam.position, cam.quaternion, v3);
     cam.scale.set(1, 1, 1);
-    // spec: portal fov 60.655 → "open" fov 40, widened by the main camera's overscan factor
-    const ov = Math.tan((f.camera.fov * Math.PI) / 360) / Math.tan((110 * Math.PI) / 360);
-    cam.fov = (2 * Math.atan(Math.tan((fov * Math.PI) / 360) * ov) * 180) / Math.PI;
-    cam.aspect = f.camera.aspect;
+    cam.fov = fov;
+    cam.aspect = f.aspect;
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld(true);
   }
+  const legacy = (range: readonly [number, number], t: number) => lerp(range[0], range[1], t) / SCENE_VP;
 
-  const parallaxS = { x: 0, y: 0 };
+  const state = { travel: 0, first: true, quadOpen: 0, splatT: 0 };
 
-  function update(f: PortalFrame) {
-    const t = (f.vp - SCENE_START) / SCENE_VP; // unclamped: corridor starts before the scene does
-    state.t = t;
-    uTime.value = f.time;
-    const corridor = invLerp(CORRIDOR_A, CORRIDOR_B, t);
-    state.corridor = corridor;
-    const cityTarget = invLerp(WIPES[0].start, CITY_END, t);
-    // damped city travel (rate 5.66); big jumps (route snaps, first frame) settle at once
-    if (state.first || Math.abs(cityTarget - state.travel) > 0.35) state.travel = cityTarget;
-    else state.travel += (cityTarget - state.travel) * damp(5.66, f.dt);
-    state.first = false;
-    const x = state.travel;
-    state.blend = stageBlend(clampN(t));
-    state.quadOpen = outCubic(invLerp(0.63, 0.9, x));
-    state.splatT = invLerp(lerp(0.63, 0.9, 0.95), 1, x);
-
-    // pan parallax (spec §3 "pan" mode): d = tile progress · gate
-    const gate = t >= W0_END ? 1 : clampN((WIPES[0].start - t) / 0.04);
-    const weight = f.isPhone ? lerp(1, 2.5, state.splatT) : 1;
-    const d = f.openness * weight * gate;
-    parallaxS.x = f.parallax.x; parallaxS.y = f.parallax.y;
-    content.set(-parallaxS.x * 0.15 * d, parallaxS.y * 0.15 * 0.5 * d, -f.openness);
-
-    const fov = lerp(60.655, OPEN_FOV, f.openness);
-    // corridor
-    state.renderCorridor = state.blend < 1;
-    if (state.renderCorridor) {
-      const camZ = corridorPath(corridor);
+  const corridor: Stage = {
+    id: 'corridor',
+    scene: corridorScene,
+    camera: corridorCam,
+    background: CORRIDOR_BG,
+    ready: Promise.resolve(),
+    grade: { tint: [0.93, 1, 1.08], contrast: 0.9, saturation: 1.05, toneMap: 'agx', vignette: true },
+    update(f) {
+      uTime.value = f.time;
+      const c = invLerp(CORRIDOR_A, CORRIDOR_B, legacy(CORRIDOR_LEGACY, f.t));
+      const camZ = corridorPath(c);
       uCamZ.value = camZ;
       updateCorridorInstances(camZ);
-      poseCamera(corridorCam, corridorPose, f, 1, fov);
-    }
-    // city
-    state.renderCity = state.blend > 0 && state.blend < 2;
-    if (state.renderCity || state.quadOpen > 0) {
+      pose(corridorCam, corridorPose, f, 1, OPEN_FOV);
+    },
+  };
+
+  let quadNdc: [number, number][] | null = null;
+  const city: Stage = {
+    id: 'city',
+    scene: cityScene,
+    camera: cityCam,
+    background: skyColor,
+    ready: Promise.resolve(),
+    grade: { contrast: 1.2, toneMap: 'agx', vignette: true },
+    update(f) {
+      const target = invLerp(WIPES[0].start, CITY_END, legacy(CITY_LEGACY, f.t));
+      // damped city travel (rate 5.66); big jumps (anchor jumps, first frame) settle at once
+      if (state.first || Math.abs(target - state.travel) > 0.35) state.travel = target;
+      else state.travel += (target - state.travel) * damp(5.66, f.dt);
+      state.first = false;
+      const x = state.travel;
+      state.quadOpen = outCubic(invLerp(0.63, 0.9, x));
       const camZ = cityPath(x);
       uTravel.value = x;
       uTwist.value = (1 - Math.cos(Math.PI * invLerp(0.24, 1, x))) / 2;
       const night = smoothN(0.2, 0.68, x);
       uNight.value = smoothN(0.25, 0.75, x);
       skyColor.setRGB(lerp(0.512, 0.006, night), lerp(0.992, 0.013, night), lerp(1.6, 0.03, night));
-      (uHaze.value as Color).setRGB(lerp(0.512, 0.006, night), lerp(0.992, 0.013, night), lerp(1.6, 0.03, night));
+      (uHaze.value as Color).copy(skyColor);
       (uSun.value as Color).setRGB(lerp(0.8, 0.5, night), lerp(0.9, 0.6, night), 1).multiplyScalar(lerp(1.4, 0.5, night));
       (uAmb.value as Color).setRGB(0.3, 0.64, 1).multiplyScalar(lerp(0.2, 0.06, night));
       updateCityInstances(camZ);
-      poseCamera(cityCam, cityPose, f, 18, fov);
+      pose(cityCam, cityPose, f, 18, OPEN_FOV);
       (uCityCam.value as Vector3).copy(cityCam.position);
       uCityCam.value.z = camZ;
-    }
-    // portal quad corners (projected with the city camera) → composite uniforms
-    uQuadOn.value = state.quadOpen > 0 && state.blend < 2 ? 1 : 0;
-    if (uQuadOn.value) {
-      const grow = state.quadOpen * (1 + 1.5 * state.splatT);
+    },
+    render(r, rt) {
+      r.setRenderTarget(rt);
+      r.setClearColor(skyColor, 1);
+      r.clear();
+      r.render(cityScene, cityCam);
+      // project the portal quad with the projection actually used for this frame (compositor overscan)
+      quadNdc = null;
+      if (state.quadOpen <= 0) return;
+      const grow = state.quadOpen * (1 + 1.5 * invLerp(0.8865, 1, state.travel));
       const w = (QUAD_W / 2) * grow, h = (QUAD_H / 2) * grow;
-      const corners = [[-w, -h], [w, -h], [w, h], [-w, h]];
+      const corners = [[-w, h], [w, h], [w, -h], [-w, -h]]; // TL, TR, BR, BL
+      const out: [number, number][] = [];
       let behind = false;
-      for (let i = 0; i < 4; i++) {
-        v3.set(corners[i][0], corners[i][1], 0).applyQuaternion(quadRot).add(quadCenter);
+      for (const [cx, cy] of corners) {
+        v3.set(cx, cy, 0).applyQuaternion(quadRot).add(quadCenter);
         p4.set(v3.x, v3.y, v3.z, 1).applyMatrix4(cityCam.matrixWorldInverse).applyMatrix4(cityCam.projectionMatrix);
         if (p4.w <= 1e-3) behind = true;
         const ww = Math.max(p4.w, 1e-3);
-        (uQ[i].value as Vector2).set((p4.x / ww) * 0.5 + 0.5, 0.5 - (p4.y / ww) * 0.5); // screenUV is y-down
+        out.push([p4.x / ww, p4.y / ww]);
       }
-      if (behind) {
-        // the quad straddles the camera plane: only possible right before it fills the screen
-        if (state.quadOpen > 0.9) {
-          (uQ[0].value as Vector2).set(-1, -1); (uQ[1].value as Vector2).set(2, -1);
-          (uQ[2].value as Vector2).set(2, 2); (uQ[3].value as Vector2).set(-1, 2);
-        } else uQuadOn.value = 0;
-      }
-    }
-    // splat
-    state.renderSplat = state.blend >= 2 || uQuadOn.value > 0;
-    if (state.renderSplat) {
-      // splat frame (splat worker): hero eye at the origin looking down −z, pitched up ~9°, fov 55–62.
-      // A small dolly (0.6 m) ends exactly at the hero eye as the stage fills the screen.
+      // the quad straddles the camera plane: only possible right before it fills the screen
+      if (behind) quadNdc = state.quadOpen > 0.9 ? [[-3, 3], [3, 3], [3, -3], [-3, -3]] : null;
+      else quadNdc = out;
+    },
+    portalQuad: () => quadNdc,
+  };
+
+  const alley: Stage = {
+    id: 'alley',
+    scene: splatScene,
+    camera: splatCam,
+    background: splatScene.background as Color,
+    ready: Promise.resolve(),
+    // spec §7.3: splat pixels skip AgX; the VHS post pushes saturated reds further, so trim exposure/saturation
+    grade: { exposure: SPLAT_EXPOSURE, saturation: SPLAT_SAT, clamp: true, vignette: true },
+    update(f) {
+      // small dolly (0.6 m) that ends at the splat's hero eye as the alley settles
+      state.splatT = smoothN(-0.25, 0.25, f.t);
       splatPose.compose(new Vector3(0, 0, 0.6 * (1 - state.splatT)), SPLAT_PITCH, ONE);
-      poseCamera(splatCam, splatPose, f, 1, lerp(60.655, SPLAT_FOV, f.openness));
+      pose(splatCam, splatPose, f, 1, SPLAT_FOV, f.isPhone ? lerp(1, 2.5, state.splatT) : 1);
       if (splat) {
         splat.setOpacity(1);
         splat.update(f.dt, splatCam, f.pointer);
       }
-    }
-    uBlend.value = state.blend;
-  }
+    },
+  };
 
-  if (import.meta.env.DEV) (globalThis as any).__lastDebug = { state, uQ, uQuadOn, quadCenter, cityCam };
-
-  function render(r: WebGPURenderer, _camera: PerspectiveCamera, rt: RenderTarget) {
-    const w = rt.width, h = rt.height;
-    for (const t of rts) if (t.width !== w || t.height !== h) t.setSize(w, h);
-    const prevClear = new Color();
-    r.getClearColor(prevClear);
-    const prevAlpha = r.getClearAlpha();
-    if (state.renderCorridor) {
-      r.setRenderTarget(rts[0]);
-      r.setClearColor(CORRIDOR_BG, 1);
-      r.clear();
-      r.render(corridorScene, corridorCam);
-    }
-    if (state.renderCity) {
-      r.setRenderTarget(rts[1]);
-      r.setClearColor(skyColor, 1);
-      r.clear();
-      r.render(cityScene, cityCam);
-    }
-    if (state.renderSplat) {
-      r.setRenderTarget(rts[2]);
-      r.setClearColor(splatScene.background as Color, 1);
-      r.clear();
-      r.render(splatScene, splatCam);
-    }
-    r.setRenderTarget(rt);
-    quad.render(r);
-    r.setClearColor(prevClear, prevAlpha);
-  }
+  if (import.meta.env.DEV) (globalThis as any).__lastDebug = { state, quadCenter, cityCam, getQuad: () => quadNdc };
 
   // =========================================================== ready
   const ready = (async () => {
@@ -703,27 +623,8 @@ export function createLastPortal(ctx: PortalContext): Portal {
     updateCityInstances(0);
     updateCorridorInstances(0);
     void loadSplat();
-    // warm every stage + the composite so the first wipe doesn't hitch
-    try {
-      await renderer.compileAsync(cityScene, cityCam);
-      await renderer.compileAsync(splatScene, splatCam);
-      await renderer.compileAsync(corridorScene, corridorCam);
-    } catch (e) {
-      console.warn('last portal warm-up', e);
-    }
-    state.ready = true;
   })();
+  corridor.ready = city.ready = alley.ready = ready;
 
-  return {
-    scene: corridorScene,
-    background: CORRIDOR_BG,
-    ready,
-    update,
-    render,
-    dispose() {
-      for (const t of rts) t.dispose();
-      (quad.material as MeshBasicNodeMaterial).dispose();
-    },
-  };
+  return { corridor, city, alley };
 }
-

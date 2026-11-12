@@ -46,6 +46,12 @@ export interface Stage {
    * is revealed during a 'portal' transition (like the city's quad revealing the alley).
    */
   portalQuad?(): [number, number][] | null;
+  /**
+   * optional colour treatment the compositor applies when sampling this stage's target (core extension).
+   * Default: none, the target is shown as-is (linear; the post converts to sRGB). Worlds that light with
+   * physical intensities usually want { toneMap: 'agx' }.
+   */
+  grade?: StageGrade;
   /** optional click handling in NDC; return true if consumed */
   onClick?(x: number, y: number): boolean;
   dispose?(): void;
@@ -75,3 +81,16 @@ export interface ProjectWorldContext extends StageContext {
 
 /** A project world module exports: createWorld(ctx: ProjectWorldContext): Stage */
 export type CreateWorld = (ctx: ProjectWorldContext) => Stage;
+
+/** compositor-side grade: c = saturation(pow(rgb·exposure·tint / .18, contrast)·.18, saturation) → tone map → vignette */
+export interface StageGrade {
+  exposure?: number;
+  tint?: [number, number, number];
+  contrast?: number;
+  saturation?: number;
+  toneMap?: 'agx' | 'none';
+  /** spec §7.3 vignette 1 - .8·smoothstep(.25,.95,|uv-.5|) */
+  vignette?: boolean;
+  /** clamp to 0..1 after grading */
+  clamp?: boolean;
+}

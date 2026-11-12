@@ -1,8 +1,11 @@
 import Lenis from 'lenis';
 import Snap from 'lenis/snap';
 import { createTimeline } from 'animejs';
-import { $route, $preloader, $scrollCommand, scroll, overlays, tilt, type Route } from '../lib/stores';
-import { PROJECT_COUNT, TOTAL_VP, SNAP_VP, SCENE_START, SCENE_VP, sceneProgress, stageBlend, clamp, routeToVp, damp } from '../lib/timeline';
+import { $route, $preloader, scroll, tilt, type Route } from '../lib/stores';
+import {
+  TOTAL_VP, SNAP_VP, STAGES, HOLD, ANCHOR_VP, journeyAt, stageLocal, stageIndex, worldStage, holdCenterVp, clamp, damp,
+  smoothstep, invLerp, PROJECT_COUNT, TRANSITIONS, type StageDef,
+} from '../lib/timeline';
 import { scramble, initHoverScramble } from './scramble';
 import { initMenu } from './menu';
 import { initTilt } from './tilt';
@@ -15,7 +18,6 @@ const scroller = $('[data-page-scroll]');
 const phoneMq = matchMedia('(max-width: 47.99rem), (max-aspect-ratio: 4/3)');
 const reducedMq = matchMedia('(prefers-reduced-motion: reduce)');
 
-// keyboard-mode focus styles
 addEventListener('keydown', (e) => e.key === 'Tab' && document.documentElement.classList.add('is-tabbing'));
 addEventListener('pointerdown', () => document.documentElement.classList.remove('is-tabbing'));
 
@@ -23,13 +25,7 @@ initHoverScramble();
 initMenu();
 
 // ---------------------------------------------------------------- Lenis + snap
-const lenis = new Lenis({
-  wrapper: scroller,
-  content: $('[data-scroll-length]'),
-  autoRaf: false,
-  lerp: 0.08,
-  touchMultiplier: 1.5,
-});
+const lenis = new Lenis({ wrapper: scroller, content: $('[data-scroll-length]'), autoRaf: false, lerp: 0.08, touchMultiplier: 1.5 });
 lenis.stop();
 
 const snap = new Snap(lenis, { type: 'proximity', debounce: 500, distanceThreshold: '50%' });
@@ -41,35 +37,39 @@ function setSnap(on: boolean) {
   snapRemovers.forEach((r) => r());
   snapRemovers = [];
   if (on) {
-    const vh = scroller.clientHeight;
-    snapRemovers = SNAP_VP.map((v) => snap.add(v * vh));
+    snapRemovers = SNAP_VP.map((v) => snap.add((v / TOTAL_VP) * lenis.limit));
   }
 }
+addEventListener('resize', () => { if (snapEnabled) { snapEnabled = false; setSnap(true); } });
 
 let programmaticUntil = 0;
 function scrollToVp(vp: number, eased = false) {
   programmaticUntil = performance.now() + (eased ? 900 : 1200) + 100;
   const to = (vp / TOTAL_VP) * lenis.limit;
   if (eased) {
-    lenis.scrollTo(to, {
-      duration: 0.9,
-      force: true,
-      lock: true,
-      easing: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
-    });
+    lenis.scrollTo(to, { duration: 0.9, force: true, lock: true, easing: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2) });
   } else lenis.scrollTo(to, { duration: 1.2, force: true });
 }
-$scrollCommand.subscribe((c) => c && scrollToVp(c.to, c.eased));
 
-// ---------------------------------------------------------------- body classes
-function syncBody() {
-  const { route } = $route.get();
-  body.classList.toggle('is--intro', route === 'intro');
-  body.classList.toggle('is--project', !!route?.startsWith('project'));
-  body.classList.toggle('is--last', route === 'last');
-  body.classList.toggle('is--carousel', route === null);
+// ---------------------------------------------------------------- route + body classes
+let lastProject = -1;
+function setRoute(route: Route, overlay: 'hidden' | 'shown' | 'leaving') {
+  const cur = $route.get();
+  const proj = route?.startsWith('project') ? Number(route.split('-')[1]) : -1;
+  const slide = proj >= 0 && proj !== lastProject ? 0 : cur.slide;
+  if (proj >= 0) lastProject = proj;
+  if (cur.route === route && cur.overlay === overlay && cur.slide === slide) return;
+  $route.set({ ...cur, route, overlay, slide, entered: overlay === 'shown' });
 }
-$route.subscribe(syncBody);
+$route.subscribe(({ route }) => {
+  body.classList.toggle('is--intro', route === 'intro');
+  body.classList.toggle('is--about', route === 'about');
+  body.classList.toggle('is--who', route === 'who');
+  body.classList.toggle('is--project', !!route?.startsWith('project'));
+  body.classList.toggle('is--contact', route === 'contact');
+  // the about/who/contact overlays share the ".last" section
+  body.classList.toggle('is--last', route === 'about' || route === 'who' || route === 'contact');
+});
 
 // ---------------------------------------------------------------- intro text
 const introSpans = $$('[data-intro] [data-scramble-text]');
@@ -81,127 +81,164 @@ $route.subscribe(({ route, overlay }) => {
   if (state === 'shown') {
     introSpans.forEach((el) => {
       el.style.opacity = '';
-      scramble(el, { duration: 700, override: ' ', settleRate: 15 });
+      scramble(el, { duration: 700, override: ' ', settleRate: 15 });
     });
   } else if (state === 'leaving') {
     introSpans.forEach((el) => el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, fill: 'forwards' }));
   }
 });
 
-// ---------------------------------------------------------------- project panels
+// ---------------------------------------------------------------- project panels + slides
 const panels = $$('[data-project-panel]');
-$route.subscribe(({ route, overlay, slide, entered }) => {
+const slideCount = (i: number) => $$('[data-thumb]', panels[i]).length || 1;
+$route.subscribe(({ route, overlay, slide }) => {
   panels.forEach((p, i) => {
     const on = route === `project-${i}` && overlay === 'shown';
     p.toggleAttribute('data-shown', on);
+    p.inert = !on;
     $$<HTMLButtonElement>('[data-thumb]', p).forEach((b, s) => {
       b.toggleAttribute('data-slide-active', s === slide);
-      b.disabled = !(on && entered);
+      b.disabled = !on;
     });
     const num = $('[data-project-slide-number]', p);
     if (num) num.textContent = String(slide + 1).padStart(2, '0');
   });
 });
-panels.forEach((p) =>
-  $$<HTMLButtonElement>('[data-thumb]', p).forEach((b, s) => b.addEventListener('click', () => $route.setKey('slide', s))),
-);
-
-export function openProject(i: number) {
-  $route.set({ ...$route.get(), route: `project-${i}` as Route, overlay: 'shown', slide: 0, entered: false });
-}
-export function closeProject() {
+panels.forEach((p) => $$<HTMLButtonElement>('[data-thumb]', p).forEach((b, s) => b.addEventListener('click', () => $route.setKey('slide', s))));
+const currentProject = () => {
   const r = $route.get().route;
-  if (!r?.startsWith('project')) return;
-  $route.set({ ...$route.get(), route: null, overlay: 'hidden', entered: false });
+  return r?.startsWith('project') ? Number(r.split('-')[1]) : -1;
+};
+function stepSlide(d: number) {
+  const i = currentProject();
+  if (i < 0 || $route.get().overlay !== 'shown') return;
+  const n = slideCount(i);
+  $route.setKey('slide', ((($route.get().slide + d) % n) + n) % n);
 }
-$('[data-close-button]').addEventListener('click', closeProject);
-$$('[data-open-project]').forEach((b) => b.addEventListener('click', () => openProject(Number(b.dataset.openProject))));
 addEventListener('keydown', (e) => {
-  const { route, slide } = $route.get();
-  if (!route?.startsWith('project')) return;
-  const n = $$('[data-thumb]', panels[Number(route.split('-')[1])]).length;
-  if (e.key === 'Escape') closeProject();
-  if (e.key === 'ArrowRight') $route.setKey('slide', (slide + 1) % n);
-  if (e.key === 'ArrowLeft') $route.setKey('slide', (slide - 1 + n) % n);
+  if (e.key === 'ArrowRight') stepSlide(1);
+  if (e.key === 'ArrowLeft') stepSlide(-1);
 });
+// horizontal drag on the scene switches slides (vertical drags keep scrolling)
+{
+  let sx = 0, sy = 0, down = false;
+  const stage = $('[data-stage]');
+  stage.addEventListener('pointerdown', (e) => { down = true; sx = e.clientX; sy = e.clientY; });
+  stage.addEventListener('pointerup', (e) => {
+    if (!down) return;
+    down = false;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5 && !(e.target as Element).closest('a, button')) stepSlide(dx < 0 ? 1 : -1);
+  });
+}
 
 // ---------------------------------------------------------------- selected work nav
 const workList = $('.work__list');
-$$('[data-work-item]').forEach((b, i) => b.addEventListener('click', () => scrollToVp(i + 1, true)));
-$('[data-scroll-back]').addEventListener('click', () => scrollToVp(SCENE_START + SCENE_VP * 0.79, true));
+const workItems = $$('[data-work-item]');
+workItems.forEach((b, i) => b.addEventListener('click', () => scrollToVp(holdCenterVp(worldStage(i)), true)));
+$('[data-scroll-back]')?.addEventListener('click', () => scrollToVp(holdCenterVp(worldStage(PROJECT_COUNT - 1)), true));
 
 // in-page anchors drive the scroll timeline (the overlays are fixed, so native hash jumps do nothing)
-const ANCHORS: Record<string, number> = { '/': 0, '/#about': SCENE_START + 0.3, '/#contact': TOTAL_VP };
 document.addEventListener('click', (e) => {
   const a = (e.target as Element).closest?.('a[href]') as HTMLAnchorElement | null;
   if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
-  const to = ANCHORS[a.getAttribute('href') ?? ''];
+  const to = ANCHOR_VP[a.getAttribute('href') ?? ''];
   if (to === undefined) return;
   e.preventDefault();
-  closeProject();
+  $('[data-menu-trigger]')?.getAttribute('aria-expanded') === 'true' && $<HTMLButtonElement>('[data-menu-trigger]').click();
   scrollToVp(to);
 });
 
-// ---------------------------------------------------------------- last section
-const lastStages = $$('[data-last-stage]');
-const lastBlocks = $$('[data-last-scroll]');
+// ---------------------------------------------------------------- about / memories / who text blocks
+type TextBlock = { el: HTMLElement; stage: number; anchor: number };
+const lastSection = $('[data-last]');
 const backdropFade = $('[data-last-backdrop-fade]');
-const talkParallax = $('[data-last-parallax]');
-const talkTl = createTimeline({ autoplay: false });
-talkTl.add($$('[data-talk-reveal]'), { opacity: [0, 1], duration: 900, delay: (_: unknown, i: number) => i * 70, ease: 'outCubic' }, 0);
-
-function updateLast(vp: number) {
-  const t = sceneProgress(vp);
-  const blend = stageBlend(t);
-  overlays.stageBlend = blend;
-  const vh = scroller.clientHeight;
-  // which stage is active: 0 (about) 1 (who) 2 (talk)
-  const active = blend >= 2 ? 2 : blend >= 1 ? 1 : 0;
-  lastStages.forEach((s, i) => s.toggleAttribute('data-active', i === active || (i < 2 && blend > i - 1 && blend < i + 1 && active < 2)));
-  // text blocks: wipe via clip-path, move at 0.5x scroll
-  const scrolled = (vp - SCENE_START);
-  const anchors = [0.024, 2.649];
-  lastBlocks.forEach((b, i) => {
-    const top = clamp(blend - (i - 1));
-    const bottom = clamp(blend - i);
-    b.style.clipPath = `inset(${(1 - top) * 100}% 0 ${bottom * 100}% 0)`;
-    const y = -(scrolled - anchors[i]) * 0.5 * vh;
-    b.style.translate = `0 ${y}px`;
-    if (i === 0) {
-      const r = b.getBoundingClientRect();
-      backdropFade.toggleAttribute('data-past-header', r.bottom < 60 || blend >= 1.5);
-    }
-  });
-  // talk reveal is scrubbed by the splat stage reveal
-  // reference: hidden at vp14 (t≈.655), fully shown by vp15 (t≈.74)
-  const talkP = clamp((t - 0.665) / 0.07);
-  overlays.talkOpacity = talkP;
-  talkTl.seek(talkP * talkTl.duration);
-  if (overlays.lastParallax) talkParallax.style.transform = overlays.lastParallax;
+const blocks: TextBlock[] = [];
+function addBlock(el: HTMLElement, stageId: string, anchorOffset: number) {
+  const i = stageIndex(stageId);
+  if (i < 0) return;
+  blocks.push({ el, stage: i, anchor: STAGES[i].start + anchorOffset });
+}
+{
+  const [about, who] = $$('[data-last-scroll]');
+  addBlock(about, 'corridor', 1.224);
+  addBlock(who, 'city', 1.009);
+}
+// memory captions (module may not exist yet)
+const memoryCopy = (import.meta as any).glob('../scene/memories/index.ts') as Record<string, () => Promise<any>>;
+for (const load of Object.values(memoryCopy)) {
+  load()
+    .then((m) => {
+      const copy: { id: string; kicker?: string; title?: string; body?: string }[] = m.MEMORY_COPY ?? [];
+      for (const c of copy) {
+        const stageEl = document.createElement('div');
+        stageEl.className = 'last-stage';
+        stageEl.setAttribute('data-memory-stage', c.id);
+        stageEl.innerHTML = `<div class="last-block" data-memory-block>
+          <div class="last-rail" aria-hidden="true"><svg width="6" height="5" viewBox="0 0 5.77 5"><path d="M2.885 0 5.77 5H0z" fill="#fff"/></svg><span class="line"></span><svg width="6" height="5" viewBox="0 0 5.77 5"><path d="M2.885 5 0 0h5.77z" fill="#fff"/></svg></div>
+          <div class="last-text"><p class="h"></p><p class="b1"></p><p class="b2"></p></div></div>`;
+        const [h, b1, b2] = $$('.last-text p', stageEl);
+        h.textContent = c.kicker ?? '';
+        b1.textContent = c.title ?? '';
+        b2.textContent = c.body ?? '';
+        if (!c.body) b2.remove();
+        lastSection.insertBefore(stageEl, $('[data-last-stage="2"]'));
+        const s = STAGES[stageIndex(c.id)];
+        if (s) addBlock($('.last-block', stageEl), c.id, s.span * 0.3);
+      }
+    })
+    .catch((e) => console.warn('[journey] memory captions unavailable', e));
 }
 
-// ---------------------------------------------------------------- project labels (matrix3d from renderer)
-const labels = $$('[data-project-labels] > li');
-function updateLabels() {
-  const m = overlays.labelMatrices;
-  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-  labels.forEach((li, i) => {
-    const hidden = overlays.labelHidden[i];
-    li.toggleAttribute('data-hidden', hidden);
-    li.inert = hidden;
-    li.toggleAttribute('data-hovered', overlays.hoveredIndex === i);
-    if (!hidden) {
-      const a = Array.from(m.subarray(i * 16, i * 16 + 16)).map((v) => v.toFixed(6)).join(',');
-      li.style.transform = `matrix3d(${a}) scale(${16 / rem}) translate(-50%, -50%)`;
-    }
-  });
-  $('[data-stage]').toggleAttribute('data-boundary-clickable', overlays.boundaryClickable);
+function updateBlocks(vp: number, vh: number) {
+  let anyVisible = false;
+  for (const b of blocks) {
+    const l = stageLocal(b.stage, vp);
+    const tin = TRANSITIONS[b.stage - 1], tout = TRANSITIONS[b.stage];
+    const visible = l.enter > 0 && l.exit < 1;
+    const host = b.el.parentElement as HTMLElement;
+    host.toggleAttribute('data-active', visible);
+    if (!visible) continue;
+    anyVisible = true;
+    // wipes clip the text with the picture; other transitions fade it
+    const top = tout?.kind === 'wipe' ? l.exit : 0;
+    const bottom = tin?.kind === 'wipe' ? 1 - l.enter : 0;
+    b.el.style.clipPath = `inset(${top * 100}% 0 ${bottom * 100}% 0)`;
+    const fadeIn = tin?.kind === 'wipe' ? 1 : smoothstep(0.55, 0.95, l.enter);
+    const fadeOut = tout?.kind === 'wipe' ? 1 : 1 - smoothstep(0.05, 0.45, l.exit);
+    b.el.style.opacity = String(fadeIn * fadeOut);
+    b.el.style.translate = `0 ${-(vp - b.anchor) * 0.5 * vh}px`;
+  }
+  backdropFade.toggleAttribute('data-past-header', !anyVisible);
+}
+
+// ---------------------------------------------------------------- contact CTA (alley)
+const alleyIndex = stageIndex('alley');
+const contactStage = $('[data-last-stage="2"]');
+const talkTl = createTimeline({ autoplay: false });
+talkTl.add($$('[data-talk-reveal]'), { opacity: [0, 1], duration: 900, delay: (_: unknown, i: number) => i * 70, ease: 'outCubic' }, 0);
+function updateContact(vp: number) {
+  const l = stageLocal(alleyIndex, vp);
+  contactStage.toggleAttribute('data-active', l.enter > 0.5);
+  const p = clamp(invLerp(0.02, 0.14, l.t));
+  talkTl.seek(p * talkTl.duration);
 }
 
 // ---------------------------------------------------------------- frame loop
 let renderer: { frame: (dt: number, t: number) => void; resize: () => void } | null = null;
 let last = performance.now();
 let lastScroll = 0;
+function routeFor(vp: number): [Route, 'hidden' | 'shown' | 'leaving'] {
+  const js = journeyAt(vp);
+  const s: StageDef = STAGES[js.current];
+  const l = stageLocal(js.current, vp);
+  if (s.kind === 'world') {
+    const hold = l.t >= HOLD[0] - 0.06 && l.t <= HOLD[1] + 0.06;
+    return [s.route as Route, hold ? 'shown' : 'leaving'];
+  }
+  if (s.kind === 'intro') return ['intro', l.exit < 0.25 ? 'shown' : 'leaving'];
+  return [s.route as Route, 'shown'];
+}
 function loop(now: number) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - last) / 1000);
@@ -211,7 +248,6 @@ function loop(now: number) {
   const vh = scroller.clientHeight;
   scroll.limit = limit;
   scroll.isPhone = phoneMq.matches;
-  // native touch scroll on phones is extra-damped
   const target = lenis.scroll / limit;
   scroll.progress = scroll.isPhone && !lenis.isSmooth ? scroll.progress + (target - scroll.progress) * damp(1 / 0.07, dt) : target;
   scroll.vp = scroll.progress * TOTAL_VP;
@@ -219,18 +255,21 @@ function loop(now: number) {
   lastScroll = lenis.scroll;
   scroll.isProgrammatic = now < programmaticUntil;
 
-  const { route } = $route.get();
-  // user scroll closes an open project
-  if (route?.startsWith('project') && Math.abs(scroll.velocity) > 0.05 && !scroll.isProgrammatic) closeProject();
-  setSnap(!scroll.isPhone && !route?.startsWith('project') && $preloader.get().isGateOpen && scroll.vp < SCENE_START + 0.05 + (SNAP_VP[SNAP_VP.length - 1] - SCENE_START));
-
-  // work nav
-  workList.style.setProperty('--active-index', String(clamp(Math.ceil(scroll.vp - 0.5), 1, PROJECT_COUNT) - 1));
-  $$('[data-work-item]').forEach((b, i) => b.toggleAttribute('aria-current', i === clamp(Math.ceil(scroll.vp - 0.5), 1, PROJECT_COUNT) - 1));
+  const gate = $preloader.get().isGateOpen;
+  setSnap(!scroll.isPhone && gate);
+  if (gate) {
+    const [r, o] = routeFor(scroll.vp);
+    setRoute(r, o);
+  }
+  const proj = currentProject();
+  if (proj >= 0) {
+    workList.style.setProperty('--active-index', String(proj));
+    workItems.forEach((b, i) => b.toggleAttribute('aria-current', i === proj));
+  }
 
   renderer?.frame(dt, now / 1000);
-  updateLabels();
-  if (body.classList.contains('is--last')) updateLast(scroll.vp);
+  updateBlocks(scroll.vp, vh);
+  updateContact(scroll.vp);
 }
 requestAnimationFrame(loop);
 
@@ -238,7 +277,6 @@ requestAnimationFrame(loop);
 const pre = $('[data-preloader]');
 const header = $('[data-header]');
 const intro = $('[data-intro]');
-const labelsUl = $('[data-project-labels]');
 
 function openGate() {
   $preloader.setKey('isGateOpen', true);
@@ -248,22 +286,15 @@ function openGate() {
   body.classList.remove('is--loading');
   header.setAttribute('data-ready', '');
   intro.setAttribute('data-ready', '');
-  labelsUl.setAttribute('data-ready', '');
   lenis.start();
   scroller.focus({ preventScroll: true });
-  $route.set({ ...$route.get(), route: 'intro', overlay: 'shown' });
 }
 
 async function boot() {
-  const fallback = setTimeout(() => $preloader.set({ ...$preloader.get(), isReady: true, isWarm: true }), 20000);
+  const fallback = setTimeout(() => $preloader.set({ ...$preloader.get(), isReady: true, isWarm: true }), 30000);
   try {
     const { createApp } = await import('../scene/app');
-    renderer = await createApp($('#app'), {
-      onProgress: (p) => $preloader.setKey('progress', p),
-      openProject,
-      scrollToVp,
-      setRoute: (r, o) => setScrollRoute(r, o),
-    });
+    renderer = await createApp($('#app'), { onProgress: (p) => $preloader.setKey('progress', p) });
     addEventListener('resize', () => renderer?.resize());
   } catch (err) {
     console.error('[lab] renderer failed', err);
@@ -288,15 +319,5 @@ function tryGate() {
 $preloader.subscribe(() => tryGate());
 boot();
 
-// route state from scroll (only when not inside a project)
-let lastRouteKey = '';
-export function setScrollRoute(next: Route, overlay: 'hidden' | 'shown' | 'leaving') {
-  const cur = $route.get();
-  if (cur.route?.startsWith('project')) return;
-  const key = `${next}|${overlay}`;
-  if (key === lastRouteKey) return;
-  lastRouteKey = key;
-  $route.set({ ...cur, route: next, overlay });
-}
-(window as any).__lab = { snap, lenis, $route, scroll, overlays, routeToVp, scrollToVp, SCENE_VP };
+(window as any).__lab = { snap, lenis, $route, scroll, scrollToVp, STAGES, TRANSITIONS, TOTAL_VP };
 if (reducedMq.matches) body.classList.add('is--reduced');

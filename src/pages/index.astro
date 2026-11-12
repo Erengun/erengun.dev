@@ -42,13 +42,6 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
         <div class="perspective-root">
           <div class="scene-tilt">
             <div id="app"></div>
-            <ul class="project-labels" data-project-labels>
-              {PROJECTS.map((p, i) => (
-                <li data-hidden data-index={i}>
-                  <button data-open-project={i}><span class="t">{p.title}</span><span class="open">Open project</span></button>
-                </li>
-              ))}
-            </ul>
           </div>
         </div>
 
@@ -152,7 +145,6 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
       </div>
     </div>
 
-    <button class="close-button" data-close-button>&gt; close &lt;</button>
     <div class="menu-backdrop" data-menu-backdrop></div>
 
     <header class="header" data-header>

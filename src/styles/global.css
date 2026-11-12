@@ -48,8 +48,8 @@ html {
 body {
   height: 100%;
   line-height: 1.5;
-  background: #fff;
-  color: #000;
+  background: var(--c-off-black);
+  color: #fff;
   font-family: var(--font-doto);
   user-select: none;
   -webkit-user-select: none;
@@ -57,7 +57,6 @@ body {
   hyphens: none;
   transition: background-color .5s var(--ease-out);
 }
-body.is--intro, body.is--project, body.is--last { background: var(--c-off-black); }
 body.is--page { background: #000; color: #fff; }
 a { color: inherit; text-decoration: none; }
 button { font: inherit; letter-spacing: inherit; line-height: inherit; color: inherit; background: none; border: 0; cursor: pointer; text-transform: inherit; }
@@ -107,7 +106,6 @@ html.is-tabbing :is(a, button, input):focus-visible {
 }
 #app { position: absolute; inset: 0; z-index: 0; }
 #app canvas { display: block; width: 100%; height: 100%; touch-action: pan-y; }
-.scene-tilt:has(.project-labels > [data-hovered]),
 .stage[data-boundary-clickable] .scene-tilt { cursor: pointer; }
 .scroll-length { height: calc(var(--scroll-viewports) * 100svh); pointer-events: none; }
 
@@ -266,40 +264,21 @@ body.is--intro .intro__inner { visibility: visible; opacity: 1; }
 
 /* ---------- selected work nav ---------- */
 .work {
-  position: fixed; inset-inline: 0; top: 49.2%; z-index: 50; color: #000; text-transform: uppercase; display: none;
+  position: fixed; inset-inline: 0; top: 40%; z-index: 50; color: #fff; text-transform: uppercase; display: none; text-shadow: var(--shadow-legible);
   visibility: hidden; opacity: 0; transition: opacity var(--dur-reveal) var(--ease-reveal), visibility var(--dur-reveal) var(--ease-reveal);
 }
 @media (min-width: 64rem) and (min-aspect-ratio: 16/9), (min-width: 80rem) and (min-aspect-ratio: 38/25) { .work { display: block; } }
-body.is--carousel:not(.is--loading) .work { visibility: visible; opacity: 1; }
+body.is--project:not(.is--loading) .work { visibility: visible; opacity: 1; }
 .work__title { font-family: var(--font-offbit); font-size: 1.75rem; line-height: .72; letter-spacing: -.02em; margin-bottom: .4375rem; }
 .work__list { position: relative; font-size: max(14px, .75rem); line-height: 1.25; font-weight: 800; letter-spacing: -.04em; }
-.work__list button { display: block; color: rgb(0 0 0 / .7); text-transform: uppercase; text-align: left; transition: transform var(--dur-menu) var(--ease-menu), color .15s; }
-.work__list button:hover, .work__list button[aria-current] { color: #000; }
+.work__list button { display: block; color: rgb(255 255 255 / .55); text-transform: uppercase; text-align: left; transition: transform var(--dur-menu) var(--ease-menu), color .15s; }
+.work__list button:hover, .work__list button[aria-current] { color: #fff; }
 .work__list button[aria-current] { transform: translateX(.5625rem); }
 .work__dot {
   position: absolute; left: 0; top: 0; height: calc(100% / var(--n, 4)); display: flex; align-items: center;
   transform: translateY(calc(var(--active-index, 0) * 100%)); transition: transform var(--dur-menu) var(--ease-menu);
 }
-.work__dot i { width: 4px; height: 4px; background: #000; border-radius: 9999px; }
-
-/* ---------- project labels (DOM hit targets placed by the renderer) ---------- */
-.project-labels { position: absolute; inset: 0; z-index: 1; visibility: hidden; pointer-events: none; }
-.project-labels[data-ready] { visibility: visible; }
-.project-labels li {
-  position: absolute; top: 50%; left: 50%; width: max-content; max-width: 29rem; transform-origin: top left; will-change: transform;
-  transition: opacity var(--dur-reveal) var(--ease-reveal);
-}
-.project-labels li[data-hidden] { opacity: 0; }
-.project-labels button {
-  display: grid; text-align: left; font-size: 1.5rem; line-height: 1.1; letter-spacing: -.02em; font-weight: 900; color: #fff;
-  text-transform: uppercase; pointer-events: auto;
-}
-.project-labels .open { display: none; }
-.project-labels button:focus-visible .open { display: block; }
-@media (hover: hover) and (pointer: fine) { .project-labels .t { visibility: hidden; } }
-@media (max-width: 48rem) {
-  .project-labels button { font-size: 1.5925rem; -webkit-text-stroke: .5px currentColor; text-shadow: 0 .0625rem .375rem rgb(0 0 0 / .5); }
-}
+.work__dot i { width: 4px; height: 4px; background: #fff; border-radius: 9999px; }
 
 /* ---------- project panels ---------- */
 .project { text-shadow: var(--shadow-legible); }
@@ -342,14 +321,6 @@ body.is--carousel:not(.is--loading) .work { visibility: visible; opacity: 1; }
   .pp-thumbs { display: none; }
 }
 @media (min-width: 64rem) { .pp-bottom { display: contents; } }
-.close-button {
-  position: fixed; top: 1.5rem; left: 50%; transform: translateX(-50%); z-index: 1000; font-size: .875rem; color: #fff;
-  text-transform: uppercase; mix-blend-mode: difference; visibility: hidden; opacity: 0; transition: all 150ms var(--ease-out); font-weight: 700;
-}
-body.is--project .close-button { visibility: visible; opacity: 1; }
-:root:has(.menu[data-open]) .close-button { visibility: hidden; opacity: 0; }
-@media (max-width: 63.99rem) { .close-button { top: calc(4rem + var(--safe-t)); } }
-
 /* ---------- last section ---------- */
 .last { visibility: hidden; opacity: 0; transition: opacity 150ms var(--ease-out), visibility 150ms var(--ease-out); }
 body.is--last .last { visibility: visible; opacity: 1; }

@@ -1,7 +1,7 @@
 import { atom, map } from 'nanostores';
 import { PROJECTS } from './content';
 
-export type Route = null | 'intro' | 'last' | `project-${number}`;
+export type Route = null | 'intro' | 'about' | 'who' | 'contact' | 'last' | `project-${number}`;
 
 export const $route = map<{
   route: Route;

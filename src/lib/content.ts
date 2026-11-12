@@ -17,10 +17,10 @@ export const SOCIALS = [
 export const MENU = [
   { label: 'home', href: '/' },
   { label: 'about', href: '/#about' },
+  { label: 'work', href: '/#work' },
   { label: 'contact', href: '/#contact' },
   { label: 'blog', href: 'https://erengun.dev/blog' },
   { label: 'projects', href: 'https://erengun.dev/projects' },
-  { label: 'work', href: 'https://erengun.dev/work' },
 ];
 
 export type Project = {
