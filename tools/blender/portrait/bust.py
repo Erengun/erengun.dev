@@ -1,6 +1,6 @@
 """
-Glitch-portrait source asset: an original stylised bust sculpted from ellipsoid primitives
-(voxel remesh union + boolean eye sockets + smoothing), animated with a slow
+Glitch-portrait source asset: an original generic bust sculpted from ellipsoid primitives
+(voxel remesh union + smoothing), posed in a 3/4 view, animated with a slow
 head turn + breathing, rendered as colour + normalized depth (near = bright) frames.
 
   blender -b -P tools/blender/portrait/bust.py -- <out_dir> [--preview] [--res 151] [--frames 54]
@@ -70,75 +70,56 @@ def sculpt(ob, voxel, smooth_iter, cutters=None):
 
 X = lambda c, r: [((c[0], c[1], c[2]), r), ((-c[0], c[1], c[2]), r)]
 # Coordinates: metres, camera looks along +Y, face points to -Y. Head local origin = neck pivot.
+# A generic adult head: fuller face/cheeks, shallow eye areas with closed lids (no carved sockets).
 head_parts = [
-    ((0, 0.010, 0.150), (0.078, 0.098, 0.095)),   # cranium
-    ((0, -0.025, 0.075), (0.062, 0.070, 0.080)),  # face mass
-    ((0, -0.030, 0.035), (0.058, 0.060, 0.045)),  # jaw
-    ((0, -0.068, 0.012), (0.026, 0.022, 0.022)),  # chin
-    ((0, -0.078, 0.128), (0.058, 0.020, 0.016)),  # brow ridge
-    ((0, -0.090, 0.100), (0.011, 0.016, 0.030)),  # nose bridge
-    ((0, -0.104, 0.072), (0.016, 0.017, 0.015)),  # nose tip
-    ((0, -0.089, 0.046), (0.022, 0.012, 0.008)),  # upper lip
-    ((0, -0.085, 0.031), (0.020, 0.012, 0.008)),  # lower lip
-    ((0, 0.012, -0.050), (0.056, 0.056, 0.100)),  # neck
-    ((0, -0.035, 0.205), (0.070, 0.060, 0.040)),  # hair quiff
-    ((0, 0.015, 0.200), (0.085, 0.100, 0.070)),   # hair top
-] + X((0.045, -0.055, 0.090), (0.026, 0.025, 0.022)) \
-  + X((0.013, -0.093, 0.067), (0.010, 0.012, 0.009)) \
-  + X((0.079, 0.005, 0.100), (0.012, 0.022, 0.032)) \
-  + X((0.060, 0.000, 0.170), (0.030, 0.080, 0.060))
+    ((0, 0.015, 0.150), (0.077, 0.097, 0.092)),   # cranium
+    ((0, -0.055, 0.160), (0.062, 0.045, 0.052)),  # forehead
+    ((0, -0.030, 0.085), (0.066, 0.068, 0.080)),  # face mass
+    ((0, -0.025, 0.032), (0.060, 0.062, 0.044)),  # jaw
+    ((0, -0.068, 0.013), (0.025, 0.021, 0.021)),  # chin
+    ((0, -0.079, 0.127), (0.055, 0.017, 0.013)),  # brow ridge (soft)
+    ((0, -0.087, 0.100), (0.010, 0.014, 0.028)),  # nose bridge
+    ((0, -0.099, 0.073), (0.014, 0.015, 0.013)),  # nose tip
+    ((0, -0.087, 0.046), (0.021, 0.010, 0.007)),  # upper lip
+    ((0, -0.084, 0.033), (0.019, 0.011, 0.007)),  # lower lip
+    ((0, 0.018, -0.050), (0.056, 0.056, 0.100)),  # neck
+] + X((0.042, -0.050, 0.075), (0.032, 0.032, 0.035)) \
+  + X((0.048, -0.008, 0.032), (0.022, 0.032, 0.030)) \
+  + X((0.012, -0.089, 0.069), (0.009, 0.010, 0.008)) \
+  + X((0.032, -0.074, 0.107), (0.017, 0.012, 0.010)) \
+  + X((0.078, 0.008, 0.100), (0.012, 0.022, 0.030))
 head = ellipsoids('Head', head_parts)
-cut = ellipsoids('Sockets', X((0.033, -0.095, 0.108), (0.020, 0.018, 0.017)))
-sculpt(head, 0.0035, 6, cut)
-bpy.data.objects.remove(cut)
-eyes = ellipsoids('Eyes', X((0.033, -0.071, 0.106), (0.015, 0.015, 0.015)))
-eyes.data.shade_smooth()
+sculpt(head, 0.003, 10)
+
+hair_parts = [
+    ((0, 0.012, 0.192), (0.084, 0.104, 0.074)),   # top
+    ((0, -0.040, 0.200), (0.066, 0.050, 0.036)),  # front quiff
+    ((0, 0.070, 0.130), (0.072, 0.050, 0.085)),   # back
+] + X((0.066, 0.012, 0.160), (0.024, 0.080, 0.058))
+hair = ellipsoids('Hair', hair_parts)
+sculpt(hair, 0.004, 14)
 
 body_parts = [
-    ((0, 0.035, -0.240), (0.175, 0.100, 0.200)),  # chest
-    ((0, 0.035, -0.090), (0.160, 0.065, 0.050)),  # trapezius
-    ((0, -0.005, -0.075), (0.072, 0.058, 0.028)), # collar
-] + X((0.170, 0.040, -0.130), (0.065, 0.065, 0.060)) + X((0.215, 0.050, -0.290), (0.055, 0.060, 0.130))
+    ((0, 0.035, -0.240), (0.170, 0.100, 0.200)),  # chest
+    ((0, 0.030, -0.085), (0.150, 0.060, 0.050)),  # trapezius
+    ((0, 0.000, -0.078), (0.072, 0.062, 0.026)),  # collar
+] + X((0.160, 0.040, -0.125), (0.070, 0.065, 0.060)) + X((0.205, 0.050, -0.290), (0.055, 0.060, 0.130))
 body = ellipsoids('Body', body_parts)
-sculpt(body, 0.006, 30)
+sculpt(body, 0.006, 40)
 
+# rig: Root (3/4 yaw of the whole bust) -> Pivot (neck: subtle turn/nod) -> head + hair
+root = bpy.data.objects.new('Root', None)
+scene.collection.objects.link(root)
+root.location = (0, 0, 1.5)
+root.rotation_euler = (0, 0, math.radians(-24))
 pivot = bpy.data.objects.new('Pivot', None)
 scene.collection.objects.link(pivot)
-pivot.location = (0, 0, 1.5)
+pivot.parent = root
 head.parent = pivot
-eyes.parent = pivot
-body.location = (0, 0, 1.5)
+hair.parent = pivot
+body.parent = root
 
 # ---------------------------------------------------------------- materials
-def mat_skin():
-    m = bpy.data.materials.new('Skin')
-    m.use_nodes = True
-    nt = m.node_tree
-    bsdf = nt.nodes['Principled BSDF']
-    bsdf.inputs['Roughness'].default_value = 0.55
-    # hair mask from object coords: above the hairline or behind the ears
-    tc = nt.nodes.new('ShaderNodeTexCoord')
-    sep = nt.nodes.new('ShaderNodeSeparateXYZ')
-    nt.links.new(tc.outputs['Object'], sep.inputs[0])
-    # hairline z threshold drops toward the back: h = z + 0.9*y
-    mul = nt.nodes.new('ShaderNodeMath'); mul.operation = 'MULTIPLY'; mul.inputs[1].default_value = 0.9
-    nt.links.new(sep.outputs['Y'], mul.inputs[0])
-    ax = nt.nodes.new('ShaderNodeMath'); ax.operation = 'ABSOLUTE'
-    nt.links.new(sep.outputs['X'], ax.inputs[0])
-    axm = nt.nodes.new('ShaderNodeMath'); axm.operation = 'MULTIPLY_ADD'
-    axm.inputs[1].default_value = 0.3
-    nt.links.new(ax.outputs[0], axm.inputs[0]); nt.links.new(mul.outputs[0], axm.inputs[2])
-    add = nt.nodes.new('ShaderNodeMath'); add.operation = 'ADD'
-    nt.links.new(sep.outputs['Z'], add.inputs[0]); nt.links.new(axm.outputs[0], add.inputs[1])
-    ramp = nt.nodes.new('ShaderNodeValToRGB')
-    ramp.color_ramp.elements[0].position = 0.110
-    ramp.color_ramp.elements[0].color = (0.62, 0.47, 0.40, 1)   # skin
-    ramp.color_ramp.elements[1].position = 0.122
-    ramp.color_ramp.elements[1].color = (0.05, 0.045, 0.04, 1)  # hair
-    nt.links.new(add.outputs[0], ramp.inputs[0])
-    nt.links.new(ramp.outputs[0], bsdf.inputs['Base Color'])
-    return m
-
 def mat_flat(name, rgb, rough=0.8):
     m = bpy.data.materials.new(name)
     m.use_nodes = True
@@ -147,8 +128,8 @@ def mat_flat(name, rgb, rough=0.8):
     b.inputs['Roughness'].default_value = rough
     return m
 
-head.data.materials.append(mat_skin())
-eyes.data.materials.append(mat_flat('Eye', (0.12, 0.12, 0.12), 0.35))
+head.data.materials.append(mat_flat('Skin', (0.55, 0.43, 0.37), 0.6))
+hair.data.materials.append(mat_flat('Hair', (0.06, 0.05, 0.045), 0.7))
 body.data.materials.append(mat_flat('Shirt', (0.16, 0.17, 0.19)))
 
 # ---------------------------------------------------------------- camera + lights
@@ -171,8 +152,8 @@ def area(name, loc, rot, energy, size):
     o.rotation_euler = [math.radians(a) for a in rot]
     scene.collection.objects.link(o)
 
-area('Key', (-0.7, -0.9, 2.2), (50, 0, -35), 22, 0.8)
-area('Fill', (0.9, -0.8, 1.6), (75, 0, 50), 5, 1.0)
+area('Key', (-0.7, -0.9, 2.2), (50, 0, -35), 18, 1.2)
+area('Fill', (0.9, -0.8, 1.6), (75, 0, 50), 8, 1.4)
 area('Rim', (0.4, 0.9, 2.0), (-60, 0, 160), 30, 0.5)
 
 world = bpy.data.worlds.new('W')
@@ -214,11 +195,9 @@ r.image_settings.color_mode = 'RGB'
 def animate(i):
     t = i / max(FRAMES - 1, 1)
     e = 0.5 - 0.5 * math.cos(math.pi * t)             # zero velocity at both ends (ping-pong friendly)
-    pivot.rotation_euler = (math.radians(-2.5 + 5.0 * math.sin(math.pi * t) ** 2 * 0.6),
-                            0,
-                            math.radians(-11 + 22 * e))
-    s = 1 + 0.014 * math.sin(math.pi * t)
-    body.scale = (1 + 0.006 * math.sin(math.pi * t), 1, s)
+    pivot.rotation_euler = (math.radians(-1.5 + 2.5 * math.sin(math.pi * t)), 0, math.radians(-4 + 8 * e))
+    s = 1 + 0.012 * math.sin(math.pi * t)
+    body.scale = (1 + 0.005 * math.sin(math.pi * t), 1, s)
     scene.frame_set(1)
     bpy.context.view_layer.update()
 
