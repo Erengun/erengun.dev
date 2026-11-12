@@ -147,7 +147,7 @@ function updateLast(vp: number) {
   lastStages.forEach((s, i) => s.toggleAttribute('data-active', i === active || (i < 2 && blend > i - 1 && blend < i + 1 && active < 2)));
   // text blocks: wipe via clip-path, move at 0.5x scroll
   const scrolled = (vp - SCENE_START);
-  const anchors = [0.3, 2.6];
+  const anchors = [0.024, 2.649];
   lastBlocks.forEach((b, i) => {
     const top = clamp(blend - (i - 1));
     const bottom = clamp(blend - i);

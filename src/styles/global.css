@@ -47,6 +47,7 @@ html {
 }
 body {
   height: 100%;
+  line-height: 1.5;
   background: #fff;
   color: #000;
   font-family: var(--font-doto);
@@ -59,7 +60,7 @@ body {
 body.is--intro, body.is--project, body.is--last { background: var(--c-off-black); }
 body.is--page { background: #000; color: #fff; }
 a { color: inherit; text-decoration: none; }
-button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+button { font: inherit; letter-spacing: inherit; line-height: inherit; color: inherit; background: none; border: 0; cursor: pointer; text-transform: inherit; }
 ul, ol { list-style: none; }
 h1, h2, h3, h4, h5, h6, p, span { pointer-events: none; }
 a span, button span { pointer-events: none; }
@@ -227,7 +228,9 @@ body.is--carousel .header:not(:has(.menu[data-open])) [data-difference],
   font-size: min(2.5vw, .6875rem); line-height: 1.1; font-weight: 700; letter-spacing: -.02em;
   color: rgb(255 255 255 / .5); text-transform: uppercase; opacity: .9;
 }
-.footer-row > :last-child { text-align: right; }
+.footer-row > :first-child { justify-self: start; }
+.footer-row > :nth-child(2) { text-align: center; }
+.footer-row > :last-child { justify-self: end; text-align: right; }
 .footer-row .c { font-weight: 400; }
 @media (max-width: 47.99rem) { .footer-row { grid-template-columns: auto 1fr auto; column-gap: .5rem; } .footer-row > :nth-child(2) { text-align: center; } }
 @media (min-width: 64rem) { body.is--carousel .menu-footer .footer-row { color: rgb(0 0 0 / .5); } }
@@ -371,7 +374,7 @@ body.is--last .last { visibility: visible; opacity: 1; }
 .last-text .b1 { max-width: 42ch; font-size: 1rem; line-height: 1.4; }
 .last-text .b2 { max-width: 42ch; font-size: 1rem; line-height: 1.2; letter-spacing: -.02em; }
 @media (max-width: 47.99rem) { .last-text .b1, .last-text .b2 { max-width: 31ch; } }
-.last-more { font-size: 1rem; line-height: 1.1; font-weight: 700; }
+.last-more { width: fit-content; font-size: 1rem; line-height: 1.1; font-weight: 700; letter-spacing: -.02em; }
 .talk-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .talk-vignette {
   position: absolute; height: 32.5rem; width: 62rem; border-radius: 9999px; margin-top: 4.1875rem; margin-left: -.5rem;
