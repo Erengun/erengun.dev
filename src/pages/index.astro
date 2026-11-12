@@ -5,17 +5,17 @@ import { TOTAL_VP } from '../lib/timeline';
 const pad = (n: number) => String(n).padStart(2, '0');
 const plus = `data:image/svg+xml,${encodeURIComponent('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 23.5V0M0 11.5H24" stroke="white" stroke-opacity="0.5"/></svg>')}`;
 const URL_BASE = 'https://erengun.dev/';
-const TITLE = `${SITE.name} — Software Engineer · Flutter, Rust & Developer Tools`;
-const DESC = 'Eren Gün is a software engineer from Istanbul building developer tools, update infrastructure and fast Flutter apps: Öge, Ferman, Cached Network Image CE, Elek and Subara.';
+const TITLE = `${SITE.name} — Software Developer | AI Engineering`;
+const DESC = 'Eren Gün is a software developer from Istanbul working on AI engineering, developer tools and fast Flutter apps: Öge, Ferman, Cached Network Image CE, Elek and Subara.';
 const jsonLd = {
   '@context': 'https://schema.org',
   '@graph': [
     { '@type': 'WebSite', '@id': URL_BASE + '#website', url: URL_BASE, name: SITE.name, inLanguage: 'en' },
     {
-      '@type': 'Person', '@id': URL_BASE + '#person', name: SITE.name, url: URL_BASE, jobTitle: 'Software Engineer',
+      '@type': 'Person', '@id': URL_BASE + '#person', name: SITE.name, url: URL_BASE, jobTitle: 'Software Developer | AI Engineering',
       image: URL_BASE + 'og.jpg', email: 'mailto:' + SITE.email,
       address: { '@type': 'PostalAddress', addressLocality: 'Istanbul', addressCountry: 'TR' },
-      knowsAbout: ['Flutter', 'Dart', 'Rust', 'Go', 'Developer tools', 'Mobile apps', 'Code push / live updates', 'AI coding agents'],
+      knowsAbout: ['AI engineering', 'AI coding agents', 'Flutter', 'Dart', 'Rust', 'Go', 'Developer tools', 'Mobile apps', 'Code push / live updates'],
       sameAs: SOCIALS.filter((s) => s.href.startsWith('http')).map((s) => s.href),
     },
     ...PROJECTS.map((p) => ({
@@ -67,7 +67,7 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
   <body class="is--loading">
     <a class="sr-only" href="#about">Skip to content</a>
     <main id="content" class="sr-only">
-      <h1>{SITE.name} — Software Engineer</h1>
+      <h1>{SITE.name} — Software Developer | AI Engineering</h1>
       <p>{SITE.tagline}</p>
       <section aria-labelledby="seo-about">
         <h2 id="seo-about">About</h2>
