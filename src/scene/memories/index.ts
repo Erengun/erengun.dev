@@ -6,7 +6,7 @@
  *
  * Every photo was turned into layered 2.5D gaussian splats offline (tools/memories/build.py): monocular depth,
  * person mattes, an inpainted background layer extended past the photo border plus a separate foreground
- * layer, adaptive quadtree splats oriented along the surface. Each .splat is authored in its own "capture"
+ * layer, adaptive quadtree splats oriented along the surface. Each splat (.csplat, tools/splat/compact.mjs) is authored in its own "capture"
  * frame: camera at the origin looking down −Z, photo width = HFOV. A camera at that pose reproduces the photo
  * exactly; the paths below stay within the angles the layered depth supports (a few degrees of orbit, dolly
  * along the view axis), which is what makes them read as places instead of flat cards.
@@ -95,9 +95,9 @@ function createStageMemory(ctx: StageContext): Stage {
   scene.add(codelabRoot);
   // draw order between the separately sorted files: codelab (furthest), the slide, then the DevFest room
   // (walls + people, sorted together) so the speaker stays in front of the slide
-  const codelab = makeLayer(ctx, '/memories/stage-codelab.splat', codelabRoot, 0);
-  const screen = makeLayer(ctx, '/memories/stage-screen.splat', scene, 1);
-  const devfest = makeLayer(ctx, '/memories/stage-devfest.splat', scene, 2);
+  const codelab = makeLayer(ctx, '/memories/stage-codelab.csplat', codelabRoot, 0);
+  const screen = makeLayer(ctx, '/memories/stage-screen.csplat', scene, 1);
+  const devfest = makeLayer(ctx, '/memories/stage-devfest.csplat', scene, 2);
   // landmarks in the DevFest capture frame (tools/memories/landmark.py)
   const SPEAKER = new Vector3(1.9, 0.4, -8.3);
   const WINDOW = new Vector3(3.15, 0.35, -8.6); // free part of the screen, right of the speaker
@@ -163,7 +163,7 @@ function createTeams(ctx: StageContext): Stage {
     g.scale.setScalar(p.k);
     scene.add(g);
     g.updateMatrixWorld();
-    const l = makeLayer(ctx, `/memories/${p.file}.splat`, g, 0);
+    const l = makeLayer(ctx, `/memories/${p.file}.csplat`, g, 0);
     // dwell viewpoint (capture origin pulled back) and look target (a point deep in the capture)
     const eye = new Vector3();
     const at = new Vector3(0, 0, -8).applyMatrix4(g.matrixWorld);

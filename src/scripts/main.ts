@@ -105,6 +105,18 @@ $route.subscribe(({ route, overlay, slide }) => {
   });
 });
 panels.forEach((p) => $$<HTMLButtonElement>('[data-thumb]', p).forEach((b, s) => b.addEventListener('click', () => $route.setKey('slide', s))));
+// thumbnails come straight from the project's screenshot manifest (lazy: they're tiny but not needed for the gate)
+const fillThumbs = () =>
+  panels.forEach((p) => {
+    const imgs = $$<HTMLImageElement>('[data-thumb-img]', p);
+    const id = imgs[0]?.dataset.thumbImg?.split(':')[0];
+    if (!id) return;
+    fetch(`/projects/${id}/manifest.json`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((slides: { src: string }[]) => imgs.forEach((img, s) => slides[s] && ((img.loading = 'lazy'), (img.decoding = 'async'), (img.src = slides[s].src))))
+      .catch(() => {});
+  });
+('requestIdleCallback' in window ? requestIdleCallback : setTimeout)(fillThumbs as any, { timeout: 4000 } as any);
 const currentProject = () => {
   const r = $route.get().route;
   return r?.startsWith('project') ? Number(r.split('-')[1]) : -1;
@@ -190,6 +202,15 @@ for (const load of HAS_MEMORIES ? Object.values(memoryCopy) : []) {
     .catch((e) => console.warn('[journey] memory captions unavailable', e));
 }
 
+/** style writes only when a value actually changes: a still page does no style work per frame */
+const written = new WeakMap<HTMLElement, Record<string, string>>();
+const setStyle = (el: HTMLElement, prop: 'clipPath' | 'opacity' | 'translate', v: string) => {
+  let w = written.get(el);
+  if (!w) written.set(el, (w = {}));
+  if (w[prop] === v) return;
+  w[prop] = v;
+  el.style[prop] = v;
+};
 function updateBlocks(vp: number, vh: number) {
   let anyVisible = false;
   for (const b of blocks) {
@@ -197,19 +218,19 @@ function updateBlocks(vp: number, vh: number) {
     const tin = TRANSITIONS[b.stage - 1], tout = TRANSITIONS[b.stage];
     const visible = l.enter > 0 && l.exit < 1;
     const host = b.el.parentElement as HTMLElement;
-    host.toggleAttribute('data-active', visible);
+    if (host.hasAttribute('data-active') !== visible) host.toggleAttribute('data-active', visible);
     if (!visible) continue;
     anyVisible = true;
     // wipes clip the text with the picture; other transitions fade it
     const top = tout?.kind === 'wipe' ? l.exit : 0;
     const bottom = tin?.kind === 'wipe' ? 1 - l.enter : 0;
-    b.el.style.clipPath = `inset(${top * 100}% 0 ${bottom * 100}% 0)`;
+    setStyle(b.el, 'clipPath', `inset(${top * 100}% 0px ${bottom * 100}% 0px)`);
     const fadeIn = tin?.kind === 'wipe' ? 1 : smoothstep(0.55, 0.95, l.enter);
     const fadeOut = tout?.kind === 'wipe' ? 1 : 1 - smoothstep(0.05, 0.45, l.exit);
-    b.el.style.opacity = String(fadeIn * fadeOut);
-    b.el.style.translate = `0 ${-(vp - b.anchor) * 0.5 * vh}px`;
+    setStyle(b.el, 'opacity', String(fadeIn * fadeOut));
+    setStyle(b.el, 'translate', `0px ${-(vp - b.anchor) * 0.5 * vh}px`);
   }
-  backdropFade.toggleAttribute('data-past-header', !anyVisible);
+  if (backdropFade.hasAttribute('data-past-header') !== !anyVisible) backdropFade.toggleAttribute('data-past-header', !anyVisible);
 }
 
 // ---------------------------------------------------------------- contact CTA (alley)
@@ -217,10 +238,13 @@ const alleyIndex = stageIndex('alley');
 const contactStage = $('[data-last-stage="2"]');
 const talkTl = createTimeline({ autoplay: false });
 talkTl.add($$('[data-talk-reveal]'), { opacity: [0, 1], duration: 900, delay: (_: unknown, i: number) => i * 70, ease: 'outCubic' }, 0);
+let talkP = -1;
 function updateContact(vp: number) {
   const l = stageLocal(alleyIndex, vp);
-  contactStage.toggleAttribute('data-active', l.enter > 0.5);
+  if (contactStage.hasAttribute('data-active') !== l.enter > 0.5) contactStage.toggleAttribute('data-active', l.enter > 0.5);
   const p = clamp(invLerp(0.02, 0.14, l.t));
+  if (p === talkP) return; // seeking writes styles on every reveal target: only when the progress moved
+  talkP = p;
   talkTl.seek(p * talkTl.duration);
 }
 
@@ -228,6 +252,7 @@ function updateContact(vp: number) {
 let renderer: { frame: (dt: number, t: number) => void; resize: () => void } | null = null;
 let last = performance.now();
 let lastScroll = 0;
+let lastWorkProj = -1;
 function routeFor(vp: number): [Route, 'hidden' | 'shown' | 'leaving'] {
   const js = journeyAt(vp);
   const s: StageDef = STAGES[js.current];
@@ -262,7 +287,8 @@ function loop(now: number) {
     setRoute(r, o);
   }
   const proj = currentProject();
-  if (proj >= 0) {
+  if (proj >= 0 && proj !== lastWorkProj) {
+    lastWorkProj = proj;
     workList.style.setProperty('--active-index', String(proj));
     workItems.forEach((b, i) => b.toggleAttribute('aria-current', i === proj));
   }

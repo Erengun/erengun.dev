@@ -1,7 +1,7 @@
 /**
  * Intro stage: an immersive SKI SCENE built from Eren's ski photo (a place, not a portrait).
  *
- * Hero: the photo as a layered gaussian splat (tools/portrait/ski_world.py → /intro/ski.splat, using the memories
+ * Hero: the photo as a layered gaussian splat (tools/portrait/ski_world.py → /intro/ski.splat → tools/splat/compact.mjs → /intro/ski.csplat, using the memories
  * pipeline: background inpainted behind the skier, skier + skis/poles as a clean foreground layer, sky pushed far,
  * borders extended and faded). Splat space: photo camera at the origin looking −Z, +Y up, metres.
  * Around it a procedural world in the same frame (/intro/ski.json: ground plane fit, skier position, sky colours):
@@ -155,7 +155,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   world.add(ridge);
 
   // ------------------------------------------------------------------ splat (photo, hero)
-  const splat: SplatHandle = createSplat({ renderer: ctx.renderer, url: BASE + 'ski.splat', isPhone: ctx.isPhone });
+  const splat: SplatHandle = createSplat({ renderer: ctx.renderer, url: BASE + 'ski.csplat', isPhone: ctx.isPhone });
   splat.object.renderOrder = 10;
   world.add(splat.object);
 

@@ -8,15 +8,21 @@
  *   colour  RGBA8   (sRGB rgb, opacity)
  * plus one per-instance float attribute `order` (splat index, back to front) rewritten after each sort.
  *
- * Sorting: CPU counting sort (4096 depth bins) in a Web Worker for every backend, triggered only when the
- * view direction changes (dot < .9995) or the camera moved > 2 cm (object-local units).
+ * Loading, parsing and sorting run in a Web Worker (splat.worker.ts), so a background load never blocks the
+ * main thread. Sorting: counting sort (65536 depth bins) over the splats inside a guard band around the view
+ * frustum (the same test the vertex shader uses to drop splats, so culling only saves work), triggered only
+ * when the view changes (direction dot < .9995, camera moved > 2 cm in object units, or the projection changed).
+ * instanceCount = number of splats that survived culling.
  *
  * Hover (§8.2): the WebGPU compute physics is replaced by the documented cheap fallback on all backends:
  * a vertex-shader push of splat centres away from the pointer ray, with a damped strength (rate 2.5) that is
  * active for a few seconds after the pointer last moved, plus a small curl-ish swirl and the
  * `rgb·(1+speed)^(1/2.4)` brightening.
  *
- * Input file: standard 32-byte `.splat` (pos f32×3, scale f32×3, rgba u8×4, quat u8×4 w-first, q·128+128).
+ * Input files: standard 32-byte `.splat` (pos f32×3, scale f32×3, rgba u8×4, quat u8×4 w-first, q·128+128) or the
+ * compact 16-byte `.csplat` (tools/splat/compact.mjs). The format is detected from the file's magic bytes.
+ * `cap` limits the splat count (a prefix of the file: importance-sorted .csplat drops the smallest/faintest
+ * splats first; shuffled files are subsampled uniformly with a size compensation).
  */
 import {
   Mesh, InstancedBufferGeometry, BufferAttribute, InstancedBufferAttribute, DataTexture, FloatType, RGBAFormat,
@@ -40,108 +46,25 @@ export interface SplatHandle {
   readonly count: number;
 }
 
-const TEX_W = 2048;
-const BINS = 4096;
+const TEX_W = 2048; // keep in sync with splat.worker.ts
+/** default cap when none is given (phones) — the alley passes its own per-tier cap */
 const PHONE_MAX = 220_000;
 
-// ----------------------------------------------------------------------------------------------- sort worker
-const workerSource = /* js */ `
-let pos = null, n = 0, depth = null, keys = null;
-const counts = new Uint32Array(${BINS});
-self.onmessage = (e) => {
-  const m = e.data;
-  if (m.type === 'init') {
-    pos = m.pos; n = pos.length / 3;
-    depth = new Float32Array(n); keys = new Uint16Array(n);
-    return;
-  }
-  if (m.type === 'sort') {
-    const t0 = performance.now();
-    const [cx, cy, cz] = m.cam, [fx, fy, fz] = m.dir;
-    let lo = Infinity, hi = -Infinity;
-    for (let i = 0, j = 0; i < n; i++, j += 3) {
-      const d = (pos[j] - cx) * fx + (pos[j + 1] - cy) * fy + (pos[j + 2] - cz) * fz;
-      depth[i] = d;
-      if (d < lo) lo = d;
-      if (d > hi) hi = d;
-    }
-    lo = Math.max(lo, m.near); // splats behind the near plane are culled in the shader anyway
-    const s = (${BINS} - 1e-3) / Math.max(hi - lo, 1e-6);
-    counts.fill(0);
-    for (let i = 0; i < n; i++) {
-      let k = ((depth[i] - lo) * s) | 0;
-      k = k < 0 ? 0 : k > ${BINS - 1} ? ${BINS - 1} : k;
-      k = ${BINS - 1} - k; // far first
-      keys[i] = k;
-      counts[k]++;
-    }
-    let acc = 0;
-    for (let b = 0; b < ${BINS}; b++) { const c = counts[b]; counts[b] = acc; acc += c; }
-    const order = m.out && m.out.length === n ? m.out : new Float32Array(n);
-    for (let i = 0; i < n; i++) order[counts[keys[i]]++] = i;
-    self.postMessage({ type: 'order', order, id: m.id, ms: performance.now() - t0 }, [order.buffer]);
-  }
-};`;
-
-// ----------------------------------------------------------------------------------------------- parse
-function parseSplat(buf: ArrayBuffer, isPhone: boolean) {
-  const total = Math.floor(buf.byteLength / 32);
-  const n = isPhone ? Math.min(total, PHONE_MAX) : total; // file is shuffled, so a prefix is a uniform subsample
-  const sizeComp = Math.sqrt(total / n);
-  const f = new Float32Array(buf, 0, total * 8);
-  const u = new Uint8Array(buf);
-  const rows = Math.ceil(n / TEX_W);
-  const centre = new Float32Array(TEX_W * rows * 4);
-  const covA = new Float32Array(TEX_W * rows * 4);
-  const covB = new Float32Array(TEX_W * rows * 4);
-  const colour = new Uint8Array(TEX_W * rows * 4);
-  const pos = new Float32Array(n * 3);
-  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (let i = 0; i < n; i++) {
-    const o = i * 8, b = i * 32;
-    const x = f[o], y = f[o + 1], z = f[o + 2];
-    const sx = f[o + 3] * sizeComp, sy = f[o + 4] * sizeComp, sz = f[o + 5] * sizeComp;
-    let qw = (u[b + 28] - 128) / 128, qx = (u[b + 29] - 128) / 128, qy = (u[b + 30] - 128) / 128, qz = (u[b + 31] - 128) / 128;
-    const ql = Math.hypot(qw, qx, qy, qz) || 1;
-    qw /= ql; qx /= ql; qy /= ql; qz /= ql;
-    // rotation matrix R (row-major r[row][col])
-    const r00 = 1 - 2 * (qy * qy + qz * qz), r01 = 2 * (qx * qy - qw * qz), r02 = 2 * (qx * qz + qw * qy);
-    const r10 = 2 * (qx * qy + qw * qz), r11 = 1 - 2 * (qx * qx + qz * qz), r12 = 2 * (qy * qz - qw * qx);
-    const r20 = 2 * (qx * qz - qw * qy), r21 = 2 * (qy * qz + qw * qx), r22 = 1 - 2 * (qx * qx + qy * qy);
-    // M = R·S ; Σ = M·Mᵀ
-    const m00 = r00 * sx, m01 = r01 * sy, m02 = r02 * sz;
-    const m10 = r10 * sx, m11 = r11 * sy, m12 = r12 * sz;
-    const m20 = r20 * sx, m21 = r21 * sy, m22 = r22 * sz;
-    const p = i * 4;
-    centre[p] = x; centre[p + 1] = y; centre[p + 2] = z; centre[p + 3] = 1;
-    covA[p] = m00 * m00 + m01 * m01 + m02 * m02;
-    covA[p + 1] = m00 * m10 + m01 * m11 + m02 * m12;
-    covA[p + 2] = m00 * m20 + m01 * m21 + m02 * m22;
-    covA[p + 3] = m10 * m10 + m11 * m11 + m12 * m12;
-    covB[p] = m10 * m20 + m11 * m21 + m12 * m22;
-    covB[p + 1] = m20 * m20 + m21 * m21 + m22 * m22;
-    colour[p] = u[b + 24]; colour[p + 1] = u[b + 25]; colour[p + 2] = u[b + 26]; colour[p + 3] = u[b + 27];
-    pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
-    if (x < minX) minX = x; if (y < minY) minY = y; if (z < minZ) minZ = z;
-    if (x > maxX) maxX = x; if (y > maxY) maxY = y; if (z > maxZ) maxZ = z;
-  }
-  const tex = (data: Float32Array | Uint8Array, float: boolean) => {
-    const t = new DataTexture(data, TEX_W, rows, RGBAFormat, float ? FloatType : UnsignedByteType);
-    t.minFilter = t.magFilter = NearestFilter;
-    t.generateMipmaps = false;
-    t.flipY = false;
-    t.needsUpdate = true;
-    return t;
-  };
-  return {
-    n, pos,
-    centre: tex(centre, true), covA: tex(covA, true), covB: tex(covB, true), colour: tex(colour, false),
-    bounds: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
-  };
+function dataTex(data: Float32Array | Uint8Array, rows: number, float: boolean) {
+  const t = new DataTexture(data, TEX_W, rows, RGBAFormat, float ? FloatType : UnsignedByteType);
+  t.minFilter = t.magFilter = NearestFilter;
+  t.generateMipmaps = false;
+  t.flipY = false;
+  t.needsUpdate = true;
+  return t;
 }
 
 // ----------------------------------------------------------------------------------------------- create
-export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: WebGPURenderer; url: string; isPhone: boolean }): SplatHandle {
+export function createSplat({ renderer: _renderer, url, isPhone, cap }: {
+  renderer: WebGPURenderer; url: string; isPhone: boolean;
+  /** max splats to keep (prefix of the file). Default: all on desktop, 220k on phones. */
+  cap?: number;
+}): SplatHandle {
   // uniforms
   const uOpacity = uniform(1);
   const uRayO = uniform(new Vector3());
@@ -160,6 +83,9 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
   mat.depthWrite = false;
   mat.depthTest = true;
   mat.side = DoubleSide;
+  // transparent + DoubleSide would otherwise be drawn twice (back faces, then front faces); every billboard has the
+  // same winding, so one of those passes culls everything after running the full vertex shader for all splats
+  mat.forceSinglePass = true;
   mat.blending = NormalBlending;
   mat.toneMapped = false;
   mat.fog = false;
@@ -173,14 +99,15 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
   const textures: DataTexture[] = [];
   let orderAttr: InstancedBufferAttribute | null = null;
   let worker: Worker | null = null;
-  let inFlight = false, dirty = true, sortId = 0, spare: Float32Array | null = null;
-  let resolveFirst: () => void = () => {};
-  const firstSort = new Promise<void>((r) => (resolveFirst = r));
+  let inFlight = false, dirty = true, sortId = 0, spare: Float32Array | null = null, firstDone = false;
 
   const lastCam = new Vector3(1e9, 0, 0), lastDir = new Vector3(0, 0, 0);
-  const sortCam = new Vector3(), sortDir = new Vector3();
+  let lastP0 = 0, lastP5 = 0;
+  // initial order for the default hero view (origin looking down -Z, no lateral culling): w = −z
+  const sortVP = new Float32Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0]);
+  const viewProj = new Matrix4();
 
-  function buildMaterial(d: ReturnType<typeof parseSplat>) {
+  function buildMaterial(d: { centre: DataTexture; covA: DataTexture; covB: DataTexture; colour: DataTexture }) {
     const vColor = varyingProperty('vec4', 'vSplatColor');
     const vUv = varyingProperty('vec2', 'vSplatUv');
     const order = instancedBufferAttribute(orderAttr!, 'float') as any;
@@ -272,46 +199,52 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
     dirty = false;
     const out = spare;
     spare = null;
-    worker.postMessage(
-      { type: 'sort', id: ++sortId, cam: sortCam.toArray(), dir: sortDir.toArray(), near: 0.01, out },
-      out ? [out.buffer] : [],
-    );
+    worker.postMessage({ type: 'sort', id: ++sortId, viewProj: sortVP.slice(), out }, out ? [out.buffer] : []);
   }
 
-  const ready = (async () => {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`splat: ${url} ${res.status}`);
-    const d = parseSplat(await res.arrayBuffer(), isPhone);
-    count = d.n;
-    orderAttr = new InstancedBufferAttribute(new Float32Array(count).map((_, i) => i), 1);
-    geo.setAttribute('order', orderAttr);
-    geo.instanceCount = count;
-    buildMaterial(d);
-    textures.push(d.centre, d.covA, d.covB, d.colour);
-    (mesh.userData as any).bounds = d.bounds;
-
-    const blobUrl = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
-    worker = new Worker(blobUrl);
+  const ready = new Promise<void>((resolve, reject) => {
+    worker = new Worker(new URL('./splat.worker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (e) => {
       const m = e.data;
+      if (m.type === 'error') {
+        reject(new Error(`splat: ${m.message}`));
+        return;
+      }
+      if (m.type === 'parsed') {
+        count = m.n;
+        orderAttr = new InstancedBufferAttribute(new Float32Array(count), 1);
+        geo.setAttribute('order', orderAttr);
+        const tex = {
+          centre: dataTex(m.centre, m.rows, true), covA: dataTex(m.covA, m.rows, true),
+          covB: dataTex(m.covB, m.rows, true), colour: dataTex(m.colour, m.rows, false),
+        };
+        buildMaterial(tex);
+        textures.push(tex.centre, tex.covA, tex.covB, tex.colour);
+        (mesh.userData as any).bounds = m.bounds;
+        (mesh.userData as any).total = m.total;
+        requestSort();
+        return;
+      }
       if (m.type !== 'order') return;
       (orderAttr!.array as Float32Array).set(m.order);
       orderAttr!.needsUpdate = true;
+      geo.instanceCount = m.count;
       spare = m.order;
       lastSortMs = m.ms;
       inFlight = false;
-      resolveFirst();
       if (dirty) requestSort();
+      if (!firstDone) {
+        firstDone = true;
+        // visible from here on so renderer.compileAsync warm-ups include it (update() keeps it in sync with opacity)
+        mesh.visible = opacity > 0.001;
+        resolve();
+      }
     };
-    worker.postMessage({ type: 'init', pos: d.pos }, [d.pos.buffer]);
-    // initial order for the default hero view (origin looking down -Z); update() re-sorts as needed
-    sortCam.set(0, 0, 0);
-    sortDir.set(0, 0, -1);
-    requestSort();
-    await firstSort;
-    // visible from here on so renderer.compileAsync warm-ups include it (update() keeps it in sync with opacity)
-    mesh.visible = opacity > 0.001;
-  })();
+    worker.onerror = (e) => reject(new Error(`splat worker: ${e.message}`));
+    worker.postMessage({
+      type: 'load', url: new URL(url, location.href).href, cap: cap ?? (isPhone ? PHONE_MAX : Infinity),
+    });
+  });
 
   // ---- per-frame
   const invObj = new Matrix4();
@@ -320,24 +253,25 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
   let lastPX = 0, lastPY = 0, idle = 1e9, lastSortMs = 0;
 
   function update(dt: number, camera: PerspectiveCamera, pointer: SplatPointer) {
-    mesh.visible = opacity > 0.001 && count > 0;
+    mesh.visible = opacity > 0.001 && firstDone;
     if (!count) return;
     mesh.updateWorldMatrix(true, false);
     invObj.copy(mesh.matrixWorld).invert();
     camPos.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(invObj);
     camDir.set(0, 0, -1).transformDirection(camera.matrixWorld).transformDirection(invObj);
 
-    // re-sort only on meaningful view changes
-    if (camDir.dot(lastDir) < 0.9995 || camPos.distanceTo(lastCam) > 0.02) {
+    // re-sort (and re-cull) only on meaningful view changes
+    const P = camera.projectionMatrix.elements;
+    if (camDir.dot(lastDir) < 0.9995 || camPos.distanceTo(lastCam) > 0.02 || P[0] !== lastP0 || P[5] !== lastP5) {
       lastDir.copy(camDir);
       lastCam.copy(camPos);
-      sortCam.copy(camPos);
-      sortDir.copy(camDir);
+      lastP0 = P[0]; lastP5 = P[5];
+      viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).multiply(mesh.matrixWorld);
+      sortVP.set(viewProj.elements);
       requestSort();
     }
 
     // pointer ray (object space); P[8], P[9] handle off-centre projections
-    const P = camera.projectionMatrix.elements;
     tmp.set((pointer.x + P[8]) / P[0], (pointer.y + P[9]) / P[5], -1).transformDirection(camera.matrixWorld).transformDirection(invObj);
     uRayO.value.copy(camPos);
     uRayD.value.copy(tmp);
@@ -358,7 +292,7 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
     setOpacity(v: number) {
       opacity = v;
       uOpacity.value = v;
-      mesh.visible = v > 0.001 && count > 0;
+      mesh.visible = v > 0.001 && firstDone;
     },
     dispose() {
       worker?.terminate();

@@ -2,7 +2,9 @@
 // Test page for the gaussian-splat renderer. Query params:
 //   ?webgl            force the WebGL2 backend
 //   ?rt               render into an offscreen HalfFloat RT (different size, object offset+scaled), then blit
-//   ?file=dummy       load /splats/<file>.splat (default alley)
+//   ?file=dummy       load /splats/<file>.<ext> (default alley)
+//   ?ext=splat        file extension (default csplat, the compact format)
+//   ?cap=<n>          max splats (createSplat cap)
 //   ?t=<seconds>      freeze the camera path at time t
 //   ?phone            phone subsampling
 //   ?fov=<deg>        camera vertical fov (default 62)
@@ -51,7 +53,7 @@
       const scene = new Scene();
       scene.background = new Color(0x000000);
       const camera = new PerspectiveCamera(q.has('fov') ? Number(q.get('fov')) : 62, 1, 0.02, 200);
-      const splat = createSplat({ renderer, url: `/splats/${file}.splat`, isPhone });
+      const splat = createSplat({ renderer, url: `/splats/${file}.${q.get('ext') ?? 'csplat'}`, isPhone, cap: q.has('cap') ? Number(q.get('cap')) : undefined });
       // in rt mode the splat is moved/scaled inside a parent to exercise the object-space paths
       const holder = new Group();
       holder.add(splat.object);

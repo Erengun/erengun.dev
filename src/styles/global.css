@@ -1,7 +1,8 @@
 /* Design tokens recreated from the reference teardown (spec-dom.md §1). */
 @font-face {
   font-family: "OffBit";
-  src: url("/fonts/OffBit-DotBold.ttf") format("truetype");
+  /* subset (Latin + Turkish + punctuation) of tools/fonts/OffBit-DotBold.ttf, see tools/fonts/subset.sh */
+  src: url("/fonts/OffBit-DotBold.subset.woff2") format("woff2");
   font-weight: 700;
   font-display: swap;
 }

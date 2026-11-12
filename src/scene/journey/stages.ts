@@ -1,7 +1,7 @@
 /**
  * Builds the journey's stage list in timeline order (src/lib/timeline.ts STAGES):
  * intro (face portal adapter) · corridor / city / alley (portals/last.ts) · memories (optional module) ·
- * project worlds (src/scene/worlds/<id>.ts, else a placeholder world).
+ * project worlds (src/scene/worlds/<id>.ts, else a placeholder world). Loading is progressive: see buildJourney.
  */
 import {
   Scene, Color, PerspectiveCamera, Mesh, PlaneGeometry, BoxGeometry, MeshBasicNodeMaterial, TextureLoader, SRGBColorSpace,
@@ -154,61 +154,195 @@ export function placeholderWorld(ctx: ProjectWorldContext): Stage {
   };
 }
 
-export interface BuiltStages {
+/**
+ * Progressive journey loading.
+ *
+ * Only the intro and the corridor are part of the preloader gate (`critical`). Every other stage loads in the
+ * background after the gate (startBackground), one at a time, nearest-next first relative to where the user
+ * is (re-prioritised on every pick, so anchor jumps are honoured), each followed by a shader compile so the
+ * swap never hitches. Until a stage is in, its slot shows a stand-in:
+ *   city   the real stage with only its sky (blocks pop in once city-block.glb is parsed)
+ *   alley  the real stage with its procedural lantern alley (the splat swaps in once sorted)
+ *   world  a lightweight placeholder world (built on first use) → replaced by the real world in place
+ * A stage the user is already looking at jumps the queue.
+ */
+export interface Journey {
+  /** STAGES order; entries are swapped in place when a real stage is ready */
   stages: Stage[];
-  /** resolves when every stage's assets are in */
-  ready: Promise<void>;
+  /** intro + corridor assets in */
+  critical: Promise<void>;
+  /** begin background loading. compile() should warm the stage's pipelines (renderer.compileAsync). */
+  startBackground(compile: (s: Stage) => Promise<void>): void;
+  /** call every frame with the stage indices on screen (b = -1 when none): pending ones jump the queue */
+  tick(a: number, b: number): void;
+  /** true once stage i is the real, compiled stage */
+  isReady(i: number): boolean;
+  /** true while a background load/compile is in flight (or queued but not yet started after the gate) */
+  busy(): boolean;
+  /** called after every swap / compile (adaptive resolution ignores the frame-time window around it) */
+  onActivity?: () => void;
 }
 
-/** builds Stage objects in STAGES order */
-export async function buildStages(ctx: StageContext, onProgress: (p: number) => void): Promise<Stage[]> {
+type Job = () => Promise<Stage>;
+
+export function buildJourney(ctx: StageContext, onProgress: (p: number) => void): Journey {
   const last = createLastStages(ctx);
-  let memories: Stage[] = [];
-  const memLoader = memoryMods['../memories/index.ts'];
-  if (memLoader && HAS_MEMORIES) {
+  const intro = introStage(ctx);
+  const n = STAGES.length;
+  const stages: Stage[] = new Array(n);
+  const jobs: (Job | null)[] = new Array(n).fill(null);
+  const ready: boolean[] = new Array(n).fill(false);
+
+  // memory stages come from one optional module (hidden for now, see timeline.ts SHOW_MEMORIES)
+  let memMod: Promise<Stage[]> | null = null;
+  const memories = () =>
+    (memMod ??= (async () => {
+      const load = memoryMods['../memories/index.ts'];
+      if (!load || !HAS_MEMORIES) return [];
+      const mod = await load();
+      return (mod.createMemoryStages?.(ctx) ?? []) as Stage[];
+    })());
+
+  STAGES.forEach((def, i) => {
+    if (def.id === 'intro') { stages[i] = intro; ready[i] = true; return; }
+    if (def.id === 'corridor') { stages[i] = last.corridor; ready[i] = true; return; }
+    if (def.id === 'city') {
+      stages[i] = last.city;
+      jobs[i] = () => last.loadCity().then(() => last.city);
+      return;
+    }
+    if (def.id === 'alley') {
+      stages[i] = last.alley;
+      jobs[i] = () => last.loadAlley().then(() => last.alley);
+      return;
+    }
+    if (def.kind === 'world' && def.project !== undefined) {
+      const project = PROJECTS[def.project];
+      const index = def.project;
+      stages[i] = deferredStage(project.id, () => placeholderWorld({ ...ctx, project, index, slides: [] }));
+      jobs[i] = async () => {
+        const slides = await loadSlides(project);
+        const wctx: ProjectWorldContext = { ...ctx, project, index, slides };
+        const load = worldMods[`../worlds/${project.id}.ts`];
+        let st: Stage | null = null;
+        if (load) {
+          try {
+            const mod = await load();
+            if (mod.createWorld) st = mod.createWorld(wctx);
+          } catch (e) {
+            console.warn(`[journey] world ${project.id} failed, using placeholder`, e);
+          }
+        }
+        st ??= placeholderWorld(wctx);
+        await st.ready;
+        return st;
+      };
+      return;
+    }
+    if (def.kind === 'memory') {
+      stages[i] = blankStage(def.id);
+      jobs[i] = async () => {
+        const st = (await memories()).find((m) => m.id === def.id);
+        if (!st) throw new Error(`no memory stage ${def.id}`);
+        await st.ready;
+        return st;
+      };
+      return;
+    }
+    console.warn(`[journey] no stage for ${def.id}, using a blank one`);
+    stages[i] = blankStage(def.id);
+    ready[i] = true;
+  });
+
+  let done = 0;
+  const critical = Promise.all(
+    [intro.ready, last.corridor.ready].map((r) =>
+      r.catch((e) => console.warn('[journey] critical stage failed', e)).then(() => onProgress(++done / 2)),
+    ),
+  ).then(() => {});
+
+  // ------------------------------------------------------------------ background queue
+  let compileFn: ((s: Stage) => Promise<void>) | null = null;
+  const started: boolean[] = new Array(n).fill(false);
+  let running = 0;
+  let cur = 0, other = -1;
+  const idle = (cb: () => void) =>
+    'requestIdleCallback' in window ? (window as any).requestIdleCallback(cb, { timeout: 400 }) : setTimeout(cb, 60);
+
+  /** nearest stage ahead of the viewer first, then the ones behind */
+  function pick(): number {
+    let best = -1, bestP = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (!jobs[i] || started[i]) continue;
+      const p = i >= cur ? i - cur : 100 + (cur - i);
+      if (p < bestP) { bestP = p; best = i; }
+    }
+    return best;
+  }
+
+  async function run(i: number) {
+    started[i] = true;
+    running++;
     try {
-      const mod = await memLoader();
-      memories = mod.createMemoryStages?.(ctx) ?? [];
+      const st = await jobs[i]!();
+      if (compileFn) await compileFn(st).catch((e) => console.warn(`[journey] compile ${st.id}`, e));
+      const prev = stages[i];
+      stages[i] = st;
+      ready[i] = true;
+      if (prev !== st) (prev as any).__disposeDeferred?.();
     } catch (e) {
-      console.warn('[journey] memories unavailable', e);
+      console.warn(`[journey] ${STAGES[i].id} unavailable, keeping its stand-in`, e);
+    } finally {
+      running--;
+      journey.onActivity?.();
+      idle(pump);
     }
   }
-  const worlds = await Promise.all(
-    PROJECTS.map(async (project, index) => {
-      const slides = await loadSlides(project);
-      const wctx: ProjectWorldContext = { ...ctx, project, index, slides };
-      const load = worldMods[`../worlds/${project.id}.ts`];
-      if (load) {
-        try {
-          const mod = await load();
-          if (mod.createWorld) return mod.createWorld(wctx);
-        } catch (e) {
-          console.warn(`[journey] world ${project.id} failed, using placeholder`, e);
-        }
-      }
-      return placeholderWorld(wctx);
-    }),
-  );
-  const byId = new Map<string, Stage>();
-  byId.set('intro', introStage(ctx));
-  byId.set('corridor', last.corridor);
-  byId.set('city', last.city);
-  byId.set('alley', last.alley);
-  for (const m of memories) byId.set(m.id, m);
-  PROJECTS.forEach((p, i) => byId.set(p.id, worlds[i]));
-  const stages = STAGES.map((s) => {
-    const st = byId.get(s.id);
-    if (st) return st;
-    console.warn(`[journey] no stage for ${s.id}, using a blank one`);
-    return blankStage(s.id);
-  });
-  let done = 0;
-  await Promise.all(
-    stages.map((s) =>
-      s.ready.catch((e) => console.warn(`[journey] ${s.id} ready failed`, e)).then(() => onProgress(++done / stages.length)),
-    ),
-  );
-  return stages;
+
+  function pump() {
+    if (!compileFn || running > 0) return;
+    const i = pick();
+    if (i >= 0) void run(i);
+  }
+
+  const journey: Journey = {
+    stages,
+    critical,
+    startBackground(compile) {
+      if (compileFn) return;
+      compileFn = compile;
+      idle(pump);
+    },
+    tick(a, b) {
+      cur = a;
+      other = b;
+      if (!compileFn) return;
+      // the viewer reached a stage that isn't in yet: load it now, alongside whatever is running
+      for (const i of [a, other]) if (i >= 0 && jobs[i] && !started[i]) void run(i);
+    },
+    isReady: (i) => ready[i],
+    busy: () => running > 0 || (!compileFn && jobs.some((j, i) => j && !started[i])),
+  };
+  return journey;
+}
+
+/** a stage whose (cheap) implementation is only built when something first touches it */
+function deferredStage(id: string, make: () => Stage): Stage {
+  let inner: Stage | null = null;
+  const get = () => (inner ??= make());
+  return {
+    id,
+    get scene() { return get().scene; },
+    get camera() { return get().camera; },
+    get background() { return get().background; },
+    get grade() { return get().grade; },
+    get ready() { return get().ready; },
+    update: (f) => get().update(f),
+    get render() { const s = get(); return s.render ? (r: WebGPURenderer, rt: RenderTarget) => s.render!(r, rt) : undefined; },
+    get portalQuad() { const s = get(); return s.portalQuad ? () => s.portalQuad!() : undefined; },
+    get onClick() { const s = get(); return s.onClick ? (x: number, y: number) => s.onClick!(x, y) : undefined; },
+    __disposeDeferred: () => inner?.dispose?.(),
+  } as Stage;
 }
 
 function blankStage(id: string): Stage {

@@ -3,6 +3,12 @@
  * Per frame: update the (at most two) stages around the scroll position → compositor renders them into its
  * two targets and blends them with the active transition inside the post chain's scene pass → fish-eye →
  * camcorder/VHS.
+ *
+ * Loading: createApp resolves (→ preloader gate) once the intro and corridor are loaded and compiled; the other
+ * stages stream in afterwards (journey/stages.ts buildJourney).
+ * Resolution: adaptive pixel ratio (spec §9) — 1 s frame-time windows, −.25 below ~45 fps, +.25 above 58 fps,
+ * capped per tier/device.
+ * Debug: `?gputime` enables WebGPU timestamp queries; `__scene.gpuMs` holds the last GPU frame times.
  */
 import { WebGPURenderer, Vector2, RenderPipeline, PerspectiveCamera } from 'three/webgpu';
 import { pass, uniform } from 'three/tsl';
@@ -11,7 +17,7 @@ import { STAGES, TRANSITIONS, SCENE_VP, WIPES, journeyAt, stageLocal, clamp, dam
 import { fishEye, fishEyeCPU, overscanScale } from './post/fisheye';
 import { createPostChain } from './post';
 import { createCompositor } from './journey/compositor';
-import { buildStages } from './journey/stages';
+import { buildJourney } from './journey/stages';
 import type { Stage, StageContext, StageFrame } from './journey/types';
 
 type Hooks = {
@@ -19,8 +25,10 @@ type Hooks = {
 };
 
 export async function createApp(container: HTMLElement, hooks: Hooks) {
-  const forceWebGL = new URLSearchParams(location.search).has('webgl');
-  const renderer = new WebGPURenderer({ antialias: false, forceWebGL });
+  const params = new URLSearchParams(location.search);
+  const forceWebGL = params.has('webgl');
+  const gpuTime = params.has('gputime');
+  const renderer = new WebGPURenderer({ antialias: false, forceWebGL, trackTimestamp: gpuTime } as any);
   await renderer.init();
   container.appendChild(renderer.domElement);
   const isPhoneNow = () => scroll.isPhone || matchMedia('(max-width: 47.99rem), (max-aspect-ratio: 4/3)').matches;
@@ -69,34 +77,100 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     stages[journeyAt(scroll.vp).current]?.onClick?.(ndc.x, ndc.y);
   });
 
-  // ------------------------------------------------------------- resize
-  function resize() {
+  // ------------------------------------------------------------- resolution
+  // tier caps (spec §9): desktop 1.6 / phone 2 on high; medium (WebGL2 fallback, ≤ 4 GB) lower
+  const dprCap = () => {
+    const dev = Math.min(devicePixelRatio, 2);
+    const cap = ctx.isPhone ? (quality === 'high' ? 2 : 1.25) : quality === 'high' ? 1.6 : 1;
+    return Math.min(dev, cap);
+  };
+  const DPR_STEP = 0.25;
+  const dpr = { reduction: 0, applied: 0, minRatio: 0.75 };
+  const floorRatio = () => Math.min(dpr.minRatio, dprCap());
+  const targetRatio = () => Math.max(dprCap() - dpr.reduction, floorRatio());
+  function applySize() {
     const w = container.clientWidth, h = container.clientHeight;
-    ctx.isPhone = isPhoneNow();
-    const dpr = Math.min(devicePixelRatio, 2);
-    const cap = ctx.isPhone ? (quality === 'high' ? 1.5 : 1.2) : quality === 'high' ? 1.6 : 1;
-    renderer.setPixelRatio(Math.min(dpr, cap));
+    dpr.applied = targetRatio();
+    renderer.setPixelRatio(dpr.applied);
     renderer.setSize(w, h, false);
     renderer.getDrawingBufferSize(size);
     comp.setSize(size.x, size.y);
     post.setSize(size.x, size.y);
   }
+  function resize() {
+    ctx.isPhone = isPhoneNow();
+    applySize(); // keeps the adaptive reduction
+    skipWindow();
+  }
+
+  /**
+   * Adaptive pixel ratio: mean frame time over 1 s windows → −.25 below 45 fps, +.25 above 58 fps.
+   * Windows containing a long frame (tab switch), a stage swap/compile or a resize are dropped; a 30 Hz-capped
+   * display (steady ~33 ms) is not treated as slow; after a step down, going back up to that ratio waits 8 s
+   * so it can't oscillate between two levels.
+   */
+  const ctl = { t: 0, n: 0, sum: 0, sq: 0, skip: true, blockUpUntil: 0, blockedRatio: Infinity };
+  let loading = () => true; // set once the journey exists: background loads/compiles make frames unrepresentative
+  function skipWindow() { ctl.skip = true; }
+  function adapt(dt: number, now: number) {
+    if (document.hidden || dt > 0.1 || loading()) skipWindow();
+    ctl.t += dt; ctl.n++; ctl.sum += dt; ctl.sq += dt * dt;
+    if (ctl.t < 1) return;
+    const mean = ctl.sum / ctl.n;
+    const sd = Math.sqrt(Math.max(0, ctl.sq / ctl.n - mean * mean));
+    const skip = ctl.skip;
+    ctl.t = ctl.n = ctl.sum = ctl.sq = 0;
+    ctl.skip = false;
+    if (skip) return;
+    const fps = 1 / mean;
+    const capped30 = fps > 26 && fps < 34 && sd < 0.004;
+    if (fps < 45 && !capped30 && dpr.applied > floorRatio() + 1e-3) {
+      ctl.blockedRatio = dpr.applied;
+      ctl.blockUpUntil = now + 8;
+      dpr.reduction = Math.min(dpr.reduction + DPR_STEP, dprCap() - floorRatio());
+    } else if (fps > 58 && dpr.reduction > 0) {
+      const next = Math.max(dprCap() - (dpr.reduction - DPR_STEP), floorRatio());
+      if (next >= ctl.blockedRatio - 1e-3 && now < ctl.blockUpUntil) return;
+      dpr.reduction = Math.max(0, dpr.reduction - DPR_STEP);
+    } else return;
+    if (Math.abs(targetRatio() - dpr.applied) > 1e-3) {
+      applySize();
+      skipWindow();
+    }
+  }
   resize();
 
   // ------------------------------------------------------------- stages
-  stages = await buildStages(ctx, hooks.onProgress);
+  const journey = buildJourney(ctx, hooks.onProgress);
+  stages = journey.stages;
+  journey.onActivity = skipWindow;
+  loading = () => !$preloader.get().isGateOpen || journey.busy();
+  await journey.critical;
 
-  // warm-up: compile every stage once (+ the compositor/post) so transitions don't hitch
+  const fitCamera = (s: Stage) => {
+    const cam = s.camera as PerspectiveCamera;
+    cam.aspect = size.x / size.y;
+    cam.updateProjectionMatrix();
+    return cam;
+  };
+  // warm-up: compile the gate stages (intro, corridor) + the compositor/post so the first frames don't hitch
   try {
-    for (const s of stages) {
-      const cam = s.camera as PerspectiveCamera;
-      cam.aspect = size.x / size.y;
-      cam.updateProjectionMatrix();
-      await renderer.compileAsync(s.scene, cam);
-    }
+    for (const s of stages.slice(0, 2)) await renderer.compileAsync(s.scene, fitCamera(s));
     await renderer.compileAsync(comp.scene, comp.camera);
   } catch (e) {
     console.warn('compile warmup', e);
+  }
+  // everything else streams in after the gate opens (a beat later, so it never competes with the gate itself);
+  // each stage is compiled before it is swapped in
+  const startBackground = () =>
+    setTimeout(() => journey.startBackground((s) => renderer.compileAsync(s.scene, fitCamera(s))), 400);
+  if ($preloader.get().isGateOpen) startBackground();
+  else {
+    const off = $preloader.subscribe((p) => {
+      if (!p.isGateOpen) return;
+      queueMicrotask(() => off());
+      startBackground();
+    });
   }
 
   // ------------------------------------------------------------- frame
@@ -120,8 +194,10 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     return f;
   }
 
+  const gpuMs: number[] = [];
   function frame(dt: number, time: number) {
     ctx.isPhone = scroll.isPhone || isPhoneNow();
+    adapt(dt, time);
     const vp = scroll.vp;
     const js = journeyAt(vp);
 
@@ -141,6 +217,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     // update + render the active stage(s): never more than two
     const a = js.trans ? js.from : js.current;
     const b = js.trans ? js.from + 1 : -1;
+    journey.tick(a, b);
     stages[a].update(stageFrame(a, dt, time, vp));
     if (b >= 0) stages[b].update(stageFrame(b, dt, time, vp));
     comp.render(stages[a], b >= 0 ? stages[b] : null, js.trans?.kind ?? 'cut', js.p, time, uOverscan.value);
@@ -154,8 +231,13 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
       sceneT: wipeMid + clamp(near, -5, 5) / SCENE_VP, lastOpen: 1,
     });
     pipeline.render();
+    if (gpuTime) {
+      renderer.resolveTimestampsAsync('render').then((ms) => {
+        if (typeof ms === 'number' && ms > 0) { gpuMs.push(ms); if (gpuMs.length > 240) gpuMs.shift(); }
+      });
+    }
   }
 
-  (window as any).__scene = { renderer, stages, comp, uFish, post };
+  (window as any).__scene = { renderer, stages, comp, uFish, post, journey, dpr, gpuMs, frame };
   return { frame, resize };
 }

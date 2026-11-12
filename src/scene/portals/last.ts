@@ -57,7 +57,24 @@ const SUN_DIR = new Vector3(-0.3215, 0.9186, 0.2297).normalize();
 
 const splatMods = (import.meta as any).glob('../splat/splat.ts') as Record<string, () => Promise<any>>;
 
-export function createLastStages(ctx: StageContext): { corridor: Stage; city: Stage; alley: Stage } {
+export interface LastStages {
+  corridor: Stage;
+  city: Stage;
+  alley: Stage;
+  /** start loading the city blocks (idempotent); until then the city stage renders its sky only */
+  loadCity(): Promise<void>;
+  /** start loading the alley splat (idempotent); until then the alley shows its procedural placeholder */
+  loadAlley(): Promise<void>;
+}
+
+/**
+ * alley splat budget per tier. alley.csplat keeps the generator's shuffled order, so a cap is a uniform subsample
+ * (splats grow by √(total/cap) to keep the coverage). Importance pruning (compact.mjs --order importance) was
+ * tried and opens holes in this surface-sampled scene (walls/awnings are many small flat splats).
+ */
+export const ALLEY_CAP = { high: 350_000, medium: 200_000, phone: 150_000 };
+
+export function createLastStages(ctx: StageContext): LastStages {
   const { renderer } = ctx;
   const high = ctx.quality === 'high';
   const PAIRS = high ? 32 : 20;
@@ -483,19 +500,22 @@ export function createLastStages(ctx: StageContext): { corridor: Stage; city: St
     splatScene.add(placeholder);
   }
 
-  async function loadSplat() {
+  async function loadSplat(): Promise<boolean> {
     const loader = splatMods['../splat/splat.ts'];
-    if (!loader) return;
+    if (!loader) return false;
     try {
       const mod = await loader();
-      if (!mod?.createSplat) return;
-      const s = mod.createSplat({ renderer, url: '/splats/alley.splat', isPhone: ctx.isPhone });
+      if (!mod?.createSplat) return false;
+      const cap = ctx.isPhone ? ALLEY_CAP.phone : ALLEY_CAP[ctx.quality];
+      const s = mod.createSplat({ renderer, url: '/splats/alley.csplat', isPhone: ctx.isPhone, cap });
       await s.ready;
       splat = s;
       placeholder.visible = false;
       splatScene.add(s.object);
+      return true;
     } catch (e) {
       console.warn('last portal: splat unavailable, using placeholder', e);
+      return false;
     }
   }
 
@@ -612,19 +632,52 @@ export function createLastStages(ctx: StageContext): { corridor: Stage; city: St
         splat.update(f.dt, splatCam, f.pointer);
       }
     },
+    render(r, rt) {
+      // the splat is soft (and goes through the VHS post), so it renders at a reduced internal resolution and is
+      // upsampled bilinearly into the stage target. Measured: most of the splat cost is per instance (vertex), so
+      // this buys ~10% at DPR 1; it matters more at high DPR, where the overlapping-splat blend cost grows
+      const k = splat ? splatRes.scale : 1;
+      if (k >= 0.999) {
+        r.setRenderTarget(rt);
+        r.setClearColor(splatScene.background as Color, 1);
+        r.clear();
+        r.render(splatScene, splatCam);
+        return;
+      }
+      const w = Math.max(1, Math.round(rt.width * k)), h = Math.max(1, Math.round(rt.height * k));
+      if (splatRT.width !== w || splatRT.height !== h) splatRT.setSize(w, h);
+      r.setRenderTarget(splatRT);
+      r.setClearColor(splatScene.background as Color, 1);
+      r.clear();
+      r.render(splatScene, splatCam);
+      r.setRenderTarget(rt);
+      splatBlit.render(r);
+    },
   };
+  /** internal resolution of the alley splat pass (× the stage target) */
+  const splatRes = { scale: ctx.isPhone ? 0.7 : ctx.quality === 'high' ? 0.75 : 0.7 };
+  const splatRT = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true });
+  const blitMat = new MeshBasicNodeMaterial();
+  blitMat.colorNode = texture(splatRT.texture, screenUV);
+  blitMat.toneMapped = false;
+  blitMat.depthTest = false;
+  blitMat.depthWrite = false;
+  const splatBlit = new QuadMesh(blitMat);
 
-  if (import.meta.env.DEV) (globalThis as any).__lastDebug = { state, quadCenter, cityCam, getQuad: () => quadNdc };
+  if (import.meta.env.DEV) (globalThis as any).__lastDebug = { state, quadCenter, cityCam, getQuad: () => quadNdc, splatRes };
 
-  // =========================================================== ready
-  const ready = (async () => {
-    buildPlaceholderSplat();
-    await Promise.all([buildCity(), buildCorridor()]);
-    updateCityInstances(0);
-    updateCorridorInstances(0);
-    void loadSplat();
-  })();
-  corridor.ready = city.ready = alley.ready = ready;
+  // =========================================================== loading
+  // corridor loads up front (it is part of the preloader gate); city and alley load when the journey loader
+  // asks for them, so their bytes stay out of the initial load
+  buildPlaceholderSplat();
+  corridor.ready = buildCorridor().then(() => updateCorridorInstances(0));
+  let cityLoad: Promise<void> | null = null;
+  let alleyLoad: Promise<void> | null = null;
+  const loadCity = () => (cityLoad ??= buildCity().then(() => { firstLevel = Number.NaN; }));
+  const loadAlley = () => (alleyLoad ??= loadSplat().then((ok) => { if (!ok) throw new Error('alley splat unavailable'); }));
+  // reading `ready` starts the load (lazy), so nothing is fetched until the journey loader gets to them
+  Object.defineProperty(city, 'ready', { get: loadCity });
+  Object.defineProperty(alley, 'ready', { get: loadAlley });
 
-  return { corridor, city, alley };
+  return { corridor, city, alley, loadCity, loadAlley };
 }
