@@ -39,6 +39,8 @@ const outCubic = (x: number) => 1 - Math.pow(1 - x, 3);
 const PAIR_STEP = 0.56;
 /** spec says the portal camera opens to 40°; the reference frames read wider because of the fish-eye overscan */
 const OPEN_FOV = 50;
+const SPLAT_EXPOSURE = 0.85;
+const SPLAT_SAT = 0.72;
 const BAKE_FPS = 60;
 const PAIR_DELAY = 0.125;
 const CORRIDOR_BG = new Color(0.002, 0.002, 0.003);
@@ -438,9 +440,11 @@ export function createLastPortal(ctx: PortalContext): Portal {
 
   // =========================================================== splat stage
   const splatScene = new Scene();
-  splatScene.background = new Color(0.02, 0.003, 0.002);
+  splatScene.background = new Color(0.003, 0.0008, 0.0006);
   const splatCam = new PerspectiveCamera(50, 1, 0.01, 200);
   const splatPose = new Matrix4();
+  const SPLAT_PITCH = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), 0.157);
+  const SPLAT_FOV = 58;
   let splat: { object: Object3D; update(dt: number, cam: PerspectiveCamera, p: { x: number; y: number; inside: boolean }): void; setOpacity(v: number): void } | null = null;
   const placeholder = new Group();
 
@@ -525,7 +529,10 @@ export function createLastPortal(ctx: PortalContext): Portal {
       saturation(pow(max(c.mul(vec3(tint[0], tint[1], tint[2])).div(0.18), 0), vec3(pw)).mul(0.18), sat);
     const g0 = agxToneMapping(grade(c0, [0.93, 1, 1.08], 0.9, 1.05), float(1));
     const g1 = agxToneMapping(grade(c1, [1, 1, 1], 1.2, 1), float(1));
-    const g2 = c2;
+    // spec: splat pixels skip AgX and get a neutral grade (the asset's grade is baked); slight exposure trim
+    // The VHS/camcorder post pushes saturated reds further, so the splat gets a small exposure and
+    // saturation trim to land on the reference's mean colour, and is clamped to display range.
+    const g2 = clamp(saturation(c2.mul(SPLAT_EXPOSURE), SPLAT_SAT), 0, 1);
     let c: N = mix(g0 as N, g1 as N, s01);
     c = mix(c, g2, sel2);
     const vig = float(1).sub(smoothstep(0.25, 0.95, length(p.sub(0.5))).mul(0.8));
@@ -646,8 +653,10 @@ export function createLastPortal(ctx: PortalContext): Portal {
     // splat
     state.renderSplat = state.blend >= 2 || uQuadOn.value > 0;
     if (state.renderSplat) {
-      splatPose.compose(new Vector3(0, 0.1, 1.2 - state.splatT * 1.0), new Quaternion(), new Vector3(1, 1, 1));
-      poseCamera(splatCam, splatPose, f, 1, fov);
+      // splat frame (splat worker): hero eye at the origin looking down −z, pitched up ~9°, fov 55–62.
+      // A small dolly (0.6 m) ends exactly at the hero eye as the stage fills the screen.
+      splatPose.compose(new Vector3(0, 0, 0.6 * (1 - state.splatT)), SPLAT_PITCH, ONE);
+      poseCamera(splatCam, splatPose, f, 1, lerp(60.655, SPLAT_FOV, f.openness));
       if (splat) {
         splat.setOpacity(1);
         splat.update(f.dt, splatCam, f.pointer);

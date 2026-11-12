@@ -215,7 +215,8 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     const lift = isPhone ? 2 : 1.7;
     carousel.rotation.y = -rot;
     carousel.position.y = idx * lift;
-    const tileScale = clamp(0.4497 * camera.aspect, 0.8019, 1);
+    // measured against reference captures: desktop .80, phone portrait 1.0 (tiles overflow the width)
+    const tileScale = isPhone ? 1 : clamp(0.4497 * camera.aspect, 0.8019, 1);
 
     // parallax input
     const k = damp(5, dt);
