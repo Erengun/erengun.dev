@@ -1,0 +1,26 @@
+---
+import { SITE } from '../lib/content';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    
+    <title>Privacy — {SITE.name}</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #050505; color: #cde7e9; font-family: ui-monospace, Menlo, monospace; }
+      main { min-height: 100%; display: grid; place-content: center; gap: 1rem; text-align: center; padding: 2rem; }
+      h1 { font-size: clamp(2rem, 6vw, 4rem); margin: 0; letter-spacing: -.02em; text-shadow: 0 0 .2rem #ffffffcf; }
+      a { color: #fff; } p { opacity: .7; margin: 0; text-transform: uppercase; font-size: .875rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Privacy</h1>
+      <p style="text-transform:none;max-width:38rem;line-height:1.6;opacity:.85">This site sets no cookies and runs no analytics or trackers. The only third-party request is Google Fonts (Doto). Fonts, 3D assets and images are otherwise served from erengun.dev (GitHub Pages, which keeps standard server logs). Questions: hi@erengun.dev</p>
+      <p><a href="/">&gt; back to {SITE.name.toLowerCase()} &lt;</a></p>
+    </main>
+  </body>
+</html>
