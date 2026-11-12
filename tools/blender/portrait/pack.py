@@ -8,7 +8,8 @@ out/meta.json      layout + quadtree params
 
 Quadtree: ROOTS_X x ROOTS_Y (16 x 9, as if the source were a 16:9 video: on the square voxel plane the root
 cells come out tall, like the reference's) root cells over the frame; a node splits while the depth range or luma range inside it is
-above a threshold (the face/silhouette refine, flat background stays coarse).
+above a threshold: the depth test uses the residual from a best-fit plane, so smooth slopes stay coarse and only
+silhouettes / creases (nose, brows, lips, hairline, jaw) refine; flat background stays at root level.
 """
 import sys, os, json, glob
 import numpy as np
@@ -25,11 +26,21 @@ ROWS = (F + COLS - 1) // COLS
 ROOTS_X, ROOTS_Y, MAXD = 16, 9, 4
 QW, QH = ROOTS_X * 2 ** MAXD, ROOTS_Y * 2 ** MAXD  # 256 x 144
 LEVEL_SCALE = 60
-D_SPLIT, L_SPLIT = 0.02, 0.12
+D_SPLIT, L_SPLIT = 0.016, 0.25   # plane-fit residual (depth), luma range
 
 col_atlas = Image.new('RGB', (COLS * N, ROWS * N))
 dat_atlas = np.zeros((ROWS * N, COLS * N, 3), np.uint8)
 qt_atlas = np.zeros((ROWS * QH, COLS * QW), np.uint8)
+
+def plane_residual(d):
+    """max |d - best-fit plane|: sloped but smooth regions stay coarse, creases/silhouettes split."""
+    h, w = d.shape
+    if h < 2 or w < 2:
+        return 0.0
+    yy, xx = np.mgrid[0:h, 0:w]
+    A = np.stack([np.ones(h * w), xx.ravel(), yy.ravel()], 1)
+    coef, *_ = np.linalg.lstsq(A, d.ravel(), rcond=None)
+    return float(np.abs(d.ravel() - A @ coef).max())
 
 def quadtree(depth, luma):
     lv = np.zeros((QH, QW), np.uint8)
@@ -39,7 +50,7 @@ def quadtree(depth, luma):
             return
         d = depth[y:y + s, x:x + s]
         l = luma[y:y + s, x:x + s]
-        if (d.max() - d.min() > D_SPLIT) or (l.max() - l.min() > L_SPLIT):
+        if (plane_residual(d) > D_SPLIT) or (l.max() - l.min() > L_SPLIT):
             h = s // 2
             for (ox, oy) in ((0, 0), (1, 0), (0, 1), (1, 1)):
                 rec(x + ox * h, y + oy * h, h, level + 1)

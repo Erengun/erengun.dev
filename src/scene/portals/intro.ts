@@ -39,7 +39,8 @@ const FRAME_DIST = 2.2;        // distance camera → frame baseline when fully 
 const CAM_OPEN = 0.406;        // inner camera distance to the portal plane when open (coverDepth·0.8)
 const GROUP_Y = -0.12;
 const TEAL = new Color().setRGB(121 / 255, 199 / 255, 199 / 255); // sRGB → linear handled by Color
-const GRID_END = new Color('#222222');
+// spec ends the grid at #222; the lead asked for the grid to stay the main read, so it rests at a dim teal-grey
+const GRID_END = new Color().setRGB(52 / 255, 68 / 255, 68 / 255);
 const LIGHT = new Color('#E0FFFF');
 const LIGHTS: [number, [number, number, number]][] = [
   [1.95, [1, 0.17, -0.05]], // top
@@ -183,8 +184,10 @@ export function createIntroPortal(ctx: PortalContext): Portal {
       const L = normalize(cameraViewMatrix.mul(vec4(new Vector3(...d).normalize(), 0)).xyz);
       lam = lam.add(max(dot(n, L), 0).mul(I));
     }
-    const lit = vColor.mul(vec3(LIGHT.r, LIGHT.g, LIGHT.b)).mul(lam.mul(1 / Math.PI)).mul(1.9);
-    return vec4(mix(lit, vColor.mul(1.4).add(0.1), vMoving.mul(0.5)), 1);
+    // dim, low-contrast voxels: the quadtree grid is the main read (reference vp0_5)
+    let lit: any = vColor.mul(vec3(LIGHT.r, LIGHT.g, LIGHT.b)).mul(lam.mul(1 / Math.PI)).mul(1.15);
+    lit = mix(vec3(dot(lit, vec3(0.2126, 0.7152, 0.0722))), lit, 0.8).mul(0.8).add(0.012);
+    return vec4(mix(lit, vColor.mul(0.7).add(0.03), vMoving.mul(0.35)), 1);
   })();
   voxel.opacityNode = Fn(() => {
     const q = uv().mul(2).sub(1);
@@ -240,7 +243,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   gridMat.blending = AdditiveBlending; // lines add onto black
   const grid = new Mesh(gridGeo, gridMat);
   grid.frustumCulled = false;
-  grid.renderOrder = 0;
+  grid.renderOrder = 2; // drawn after the voxels, additive, no depth test: lines read over the face
   group.add(grid);
 
   // ------------------------------------------------------------------ composite (CA, edge glow, vignette, glow ×.27)
@@ -291,7 +294,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     const teal = vec3(TEAL.r, TEAL.g, TEAL.b);
     const d = length(screenUV.sub(0.5)).div(Math.SQRT1_2);
     const vig = float(1).sub(smoothstep(0.6, 0.95, d).mul(0.8));
-    const outc = col.add(teal.mul(edge.mul(0.7))).mul(vig).add(glow.mul(0.27));
+    const outc = col.add(teal.mul(edge.mul(0.3))).mul(vig).add(glow.mul(0.27));
     return vec4(outc, 1);
   })();
   const downQuad = new QuadMesh(downMat);

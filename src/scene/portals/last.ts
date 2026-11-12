@@ -45,6 +45,9 @@ const CORRIDOR_BG = new Color(0.002, 0.002, 0.003);
 
 // ------------------------------------------------------------------ city constants (spec §7.2)
 const STREET_X = 25.401;
+/** blocks are centred on the street line, so their facades sit at ±(25.401 - 26.8/2) */
+const CANYON_WIDEN = 4;
+const FACADE_X = STREET_X + CANYON_WIDEN - 26.8015 / 2;
 const BLOCK_W = 14.044, BLOCK_H = 13.435, BLOCK_D = 26.8015;
 const TWIST_LEN = 430;
 const CITY_DIST = 250; // forward travel over the city stage
@@ -267,93 +270,84 @@ export function createLastPortal(ctx: PortalContext): Portal {
   const uFogNear = uniform(ctx.isPhone ? 150 : 45);
   const skyColor = new Color();
   const cityCount = (ROWS_ABOVE + ROWS_BELOW) * 2 * LEVELS;
-  const iA = new InstancedBufferAttribute(new Float32Array(cityCount * 4), 4); // pos.xyz, seed
-  const iB = new InstancedBufferAttribute(new Float32Array(cityCount * 4), 4); // cos roll, sin roll, scale, side
+  /** blocks come in VARIANTS (city-block.glb); each variant is one instanced draw with its own instance data */
+  const VARIANTS = 4;
+  type CityVariant = { mesh: Mesh | null; iA: InstancedBufferAttribute; iB: InstancedBufferAttribute };
+  const variants: CityVariant[] = Array.from({ length: VARIANTS }, () => ({
+    mesh: null,
+    iA: new InstancedBufferAttribute(new Float32Array(cityCount * 4), 4), // pos.xyz, seed
+    iB: new InstancedBufferAttribute(new Float32Array(cityCount * 4), 4), // cos roll, sin roll, scale, side
+  }));
   let firstLevel = Number.NaN;
-  let cityMesh: Mesh | null = null;
 
-  function buildBlockGeometry() {
-    // local frame: facade (street side) faces -x at x = -BLOCK_D/2; block centred on the origin
-    const g: BufferGeometry[] = [];
-    const fx = -BLOCK_D / 2;
-    const add = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) => {
-      const b = new BoxGeometry(x1 - x0, y1 - y0, z1 - z0);
-      b.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
-      b.deleteAttribute('uv');
-      g.push(b);
-    };
-    const hw = BLOCK_W / 2 - 0.35, hh = BLOCK_H / 2 - 0.3;
-    add(fx, -fx, -hh, hh, -hw, hw); // main mass
-    add(fx - 1.1, fx, -2.9, -2.4, -hw, hw); // balcony slab
-    add(fx - 1.1, fx, 3.3, 3.6, -hw, -0.5); // slab 2
-    add(fx - 2.2, fx, -1.6, 5.4, -5.6, -1.4); // bay
-    add(fx - 2.4, fx - 2.0, 5.4, 5.8, -5.8, -1.2); // bay cap
-    add(fx - 1.3, fx, -6.2, -0.4, 1.8, 6.1); // second bay
-    add(fx - 0.9, fx, 1.3, 2.3, 3.0, 4.4); // AC unit
-    add(fx - 0.9, fx, 4.4, 5.4, 1.2, 2.6); // AC unit
-    add(fx - 0.5, fx, -hh, hh, 0.4, 0.8); // pipe
-    add(fx - 0.6, fx, -hh, hh, -6.4, -6.0); // pilaster
-    add(fx - 0.6, fx, -hh, hh, 6.0, 6.4); // pilaster
-    add(fx + 4, fx + 12, hh, hh + 1.2, -3, 4); // rooftop box (seen when rolled)
-    const merged = mergeGeometries(g, false)!;
-    return merged;
+  async function buildCity() {
+    const gltf = await new GLTFLoader().loadAsync('/models/city-block.glb');
+    gltf.scene.updateMatrixWorld(true);
+    const geos: BufferGeometry[] = [];
+    gltf.scene.traverse((o: any) => {
+      const m = /^Block(\d)$/.exec(o.name);
+      if (o.isMesh && m) {
+        const g = (o.geometry as BufferGeometry).clone();
+        g.applyMatrix4(o.matrixWorld);
+        geos[Number(m[1])] = g;
+      }
+    });
+    variants.forEach((v, vi) => {
+      const geo = geos[vi] ?? geos[0];
+      const mesh = new Mesh(geo, makeCityMaterial(v));
+      mesh.frustumCulled = false;
+      (mesh as any).count = 2;
+      cityScene.add(mesh);
+      v.mesh = mesh;
+    });
   }
 
-  function buildCity() {
-    const geo = buildBlockGeometry();
-    const A: N = instancedBufferAttribute(iA, 'vec4');
-    const Bn: N = instancedBufferAttribute(iB, 'vec4');
+  function makeCityMaterial(v: CityVariant) {
+    const A: N = instancedBufferAttribute(v.iA, 'vec4');
+    const Bn: N = instancedBufferAttribute(v.iB, 'vec4');
     const pg = positionGeometry, ng = normalGeometry;
     // instance transform: roll about local x, scale, mirror for the left street side, translate
-    const rollv = (v: N) => vec3(v.x, v.y.mul(Bn.x).sub(v.z.mul(Bn.y)), v.y.mul(Bn.y).add(v.z.mul(Bn.x)));
-    const side = (v: N) => vec3(v.x.mul(Bn.w), v.y, v.z.mul(Bn.w));
+    const rollv = (q: N) => vec3(q.x, q.y.mul(Bn.x).sub(q.z.mul(Bn.y)), q.y.mul(Bn.y).add(q.z.mul(Bn.x)));
+    const side = (q: N) => vec3(q.x.mul(Bn.w), q.y, q.z.mul(Bn.w));
     const p0 = side(rollv(pg).mul(Bn.z)).add(A.xyz);
     const n0 = side(rollv(ng));
-    // twist about the street axis (spec §7.2): k = clamp(along/430)·twist ; angle = -π k ; squeeze 1 - .35 k
+    // twist about the street axis (spec §7.2): k = clamp(along/430)·twist ; angle = -π k ; squeeze
     const along = clamp(uCityCam.z.add(10).sub(p0.z).div(TWIST_LEN), 0, 1);
     const k = along.mul(uTwist);
     const ang = k.mul(-3.14);
     const ca = cos(ang), sa = sin(ang);
-    const ex = p0.x.mul(float(1).sub(k.mul(0.5)));
+    const ex = p0.x.mul(float(1).sub(k.mul(0.35)));
     const ey = p0.y.sub(uCityCam.y);
     const pw = vec3(ex.mul(ca).sub(ey.mul(sa)), ex.mul(sa).add(ey.mul(ca)).add(uCityCam.y), p0.z);
     const nw = vec3(n0.x.mul(ca).sub(n0.y.mul(sa)), n0.x.mul(sa).add(n0.y.mul(ca)), n0.z);
     const vW: N = varying(pw, 'vCityW');
     const vN: N = varying(nw, 'vCityN');
-    const vL: N = varying(pg, 'vCityL');
-    const vLN: N = varying(ng, 'vCityLN');
+    const vC: N = varying(attribute('color', 'vec4'), 'vCityC');
+    const vUv: N = varying(uv(), 'vCityUv');
     const vSeed: N = varying(A.w, 'vCitySeed');
-    const vDepth: N = varying(abs(p0.x).sub(STREET_X), 'vCityDepth');
+    const vDepth: N = varying(abs(p0.x).sub(FACADE_X), 'vCityDepth');
 
-    const hash2 = (v: N) => fract(sin(dot(v, vec2(12.9898, 78.233))).mul(43758.5453));
+    const hash2 = (q: N) => fract(sin(dot(q, vec2(12.9898, 78.233))).mul(43758.5453));
     const shade = Fn(() => {
-      const Nn = normalize(vN);
+      const Nn: N = normalize(vN);
       const L = vec3(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z);
       const ndl = max(dot(Nn, L), 0);
-      // brick-ish banding on the facades
-      const band = smoothstep(0.0, 0.08, fract(vL.y.mul(2.2))).mul(0.12).add(0.88);
-      const grain = hash2(floor(vL.yz.mul(vec2(2.2, 1.1))).add(vSeed)).mul(0.12).add(0.9);
-      const alb = vec3(0.13, 0.2, 0.3).mul(band).mul(grain);
-      const ao = mix(float(0.12), float(1), float(1).sub(smoothstep(9, 15, vDepth)))
-        .mul(Nn.dot(vec3(0, 0, 1)).abs().mul(-0.25).add(1));
-      // windows on the street-facing faces (local -x)
-      const facade = step(0.9, vLN.x.negate());
-      const cell = vec2(vL.z.div(3.4), vL.y.div(3.3));
-      const fc = fract(cell);
-      const pane = fract(fc.mul(vec2(2, 3)).sub(vec2(0.1, 0.25 * 3 - 0.75)));
-      const mull = step(0.1, pane.x).mul(step(pane.y, 0.92)).mul(0.6).add(0.4);
-      // windows only on a band of the facade (like a window strip in a texture atlas)
-      const band2 = step(0.45, hash2(vec2(vSeed, 9.7))).mul(step(-5.6, vL.z)).mul(step(vL.z, 2.2)).mul(step(-5.5, vL.y)).mul(step(vL.y, 5.4));
-      const inWin = step(0.12, fc.x).mul(step(fc.x, 0.88)).mul(step(0.18, fc.y)).mul(step(fc.y, 0.8)).mul(facade).mul(band2);
-      const cid = floor(cell).add(vSeed.mul(17.0));
-      const h1 = hash2(cid), h2 = hash2(cid.add(31.7)), h3 = hash2(cid.add(7.1));
-      const lit = inWin.mul(step(h1, 0.4)).mul(step(h2, uNight));
-      const bright = mix(float(0.35), float(1), h3).mul(mull);
-      let c: N = alb.mul(vec3(uAmb as N).add(vec3(uSun as N).mul(ndl))).mul(ao);
-      c = c.mul(mix(float(1), float(0.75), inWin)).mul(hash2(vec2(vSeed, 3.1)).mul(0.35).add(0.8));
-      c = c.add(vec3(0.8714, 0.8632, 0.855).mul(lit).mul(bright).mul(2.6));
+      const glass = vC.a;
+      // vertex albedo (grey) pushed into the reference's cold blue, per-block tint variation
+      const tint = hash2(vec2(vSeed, 3.1)).mul(0.3).add(0.85);
+      const alb = vC.rgb.mul(vec3(0.2, 0.38, 0.66)).mul(tint);
+      // skylight from "above" the canyon reads on bevels and ledges; deep parts of the wall go dark
+      const sky = Nn.y.mul(0.35).add(0.65);
+      const ao = mix(float(0.12), float(1), float(1).sub(smoothstep(9, 15, vDepth)));
+      let c: N = alb.mul(vec3(uAmb as N).mul(sky).add(vec3(uSun as N).mul(ndl))).mul(ao);
+      // window glass: dark with a faint sky sheen; a lit window lights all its panes (uv.y = window id)
+      const wid = vUv.y.add(vSeed.mul(0.137));
+      const lit = glass.mul(step(hash2(vec2(wid, 1.7)), 0.4)).mul(step(hash2(vec2(wid, 5.3)), uNight));
+      const bright = mix(float(0.75), float(1), hash2(vec2(vUv.x.add(vSeed), 2.9)));
+      c = mix(c, vec3(uAmb as N).mul(0.04).add(c.mul(0.6)), glass.mul(float(1).sub(lit)));
+      c = mix(c, vec3(0.8714, 0.8632, 0.855).mul(bright).mul(3.2), lit);
       const dist = length(cameraPosition.sub(vW));
-      const fog = smoothstep(uFogNear, 340, dist);
+      const fog = pow(smoothstep(uFogNear, 340, dist), 0.55);
       c = mix(c, vec3(uHaze as N), fog);
       return vec4(c, 1);
     });
@@ -362,11 +356,7 @@ export function createLastPortal(ctx: PortalContext): Portal {
     mat.colorNode = shade();
     mat.toneMapped = false;
     mat.fog = false;
-    const mesh = new Mesh(geo, mat);
-    mesh.frustumCulled = false;
-    (mesh as any).count = cityCount;
-    cityScene.add(mesh);
-    cityMesh = mesh;
+    return mat;
   }
 
   const rnd = (a: number, b: number, c: number) => {
@@ -374,30 +364,36 @@ export function createLastPortal(ctx: PortalContext): Portal {
     return s - Math.floor(s);
   };
   function updateCityInstances(camZ: number) {
+    if (!variants[0].mesh) return;
     const j0 = Math.floor(-camZ / BLOCK_W) - 2;
     if (j0 === firstLevel) return;
     firstLevel = j0;
-    const a = iA.array as Float32Array, b = iB.array as Float32Array;
-    let n = 0;
+    const counts = new Array(VARIANTS).fill(0);
     for (let s = -1; s <= 1; s += 2) {
       for (let r = -ROWS_BELOW; r < ROWS_ABOVE; r++) {
         for (let l = 0; l < LEVELS; l++) {
           const j = j0 + l;
+          const vi = Math.floor(rnd(j * 1.3, r * 2.1, s + 7) * VARIANTS) % VARIANTS;
+          const v = variants[vi];
+          const n = counts[vi]++;
+          const a = v.iA.array as Float32Array, b = v.iB.array as Float32Array;
           const h = rnd(j, r, s);
           const sc = 1 + (rnd(r, j, s * 3) * 2 - 1) * 0.125;
-          const rr = h < 0.5 ? 0 : h < 0.75 ? Math.PI / 2 : -Math.PI / 2;
-          // left side (s = -1) is the right side rotated 180° about y
-          a[n * 4] = s * (STREET_X + BLOCK_D / 2 * sc);
+          const rr = h < 0.6 ? 0 : h < 0.8 ? Math.PI / 2 : -Math.PI / 2;
+          // instance centre on the street line; the left side (s = -1) is the right side rotated 180° about y
+          a[n * 4] = s * (STREET_X + CANYON_WIDEN + (BLOCK_D / 2) * (sc - 1) + (rnd(j * 0.7, r * 1.9, s) - 0.35) * 3.5);
           a[n * 4 + 1] = r * BLOCK_H + BLOCK_H / 2;
           a[n * 4 + 2] = -j * BLOCK_W;
           a[n * 4 + 3] = rnd(j * 3, r * 7, s) * 100;
           b[n * 4] = Math.cos(rr); b[n * 4 + 1] = Math.sin(rr); b[n * 4 + 2] = sc; b[n * 4 + 3] = s;
-          n++;
         }
       }
     }
-    iA.needsUpdate = true;
-    iB.needsUpdate = true;
+    variants.forEach((v, i) => {
+      (v.mesh as any).count = Math.max(2, counts[i]);
+      v.iA.needsUpdate = true;
+      v.iB.needsUpdate = true;
+    });
   }
 
   // city camera path: forward through the canyon (x³ - x⁴/2 = ∫ smoothstep speed), roll π/2 over .45→.9,
@@ -416,7 +412,7 @@ export function createLastPortal(ctx: PortalContext): Portal {
     const dolly = dRaw < 0.5 ? 2 * dRaw * dRaw : 1 - Math.pow(2 - 2 * dRaw, 1.5) / 2;
     const z = -CITY_DIST * fwd - DOLLY * dolly;
     const roll = smoothN(0.45, 0.9, x) * Math.PI / 2;
-    const eye = v3c.set(dolly * (STREET_X - 19), 2, z);
+    const eye = v3c.set(-dolly * 2, 2, z);
     qRoll.setFromAxisAngle(Z_AXIS, roll);
     qBase.setFromAxisAngle(X_AXIS, 0.06 * (1 - x)).premultiply(qRoll);
     // turn toward the quad during the dolly so it stays near the centre of the view while it opens
@@ -427,12 +423,12 @@ export function createLastPortal(ctx: PortalContext): Portal {
     cityPose.compose(eye, qBase, ONE);
     return z;
   }
-  const QUAD_W = 42, QUAD_H = 31.5;
+  const QUAD_W = 40, QUAD_H = 30;
   // hung in front of the right-hand wall just short of where the camera is at travel ~.95, turned to face the
   // approaching camera (as seen at travel .8) and tilted in-plane
   const quadRot = new Quaternion();
   {
-    quadCenter.set(STREET_X - 6, 1, -CITY_DIST * 2 * (0.95 ** 3 - 0.95 ** 4 / 2) - DOLLY * 0.9 - 8);
+    quadCenter.set(FACADE_X - 2.5, 1, -CITY_DIST * 2 * (0.9 ** 3 - 0.9 ** 4 / 2) - DOLLY * 0.77 - 8);
     cityPath(0.8);
     const eye = new Vector3().setFromMatrixPosition(cityPose);
     // Matrix4.lookAt(eye, target) points the object's +z from target to eye: the quad's front faces the camera
@@ -616,10 +612,10 @@ export function createLastPortal(ctx: PortalContext): Portal {
       uTwist.value = (1 - Math.cos(Math.PI * invLerp(0.24, 1, x))) / 2;
       const night = smoothN(0.2, 0.68, x);
       uNight.value = smoothN(0.25, 0.75, x);
-      skyColor.setRGB(lerp(0.45, 0.006, night), lerp(0.96, 0.013, night), lerp(1.5, 0.03, night));
+      skyColor.setRGB(lerp(0.512, 0.006, night), lerp(0.992, 0.013, night), lerp(1.6, 0.03, night));
       (uHaze.value as Color).setRGB(lerp(0.512, 0.006, night), lerp(0.992, 0.013, night), lerp(1.6, 0.03, night));
       (uSun.value as Color).setRGB(lerp(0.8, 0.5, night), lerp(0.9, 0.6, night), 1).multiplyScalar(lerp(1.4, 0.5, night));
-      (uAmb.value as Color).setRGB(0.3, 0.64, 1).multiplyScalar(lerp(0.34, 0.13, night));
+      (uAmb.value as Color).setRGB(0.3, 0.64, 1).multiplyScalar(lerp(0.2, 0.06, night));
       updateCityInstances(camZ);
       poseCamera(cityCam, cityPose, f, 18, fov);
       (uCityCam.value as Vector3).copy(cityCam.position);
@@ -693,10 +689,9 @@ export function createLastPortal(ctx: PortalContext): Portal {
 
   // =========================================================== ready
   const ready = (async () => {
-    buildCity();
     buildPlaceholderSplat();
+    await Promise.all([buildCity(), buildCorridor()]);
     updateCityInstances(0);
-    await buildCorridor();
     updateCorridorInstances(0);
     void loadSplat();
     // warm every stage + the composite so the first wipe doesn't hitch
