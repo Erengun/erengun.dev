@@ -1,0 +1,153 @@
+---
+// Test page for the gaussian-splat renderer. Query params:
+//   ?webgl            force the WebGL2 backend
+//   ?rt               render into an offscreen HalfFloat RT (different size, object offset+scaled), then blit
+//   ?file=dummy       load /splats/<file>.<ext> (default alley)
+//   ?ext=splat        file extension (default csplat, the compact format)
+//   ?cap=<n>          max splats (createSplat cap)
+//   ?t=<seconds>      freeze the camera path at time t
+//   ?phone            phone subsampling
+//   ?fov=<deg>        camera vertical fov (default 62)
+//   ?op=<0..1>        setOpacity
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>test: splat</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      #c { position: fixed; inset: 0; }
+      #hud { position: fixed; left: 8px; bottom: 8px; color: #ccc; font: 11px/1.3 monospace; z-index: 2; white-space: pre; }
+    </style>
+  </head>
+  <body>
+    <div id="c"></div>
+    <div id="hud"></div>
+    <script>
+      import {
+        WebGPURenderer, PerspectiveCamera, Scene, Color, RenderTarget, HalfFloatType, Mesh, PlaneGeometry,
+        MeshBasicNodeMaterial, OrthographicCamera, Group,
+      } from 'three/webgpu';
+      import { texture, screenUV } from 'three/tsl';
+      import { createSplat } from '../scene/splat/splat';
+
+      const q = new URLSearchParams(location.search);
+      const forceWebGL = q.has('webgl');
+      const rtMode = q.has('rt');
+      const file = q.get('file') ?? 'alley';
+      const freezeT = q.has('t') ? Number(q.get('t')) : null;
+      const isPhone = q.has('phone');
+
+      const el = document.getElementById('c')!;
+      const hud = document.getElementById('hud')!;
+      const renderer = new WebGPURenderer({ antialias: false, forceWebGL });
+      await renderer.init();
+      renderer.setPixelRatio(1);
+      el.appendChild(renderer.domElement);
+      const backend = (renderer.backend as any).isWebGLBackend ? 'webgl2' : 'webgpu';
+
+      const scene = new Scene();
+      scene.background = new Color(0x000000);
+      const camera = new PerspectiveCamera(q.has('fov') ? Number(q.get('fov')) : 62, 1, 0.02, 200);
+      const splat = createSplat({ renderer, url: `/splats/${file}.${q.get('ext') ?? 'csplat'}`, isPhone, cap: q.has('cap') ? Number(q.get('cap')) : undefined });
+      // in rt mode the splat is moved/scaled inside a parent to exercise the object-space paths
+      const holder = new Group();
+      holder.add(splat.object);
+      scene.add(holder);
+      if (rtMode) {
+        holder.position.set(3, -1, 2);
+        holder.scale.setScalar(0.5);
+      }
+
+      const rt = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true });
+      const blitScene = new Scene();
+      const blitCam = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      const blitMat = new MeshBasicNodeMaterial();
+      blitMat.colorNode = texture(rt.texture, screenUV);
+      blitMat.toneMapped = false;
+      blitScene.add(new Mesh(new PlaneGeometry(2, 2), blitMat));
+
+      const pointer = { x: 0, y: 0, inside: false };
+      addEventListener('pointermove', (e) => {
+        pointer.x = (e.clientX / innerWidth) * 2 - 1;
+        pointer.y = 1 - (e.clientY / innerHeight) * 2;
+        pointer.inside = true;
+      });
+      document.addEventListener('pointerleave', () => (pointer.inside = false));
+      (window as any).__pointer = pointer;
+
+      function resize() {
+        renderer.setSize(innerWidth, innerHeight);
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        rt.setSize(Math.round(innerWidth * 0.75), Math.round(innerHeight * 0.75));
+      }
+      addEventListener('resize', resize);
+      resize();
+
+      (window as any).__splat = splat;
+      if (q.has('op')) splat.setOpacity(Number(q.get('op')));
+      const t0 = performance.now();
+      await splat.ready;
+      const loadMs = performance.now() - t0;
+
+      // camera path: hero viewpoint at the origin looking down -Z with a slight upward pitch,
+      // slow dolly forward + gentle sway (similar to the reference's final frames)
+      function pose(t: number) {
+        const k = 0.5 - 0.5 * Math.cos(Math.min(t / 12, 1) * Math.PI);
+        const x = Math.sin(t * 0.35) * 0.05, y = Math.sin(t * 0.27) * 0.025;
+        const z = 0.6 - k * 0.6;
+        const pitch = 0.157 + Math.sin(t * 0.2) * 0.01;
+        const yaw = Math.sin(t * 0.17) * 0.03;
+        return { x, y, z, pitch, yaw };
+      }
+
+      const frames: number[] = [];
+      let last = performance.now();
+      let n = 0;
+      renderer.setAnimationLoop(() => {
+        const now = performance.now();
+        const dt = Math.min((now - last) / 1000, 0.05);
+        frames.push(now - last);
+        if (frames.length > 120) frames.shift();
+        last = now;
+        const t = freezeT ?? (now - t0 - loadMs) / 1000;
+        const p = pose(t);
+        // pose is in splat-local space; map through the holder for rt mode
+        camera.position.set(p.x, p.y, p.z);
+        camera.rotation.set(p.pitch, p.yaw, 0, 'YXZ');
+        if (rtMode) {
+          camera.position.multiplyScalar(holder.scale.x).add(holder.position);
+        }
+        camera.updateMatrixWorld();
+        splat.update(dt, camera, pointer);
+        if (rtMode) {
+          renderer.setRenderTarget(rt);
+          renderer.setClearColor(0x000000, 1);
+          renderer.clear();
+          renderer.render(scene, camera);
+          renderer.setRenderTarget(null);
+          renderer.render(blitScene, blitCam);
+        } else {
+          renderer.render(scene, camera);
+        }
+        if (++n % 30 === 0) {
+          const s = [...frames].sort((a, b) => a - b);
+          const avg = frames.reduce((a, b) => a + b, 0) / frames.length;
+          const info = {
+            backend, count: splat.count, loadMs: Math.round(loadMs), avgMs: +avg.toFixed(2), p50: +s[s.length >> 1].toFixed(2),
+            p95: +s[Math.floor(s.length * 0.95)].toFixed(2), sortMs: +((splat as any).lastSortMs ?? 0).toFixed(1),
+            size: `${innerWidth}x${innerHeight}`,
+          };
+          (window as any).__perf = info;
+          hud.textContent = JSON.stringify(info);
+        }
+      });
+      (window as any).__ready = true;
+    </script>
+  </body>
+</html>

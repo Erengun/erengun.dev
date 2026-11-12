@@ -1,0 +1,44 @@
+[
+ {
+  "src": "/projects/cached-network-image-ce/slide-0.webp",
+  "w": 2016,
+  "h": 1200,
+  "kind": "cover",
+  "caption": "Cached Network Image CE cover"
+ },
+ {
+  "src": "/projects/cached-network-image-ce/slide-1.webp",
+  "w": 1760,
+  "h": 1100,
+  "kind": "desktop",
+  "caption": "README · github.com/Erengun/flutter_cached_network_image_ce"
+ },
+ {
+  "src": "/projects/cached-network-image-ce/slide-2.webp",
+  "w": 1760,
+  "h": 1100,
+  "kind": "desktop",
+  "caption": "How we stack up"
+ },
+ {
+  "src": "/projects/cached-network-image-ce/slide-3.webp",
+  "w": 640,
+  "h": 1386,
+  "kind": "phone",
+  "caption": "Simulator benchmark"
+ },
+ {
+  "src": "/projects/cached-network-image-ce/slide-4.webp",
+  "w": 1840,
+  "h": 1150,
+  "kind": "desktop",
+  "caption": "pub.dev/packages/cached_network_image_ce"
+ },
+ {
+  "src": "/projects/cached-network-image-ce/slide-5.webp",
+  "w": 1840,
+  "h": 1150,
+  "kind": "desktop",
+  "caption": "Flutter Gems"
+ }
+]

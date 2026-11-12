@@ -1,0 +1,30 @@
+[
+ {
+  "src": "/projects/ferman/slide-0.webp",
+  "w": 2016,
+  "h": 1200,
+  "kind": "cover",
+  "caption": "Ferman cover"
+ },
+ {
+  "src": "/projects/ferman/slide-1.webp",
+  "w": 2016,
+  "h": 1200,
+  "kind": "cover",
+  "caption": "Release dashboard (designed)"
+ },
+ {
+  "src": "/projects/ferman/slide-2.webp",
+  "w": 2016,
+  "h": 1200,
+  "kind": "cover",
+  "caption": "Release workflow CLI (designed)"
+ },
+ {
+  "src": "/projects/ferman/slide-3.webp",
+  "w": 2016,
+  "h": 1200,
+  "kind": "cover",
+  "caption": "Platforms, C ABI, deploy (designed)"
+ }
+]

@@ -1,0 +1,37 @@
+[
+ {
+  "src": "/projects/elek/slide-0.webp",
+  "w": 2016,
+  "h": 1200,
+  "kind": "cover",
+  "caption": "Elek cover"
+ },
+ {
+  "src": "/projects/elek/slide-1.webp",
+  "w": 1760,
+  "h": 1100,
+  "kind": "desktop",
+  "caption": "README · github.com/Erengun/elek"
+ },
+ {
+  "src": "/projects/elek/slide-2.webp",
+  "w": 1760,
+  "h": 1100,
+  "kind": "desktop",
+  "caption": "Install & usage"
+ },
+ {
+  "src": "/projects/elek/slide-3.webp",
+  "w": 1760,
+  "h": 1100,
+  "kind": "desktop",
+  "caption": "Benchmarks"
+ },
+ {
+  "src": "/projects/elek/slide-4.webp",
+  "w": 1840,
+  "h": 1150,
+  "kind": "desktop",
+  "caption": "pub.dev/packages/elek"
+ }
+]

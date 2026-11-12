@@ -1,0 +1,143 @@
+---
+// Test page for the Ferman project world (src/scene/worlds/ferman*.ts). Query:
+//   ?t=0.5      fixed local progress (otherwise the slider / scroll wheel drives it)
+//   ?slide=n    featured slide           ?webgl   force the WebGL2 backend
+//   ?post       run through the fish-eye + camcorder chain       ?time=12  freeze the clock
+//   ?px=..&py=.. fixed parallax (-1..1)   ?panel  show a mock of the DOM text panel (bottom 28%)
+//   ?noslides  pass ctx.slides = [] (exercises the world's own manifest / generated fallback)
+// Keys: ←/→ slide
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>test: ferman world</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #0a0f1a; overflow: hidden; }
+      #c { position: fixed; inset: 0; }
+      #ui { position: fixed; left: 8px; top: 8px; z-index: 3; color: #9aa; font: 11px/1.3 monospace; display: flex; gap: 8px; align-items: center; }
+      #ui input { width: 320px; }
+      #panel { position: fixed; left: 0; right: 0; bottom: 0; height: 28%; background: linear-gradient(transparent, rgba(0,0,0,.75)); z-index: 2; display: none; border-top: 1px dashed rgba(255,255,255,.25); }
+      body.clean #ui { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="c"></div>
+    <div id="panel"></div>
+    <div id="ui"><input id="slider" type="range" min="0" max="1" step="0.001" /><span id="hud"></span></div>
+    <script>
+      import { WebGPURenderer, Vector2, RenderPipeline, Timer } from 'three/webgpu';
+      import { pass, uniform, screenUV, vec4 } from 'three/tsl';
+      import { fishEye, overscanScale } from '../scene/post/fisheye';
+      import { createCamcorder } from '../scene/post/camcorder';
+      import { PROJECTS } from '../lib/content';
+      import type { StageFrame } from '../scene/journey/types';
+
+      const mods = import.meta.glob('../scene/worlds/ferman*.ts') as Record<string, () => Promise<any>>;
+      const key = Object.keys(mods).find((k) => k.endsWith('ferman.wip.ts')) ?? Object.keys(mods).find((k) => k.endsWith('ferman.ts'))!;
+      const { createWorld } = await mods[key]();
+
+      const q = new URLSearchParams(location.search);
+      if (q.has('clean')) document.body.classList.add('clean');
+      if (q.has('panel')) document.getElementById('panel')!.style.display = 'block';
+      const container = document.getElementById('c')!;
+      const slider = document.getElementById('slider') as HTMLInputElement;
+      const hud = document.getElementById('hud')!;
+      let t = q.has('t') ? +q.get('t')! : 0.5;
+      slider.value = String(t);
+      slider.oninput = () => (t = +slider.value);
+      addEventListener('wheel', (e) => { t = Math.min(1.05, Math.max(-0.05, t + e.deltaY * 0.0004)); slider.value = String(t); });
+      let slide = q.has('slide') ? +q.get('slide')! : 0;
+      addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') slide++; if (e.key === 'ArrowLeft') slide--; });
+
+      const renderer = new WebGPURenderer({ antialias: !q.has('post'), forceWebGL: q.has('webgl') });
+      await renderer.init();
+      container.appendChild(renderer.domElement);
+      const backend = (renderer.backend as any).isWebGPUBackend ? 'WebGPU' : 'WebGL2';
+      console.log('backend', backend);
+
+      const isPhone = matchMedia('(max-width: 47.99rem), (max-aspect-ratio: 4/3)').matches;
+      const project = PROJECTS.find((p) => p.id === 'ferman')!;
+      let slides: any[] = [];
+      if (!q.has('noslides')) {
+        for (const url of ['/projects/ferman/manifest.json', '/projects/_placeholder/manifest.json']) {
+          try { const r = await fetch(url); if (r.ok) { const j = await r.json(); if (Array.isArray(j) && j.length) { slides = j; break; } } } catch {}
+        }
+      }
+      const stage = createWorld({ renderer, isPhone, quality: 'high', project, index: 1, slides });
+      await stage.ready;
+
+      // optional post chain (mirrors src/scene/post)
+      const usePost = q.has('post');
+      const uFish = uniform(0.1), uOverscan = uniform(1);
+      const passCamera = stage.camera.clone();
+      let pipeline: RenderPipeline | null = null;
+      let cam: any = null;
+      if (usePost) {
+        const scenePass = pass(stage.scene, passCamera);
+        const src = scenePass.getTextureNode('output');
+        const uvFish = fishEye(screenUV, uFish, uOverscan);
+        const sampled = src.sample(uvFish);
+        pipeline = new RenderPipeline(renderer);
+        cam = createCamcorder({ renderer, source: sampled, sourceTexture: src as any, uvFish, uFish, uOverscan });
+        pipeline.outputNode = cam.output ?? vec4(sampled.rgb, 1);
+      }
+
+      const size = new Vector2();
+      function resize() {
+        const w = container.clientWidth, h = container.clientHeight;
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+        renderer.setSize(w, h, false);
+        stage.camera.aspect = w / h;
+        stage.camera.updateProjectionMatrix();
+        renderer.getDrawingBufferSize(size);
+        cam?.setSize(size.x, size.y);
+      }
+      resize();
+      addEventListener('resize', resize);
+
+      const pointer = { x: 0, y: 0, inside: false, down: false };
+      const par = { x: q.has('px') ? +q.get('px')! : 0, y: q.has('py') ? +q.get('py')! : 0 };
+      const fixedPar = q.has('px') || q.has('py');
+      addEventListener('pointermove', (e) => { pointer.x = (e.clientX / innerWidth) * 2 - 1; pointer.y = -(e.clientY / innerHeight) * 2 + 1; pointer.inside = true; });
+      const timer = new Timer();
+      const t0 = performance.now();
+      let frames = 0, acc = 0, fps = 0;
+      const postState = { isHome: false, isPhone, inside: true, idx: 1, sceneT: 0, lastOpen: 0 };
+      renderer.setAnimationLoop(() => {
+        timer.update();
+        const dt = Math.min(0.05, timer.getDelta());
+        const time = q.has('time') ? +q.get('time')! : (performance.now() - t0) / 1000;
+        if (!fixedPar) { par.x += (pointer.x - par.x) * Math.min(1, dt * 3); par.y += (pointer.y - par.y) * Math.min(1, dt * 3); }
+        const f: StageFrame = {
+          dt, time, t, enter: 1, exit: 0, vp: 0, pointer, parallax: par, aspect: stage.camera.aspect,
+          isPhone, quality: 'high', slide, gateOpen: true,
+        };
+        stage.update(f);
+        if (pipeline) {
+          const s = (uOverscan.value = overscanScale(stage.camera.aspect, uFish.value));
+          passCamera.position.copy(stage.camera.position);
+          passCamera.quaternion.copy(stage.camera.quaternion);
+          passCamera.fov = (2 * Math.atan(Math.tan((stage.camera.fov * Math.PI) / 360) * s) * 180) / Math.PI;
+          passCamera.aspect = stage.camera.aspect / s;
+          passCamera.near = stage.camera.near; passCamera.far = stage.camera.far;
+          passCamera.updateProjectionMatrix();
+          passCamera.updateMatrixWorld();
+          cam?.update(dt, time, postState);
+          pipeline.render();
+        } else {
+          renderer.render(stage.scene, stage.camera);
+        }
+        acc += dt; frames++;
+        if (acc > 0.5) { fps = frames / acc; acc = 0; frames = 0; }
+        hud.textContent = `${backend} t=${t.toFixed(3)} slide=${slide} draws=${renderer.info.render.drawCalls} fps=${fps.toFixed(0)}`;
+        (window as any).__draws = renderer.info.render.drawCalls;
+        if (performance.now() - t0 > 1500) document.body.dataset.ready = '1';
+      });
+      (window as any).__w = { stage, renderer, setT: (v: number) => (t = v), setSlide: (v: number) => (slide = v) };
+    </script>
+  </body>
+</html>

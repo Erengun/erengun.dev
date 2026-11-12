@@ -1,0 +1,183 @@
+---
+import '../styles/global.css';
+import { SITE, SOCIALS, MENU, PROJECTS, LAST } from '../lib/content';
+import { TOTAL_VP } from '../lib/timeline';
+const pad = (n: number) => String(n).padStart(2, '0');
+const plus = `data:image/svg+xml,${encodeURIComponent('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 23.5V0M0 11.5H24" stroke="white" stroke-opacity="0.5"/></svg>')}`;
+const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 9h23M16 1l8 8-8 8" stroke="white" stroke-width="1.5"/></svg>`;
+---
+<!doctype html>
+<html lang="en" style={`--scroll-viewports:${TOTAL_VP}`}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Ccircle cx='8' cy='8' r='3' fill='%2311ff00'/%3E%3C/svg%3E" />
+    <title>{SITE.name} — lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Doto:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="preload" href="/fonts/OffBit-DotBold.subset.woff2" as="font" type="font/woff2" crossorigin />
+  </head>
+  <body class="is--loading">
+    <a class="sr-only" href="#about">Skip to content</a>
+    <main id="content" class="sr-only">
+      <h1>{SITE.name} — Software Developer</h1>
+      <p>{SITE.tagline}</p>
+    </main>
+
+    <div class="preloader" data-preloader role="status" aria-live="polite">
+      <span class="preloader__label">Loading</span>
+      <div class="preloader__pill"><span class="preloader__dot"></span></div>
+      <div class="motion-gate" role="dialog" aria-modal="true" aria-label="Motion sensors">
+        <svg width="56" height="56" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="32" cy="32" r="30"/><ellipse cx="32" cy="32" rx="30" ry="12" transform="rotate(35 32 32)"/><ellipse cx="32" cy="32" rx="30" ry="12" transform="rotate(-35 32 32)"/></svg>
+        <p>This site would like to use your device's<br /><em>Motion and Orientation</em> sensors.</p>
+        <div class="btns"><button class="allow" data-motion-allow>Allow</button><button class="decline" data-motion-decline>Decline</button></div>
+      </div>
+    </div>
+
+    <div class="stage" data-stage data-scene="home">
+      <div class="page-scroll" data-page-scroll tabindex="-1">
+        <div class="perspective-root">
+          <div class="scene-tilt">
+            <div id="app"></div>
+          </div>
+        </div>
+
+        <section class="ov intro" data-intro>
+          <div class="container intro__inner" style="width:100%">
+            <div class="intro__left">
+              <p class="intro__name"><span data-scramble-text>{SITE.name}</span></p>
+              <p class="intro__meta"><span data-scramble-text>// portfolio</span><span><span data-scramble-text>©</span><span data-scramble-text>{SITE.year}</span></span></p>
+            </div>
+            <p class="intro__para"><span data-scramble-text>{SITE.tagline}</span></p>
+          </div>
+        </section>
+
+        <section class="ov project" data-project>
+          {PROJECTS.map((p, i) => (
+            <div class="project-panel" data-project-panel={i}>
+              <div class="pp-col-title">
+                <div class="row"><p class="pp-label">Project</p><p class="pp-label pp-counter"><span style="color:#fff" data-project-slide-number>01</span> / {pad(p.slides)}</p></div>
+                <h2 class="pp-title">{p.title}</h2>
+              </div>
+              <div class="pp-bottom">
+                <div class="pp-col-info">
+                  <p class="pp-label">Info</p>
+                  <p>{p.info}</p>
+                </div>
+                <div class="pp-col-role">
+                  <p class="pp-label">Role</p>
+                  <div class="pp-role-list">{p.roles.map((r) => <span>{r}</span>)}</div>
+                </div>
+              </div>
+              <div class="pp-thumbs">
+                {Array.from({ length: p.slides }).map((_, s) => (
+                  <button data-thumb={s} aria-label={`Slide ${s + 1}`} disabled><img alt="" data-thumb-img={`${p.id}:${s}`} /></button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </section>
+
+        <section class="ov last" data-last>
+          <div class="last-backdrop" data-last-backdrop-fade></div>
+          {LAST.map((s, i) => (
+            <div class="last-stage" data-last-stage={i} id={i === 0 ? 'about' : undefined}>
+              <div class="last-block" data-last-scroll={i}>
+                <div class="last-rail" aria-hidden="true">
+                  <svg width="6" height="5" viewBox="0 0 5.77 5"><path d="M2.885 0 5.77 5H0z" fill="#fff" /></svg>
+                  <span class="line"></span>
+                  <svg width="6" height="5" viewBox="0 0 5.77 5"><path d="M2.885 5 0 0h5.77z" fill="#fff" /></svg>
+                </div>
+                <div class="last-text">
+                  <p class="h">{s.h}</p>
+                  <p class="b1">{s.b1}</p>
+                  {s.b2 && <p class="b2">{s.b2}</p>}
+                </div>
+                <a class="last-more" href="https://erengun.dev/work"><span style="opacity:.5">&gt; </span><span data-scramble-text>learn more</span></a>
+              </div>
+            </div>
+          ))}
+          <div class="last-stage" data-last-stage="2" id="contact">
+            <div class="talk-wrap" data-last-parallax>
+              <div class="talk-vignette"></div>
+              <div class="talk-col">
+                <a class="talk" href={`mailto:${SITE.email}`} data-talk-reveal>
+                  <span class="talk__plus" data-talk-plus>{[0, 1, 2, 3].map(() => <img src={plus} alt="" />)}</span>
+                  <svg class="talk__icon" viewBox="0 0 29 29" fill="none"><circle cx="14.5" cy="14.5" r="14" stroke="white" stroke-dasharray="2 2" /><path d="M10.36 15.77c1.6 3.5 7 3.5 8.28 0" stroke="white" stroke-linecap="round" stroke-dasharray="2 2" /><circle cx="8.1" cy="10.85" r="1.05" fill="white" /><circle cx="20.9" cy="10.85" r="1.05" fill="white" /></svg>
+                  <span class="talk__h uc" data-talk-reveal>let's talk about<br />your next project</span>
+                  <span class="talk__sub uc" data-talk-reveal>drop me an email and tell me what you're building</span>
+                  <span class="talk__arrow l" set:html={arrow} />
+                  <span class="talk__arrow r" set:html={arrow} />
+                  <span class="talk__arrow b" set:html={arrow} />
+                </a>
+                <ul class="socials uc" data-talk-reveal>
+                  {SOCIALS.map((s) => <li><a href={s.href}><span class="gt">&gt; </span><span data-scramble-text>{s.short}</span></a></li>)}
+                </ul>
+              </div>
+            </div>
+            <div class="last-bottom">
+              <button class="scroll-back uc" data-scroll-back data-talk-reveal>&gt; <span data-scramble-text>scroll back</span> &lt;</button>
+              <div class="container footer-row" data-talk-reveal>
+                <a href="https://erengun.dev/legal/privacy"><span data-scramble-text>privacy policy</span></a>
+                <span>{SITE.name} all rights reserved</span>
+                <span><span class="c">©</span> {SITE.year}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <nav class="ov work" data-work aria-label="Selected work">
+          <div class="container">
+            <p class="work__title">Selected work</p>
+            <div class="work__list" style={`--n:${PROJECTS.length}`}>
+              <span class="work__dot"><i></i></span>
+              {PROJECTS.map((p, i) => (
+                <button data-work-item={i}>[{pad(i + 1)}] {p.title}</button>
+              ))}
+            </div>
+          </div>
+        </nav>
+
+        <div class="scroll-length" data-scroll-length></div>
+      </div>
+    </div>
+
+    <div class="menu-backdrop" data-menu-backdrop></div>
+
+    <header class="header" data-header>
+      <div class="container header__inner">
+        <a class="header__logo" href="/" data-difference><span data-scramble-text data-logo>{SITE.logo}</span></a>
+        <div class="header__right">
+          <a class="header__talk" href={`mailto:${SITE.email}`} data-talk><span data-scramble-text>let's talk</span><i></i></a>
+          <div data-difference>
+            <nav class="menu" data-menu>
+              <button class="menu-trigger" data-menu-trigger aria-expanded="false" aria-controls="menu-list">
+                <span class="when-closed" data-scramble-text>menu</span>
+                <svg class="when-closed" viewBox="0 0 8.68 9.91" fill="none"><path d="M0 1.5h8.68M0 4.95h8.68M0 8.4h8.68" stroke="currentColor" stroke-width=".91" stroke-dasharray=".91 .2" /></svg>
+                <span class="when-open">close - x</span>
+              </button>
+              <ul class="menu-list" id="menu-list" data-menu-list>
+                {MENU.map((m, i) => (
+                  <li><a class="item" href={m.href} aria-current={i === 0 ? 'page' : undefined}><span data-scramble-text>{m.label}</span><span>{pad(i + 1)}</span></a></li>
+                ))}
+                <li class="links">
+                  <ul>{SOCIALS.map((s) => <li><a href={s.href}><span class="gt">&gt; </span><span data-scramble-text>{s.label}</span></a></li>)}</ul>
+                </li>
+              </ul>
+            </nav>
+          </div>
+        </div>
+      </div>
+      <div class="menu-footer"><div class="container footer-row"><a href="https://erengun.dev/legal/privacy"><span data-scramble-text>privacy policy</span></a><span>{SITE.name} all rights reserved</span><span><span class="c">©</span> {SITE.year}</span></div></div>
+    </header>
+
+    <div class="page-fade" data-page-fade></div>
+
+    <script>
+      import '../scripts/main';
+    </script>
+  </body>
+</html>

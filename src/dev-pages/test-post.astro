@@ -1,0 +1,166 @@
+---
+// Test page for the camcorder / VHS + CRT post pass (src/scene/post/camcorder.ts).
+// Query: ?webgl  force WebGL2 backend | ?dark  dark scene | ?phase=0.3 freeze loop phase
+//        ?nocam  bypass camcorder | ?idx=1 carousel index (vignette/curvature) | ?inside | ?fish=0.1
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>test-post</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      #c { position: fixed; inset: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="c"></div>
+    <script>
+      import {
+        WebGPURenderer, PerspectiveCamera, Scene, Mesh, PlaneGeometry, MeshBasicNodeMaterial, CanvasTexture,
+        RenderPipeline, SRGBColorSpace, Color, Vector2,
+      } from 'three/webgpu';
+      import { pass, uniform, mix, color, screenUV, vec4 } from 'three/tsl';
+      import { fishEye, overscanScale } from '../scene/post/fisheye';
+      import { createCamcorder } from '../scene/post/camcorder';
+
+      const q = new URLSearchParams(location.search);
+      const dark = q.has('dark');
+      const container = document.getElementById('c')!;
+      const renderer = new WebGPURenderer({ antialias: false, forceWebGL: q.has('webgl') });
+      await renderer.init();
+      container.appendChild(renderer.domElement);
+
+      const FOV = 70;
+      const camera = new PerspectiveCamera(FOV, 1, 0.1, 100);
+      camera.position.set(0, 0, 4);
+      const passCamera = camera.clone();
+      const scene = new Scene();
+      scene.backgroundNode = dark ? color(0x000000) : mix(color(0xffffff), color(0xd2d2d2), screenUV.y);
+
+      const canvasTex = (w: number, h: number, draw: (g: CanvasRenderingContext2D) => void) => {
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        draw(cv.getContext('2d')!);
+        const t = new CanvasTexture(cv);
+        t.colorSpace = SRGBColorSpace;
+        return t;
+      };
+      const plane = (w: number, h: number, mat: MeshBasicNodeMaterial, x: number, y: number, z: number, ry = 0) => {
+        const m = new Mesh(new PlaneGeometry(w, h), mat);
+        m.position.set(x, y, z); m.rotation.y = ry;
+        scene.add(m);
+        return m;
+      };
+
+      if (!dark) {
+        // blue "slide" with big bold title + small body text
+        const slide = canvasTex(1600, 1000, (g) => {
+          const gr = g.createLinearGradient(0, 0, 0, 1000);
+          gr.addColorStop(0, '#1c3fe0'); gr.addColorStop(1, '#3fd2ff');
+          g.fillStyle = gr; g.fillRect(0, 0, 1600, 1000);
+          g.fillStyle = '#fff'; g.font = 'italic bold 120px Helvetica, Arial, sans-serif';
+          g.fillText("Eren's AI Trust Map", 40, 150);
+          g.font = '22px Helvetica, Arial, sans-serif';
+          const body = ['Trusted AI requires customer control, privacy', 'by design, governance, transparency, and', 'human oversight. Explore this guide to see', 'how teams maximize AI opportunity.'];
+          body.forEach((l, i) => g.fillText(l, 40, 420 + i * 30));
+          g.fillStyle = '#ff3b30'; g.fillRect(700, 450, 200, 300);
+          g.fillStyle = '#ffd60a'; g.fillRect(950, 500, 120, 120);
+        });
+        plane(4.6, 2.9, new MeshBasicNodeMaterial({ map: slide }), 0, 0.15, 0);
+        // dark grid tile top-left (like the intro tile seen from the carousel)
+        const grid = canvasTex(512, 512, (g) => {
+          g.fillStyle = '#000'; g.fillRect(0, 0, 512, 512);
+          g.strokeStyle = '#ccc'; g.lineWidth = 2;
+          for (let i = 0; i <= 512; i += 32) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 512); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(512, i); g.stroke(); }
+        });
+        plane(2.5, 1.6, new MeshBasicNodeMaterial({ map: grid }), -3.3, 2.4, -0.5, 0.5);
+        // terminal-ish mono text on white, below
+        const term = canvasTex(2048, 512, (g) => {
+          g.fillStyle = 'rgba(255,255,255,0)'; g.clearRect(0, 0, 2048, 512);
+          g.fillStyle = '#9a9a9a'; g.font = 'bold 34px Menlo, monospace';
+          const lines = ['[00:26:02] adapter: discrete gpu, backend webgpu, limits ok', '[00:26:09] portal 01 atlas      entered   progress 1.000', '[00:26:17] portal 02 harbour    settled   rotation 0.2618 rad', 'eren@studio:~$ tail -f /var/log/studio/render.log', 'type is set in a monospace face, as always'];
+          lines.forEach((l, i) => g.fillText(l, 20, 60 + i * 52));
+        });
+        const tm = new MeshBasicNodeMaterial({ map: term, transparent: true });
+        const t = plane(7, 1.75, tm, -0.5, -2.35, 0.3);
+        t.rotation.x = -0.5;
+        // saturated swatches (chroma bleed check)
+        const sw = ['#ff0000', '#00c000', '#0040ff', '#ff00ff'];
+        sw.forEach((c, i) => plane(0.35, 0.35, new MeshBasicNodeMaterial({ color: new Color(c) }), 3.0 + (i % 2) * 0.45, 1.6 - Math.floor(i / 2) * 0.45, 0.2));
+        // corner marker (orientation check): black square top-right
+        plane(0.25, 0.25, new MeshBasicNodeMaterial({ color: new Color('#000') }), 3.6, 2.35, 0.2);
+      } else {
+        // dark: thin white grid + bright text block + voxel-ish face
+        const grid = canvasTex(2048, 1024, (g) => {
+          g.fillStyle = '#000'; g.fillRect(0, 0, 2048, 1024);
+          g.strokeStyle = '#bbb'; g.lineWidth = 2;
+          for (let i = 0; i <= 2048; i += 96) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 1024); g.stroke(); }
+          for (let i = 0; i <= 1024; i += 96) { g.beginPath(); g.moveTo(0, i); g.lineTo(2048, i); g.stroke(); }
+          g.strokeStyle = '#999'; g.lineWidth = 1.5;
+          for (let r = 0; r < 26; r++) for (let c = 0; c < 22; c++) {
+            const dx = (c - 11) / 11, dy = (r - 13) / 13;
+            if (dx * dx + dy * dy > 1) continue;
+            const s = 14 + ((r * 7 + c * 3) % 3) * 6;
+            g.strokeRect(1024 - 330 + c * 30, 120 + r * 30, s, s);
+          }
+          g.fillStyle = '#fff'; g.font = 'bold 64px Helvetica, Arial, sans-serif';
+          g.fillText('EREN GÜN', 60, 540);
+          g.font = '26px Menlo, monospace';
+          ['INDEPENDENT  SOFTWARE  DEVELOPER', 'BUILDING  RELIABLE  FLUTTER  APPS', 'AND  SMALL  WEIRD  WEBSITES'].forEach((l, i) => g.fillText(l, 1440, 500 + i * 34));
+        });
+        plane(12, 6, new MeshBasicNodeMaterial({ map: grid }), 0, 0, -1);
+        plane(0.25, 0.25, new MeshBasicNodeMaterial({ color: new Color('#fff') }), 3.6, 2.35, 0.2);
+      }
+
+      // ---- post chain (mirrors src/scene/post/index.ts, same module, built standalone)
+      const uFish = uniform(q.has('fish') ? +q.get('fish')! : 0.1);
+      const uOverscan = uniform(1);
+      const scenePass = pass(scene, passCamera);
+      const src = scenePass.getTextureNode('output');
+      const uvFish = fishEye(screenUV, uFish, uOverscan);
+      const sampled = src.sample(uvFish);
+      const pipeline = new RenderPipeline(renderer);
+      let cam: ReturnType<typeof createCamcorder> | null = null;
+      if (q.has('nocam')) pipeline.outputNode = vec4(sampled.rgb, 1);
+      else {
+        cam = createCamcorder({ renderer, source: sampled, sourceTexture: src as any, uvFish, uFish, uOverscan });
+        pipeline.outputNode = cam.output;
+        if (q.has('phase')) cam.debug.phaseOverride = +q.get('phase')!;
+      }
+
+      const size = new Vector2();
+      function resize() {
+        const w = container.clientWidth, h = container.clientHeight;
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.getDrawingBufferSize(size);
+        cam?.setSize(size.x, size.y);
+      }
+      resize();
+      addEventListener('resize', resize);
+
+      const state = { isHome: true, isPhone: false, inside: q.has('inside'), idx: q.has('idx') ? +q.get('idx')! : (dark ? 0 : 1), sceneT: 0, lastOpen: 0 };
+      let last = performance.now();
+      let frames = 0;
+      renderer.setAnimationLoop(() => {
+        const now = performance.now();
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        const s = (uOverscan.value = overscanScale(camera.aspect, uFish.value));
+        passCamera.position.copy(camera.position);
+        passCamera.fov = (2 * Math.atan(Math.tan((FOV * Math.PI) / 360) * s) * 180) / Math.PI;
+        passCamera.aspect = camera.aspect / s;
+        passCamera.updateProjectionMatrix();
+        passCamera.updateMatrixWorld();
+        cam?.update(q.has('phase') ? 0.5 : dt, now / 1000, state);
+        pipeline.render();
+        if (++frames === 30) document.body.dataset.ready = '1';
+      });
+      (window as any).__t = { renderer, cam, state };
+    </script>
+  </body>
+</html>

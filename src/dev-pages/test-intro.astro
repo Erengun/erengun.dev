@@ -1,0 +1,149 @@
+---
+// Test page for the intro portal (glitch portrait). Query params:
+//   webgl            force the WebGL2 backend
+//   quality=high|medium
+//   openness=0..1    (default 1)  focus=0..1 (default 1)
+//   threshold=.2..1  override reveal threshold   grid=0..1 override grid mix
+//   frame=N          freeze playback on frame N
+//   gate=0           keep the preloader gate closed (default open at load)
+//   px,py            fixed pointer NDC (for screenshots)
+//   post             run through the real post chain (fish-eye + camcorder/VHS)
+//   reveal, exit     dot-matrix intro: override reveal / exit progress;  cx,cy: fixed cursor (-1..1 of the frame)
+//   src=ski          dot-matrix intro: ski-photo variant
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>test: intro portal</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      #app, canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+      #hud { position: fixed; left: 8px; bottom: 8px; color: #7cc; font: 11px monospace; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud"></div>
+    <script>
+      import { WebGPURenderer, PerspectiveCamera, RenderTarget, HalfFloatType, QuadMesh, MeshBasicNodeMaterial, Vector2, Scene, Mesh, PlaneGeometry, OrthographicCamera, RenderPipeline } from 'three/webgpu';
+      import { texture, screenUV, uniform, pass } from 'three/tsl';
+      import { createPostChain } from '../scene/post';
+      import { fishEye, overscanScale } from '../scene/post/fisheye';
+      import { createIntroPortal } from '../scene/portals/intro';
+      import { PORTAL_H, PORTAL_W, type PortalFrame } from '../scene/types';
+
+      const q = new URLSearchParams(location.search);
+      const num = (k: string, d: number) => (q.has(k) ? +q.get(k)! : d);
+      const container = document.getElementById('app')!;
+      const hud = document.getElementById('hud')!;
+      const renderer = new WebGPURenderer({ antialias: false, forceWebGL: q.has('webgl') });
+      await renderer.init();
+      container.appendChild(renderer.domElement);
+      const isWebGL = !!(renderer.backend as any).isWebGLBackend;
+      const quality = (q.get('quality') as 'high' | 'medium') ?? (isWebGL ? 'medium' : 'high');
+      const portal = createIntroPortal({ renderer, isPhone: false, quality });
+      const dbg = (portal as any).debug ?? {};
+      for (const k of ['threshold', 'grid', 'frame', 'drift', 'reveal', 'exit', 'glide', 'px', 'py', 'hide']) if (q.has(k)) dbg[k] = +q.get(k)!;
+      if (q.has('cx')) dbg.cursor = [+q.get('cx')!, +q.get('cy')!];
+
+      // inner camera = the app's camera expressed in the portal plane's frame (FOV 110, see app.ts)
+      const FOV = 110;
+      const camera = new PerspectiveCamera(FOV, 1, 0.01, 1000);
+      const rt = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true });
+      const blit = new MeshBasicNodeMaterial();
+      blit.colorNode = texture(rt.texture, screenUV);
+      const quad = new QuadMesh(blit);
+      // ?post: run the portal image through the real post chain (fish-eye + overscan + camcorder/VHS), like the app
+      const usePost = q.has('post');
+      const uFish = uniform(0.1), uOverscan = uniform(1);
+      let pipeline: RenderPipeline | null = null, post: ReturnType<typeof createPostChain> | null = null;
+      if (usePost) {
+        const ps = new Scene();
+        const pm = new MeshBasicNodeMaterial(); pm.colorNode = texture(rt.texture, screenUV); pm.toneMapped = false;
+        ps.add(new Mesh(new PlaneGeometry(2, 2), pm));
+        const oc = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        post = createPostChain({ renderer, scenePass: pass(ps, oc), uFish, uOverscan, fishEye });
+        pipeline = new RenderPipeline(renderer);
+        pipeline.outputNode = post.output;
+      }
+
+      function resize() {
+        const w = innerWidth, h = innerHeight;
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(w, h, false);
+        const ov = usePost ? overscanScale(w / h, uFish.value) : 1;
+        uOverscan.value = ov;
+        camera.fov = (2 * Math.atan(Math.tan((FOV * Math.PI) / 360) * ov) * 180) / Math.PI;   // overscanned pass camera
+        camera.aspect = w / h / ov;
+        camera.updateProjectionMatrix();
+        const s = renderer.getDrawingBufferSize(new Vector2());
+        rt.setSize(s.x, s.y);
+        post?.setSize(s.x, s.y);
+      }
+      addEventListener('resize', resize);
+      resize();
+
+      const pointer = { x: num('px', 0), y: num('py', 0), inside: q.has('px'), down: false };
+      addEventListener('pointermove', (e) => {
+        pointer.x = (e.clientX / innerWidth) * 2 - 1;
+        pointer.y = 1 - (e.clientY / innerHeight) * 2;
+        pointer.inside = true;
+      });
+      document.documentElement.addEventListener('pointerleave', () => (pointer.inside = false));
+      const parallax = { x: 0, y: 0 };
+
+      await portal.ready;
+      try { await renderer.compileAsync(portal.scene, camera); } catch (e) { console.warn(e); }
+
+      const openness = num('openness', 1);
+      const focus = num('focus', 1);
+      const gateDelay = num('gateDelay', 0.2);
+      let last = performance.now();
+      const t0 = last;
+      let frames = 0, fpsT = 0, fps = 0;
+      (window as any).__intro = { portal, pointer, camera };
+
+      function coverDistance() {
+        const t = Math.tan((camera.fov * Math.PI) / 360);
+        const cover = Math.min(PORTAL_H / (2 * t), PORTAL_W / (2 * t * camera.aspect));
+        const target = cover * (1 - 0.2 * Math.min(1, openness / 1));
+        const ease = openness * openness * (3 - 2 * openness);
+        return 1 - (1 - target) * ease; // rest distance 1 (desktop camera z 4 − carousel radius 3)
+      }
+
+      function loop(now: number) {
+        const dt = Math.min((now - last) / 1000, 0.1);
+        last = now;
+        const time = (now - t0) / 1000;
+        const k = 1 - Math.exp(-5 * dt);
+        parallax.x += ((pointer.inside ? pointer.x : 0) - parallax.x) * k;
+        parallax.y += ((pointer.inside ? pointer.y : 0) - parallax.y) * k;
+        camera.position.set(0, 0, coverDistance());
+        camera.quaternion.identity();
+        camera.updateMatrixWorld();
+        const f: PortalFrame = {
+          dt, time, openness, focus, camera, pointer, parallax, vp: 0, sceneT: 0, isPhone: false,
+          gateOpen: q.get('gate') !== '0' && time > gateDelay, slide: 0, inside: false,
+        };
+        portal.update(f);
+        renderer.setRenderTarget(rt);
+        renderer.setClearColor(portal.background, 1);
+        if (portal.render) portal.render(renderer, camera, rt);
+        else { renderer.clear(); renderer.render(portal.scene, camera); }
+        renderer.setRenderTarget(null);
+        if (pipeline && post) {
+          post.update(dt, time, { isHome: true, isPhone: false, inside: false, idx: 0, sceneT: 0, lastOpen: 0 });
+          pipeline.render();
+        } else quad.render(renderer);
+        frames++; fpsT += dt;
+        if (fpsT > 0.5) { fps = frames / fpsT; frames = 0; fpsT = 0; hud.textContent = `${isWebGL ? 'webgl2' : 'webgpu'} ${quality} ${fps.toFixed(0)} fps`; }
+        requestAnimationFrame(loop);
+      }
+      requestAnimationFrame(loop);
+    </script>
+  </body>
+</html>
