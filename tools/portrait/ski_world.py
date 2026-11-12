@@ -75,7 +75,78 @@ def sky_mask(im, dd):
 SCALE = 2.0
 cfg = dict(src=SRC, scale=SCALE, stamp=STAMP, zn=1.3, zf=70, relief=0.45, n_bg=150_000, n_fg=60_000,
            open_w=0.3, bump_lo=.05, bump_hi=.10, ext=(0.30, 0.18), ext_push=0.35, hole_dilate=13, min_area=0.003,
-           far_mask=sky_mask, fg_levels=(2, 1), close_k=7, kmax=20.0)
+           far_mask=sky_mask, fg_levels=(2, 1), close_k=7, kmax=4.0)   # low stretch: no treeline smear
+# ---- polish: feather the photo's background layer into the procedural world (applied to parts[0] = bg only;
+# the skier/skis foreground layer is untouched)
+#   - sky splats (far plane) fade radially toward the photo border → no hard band / mirrored extension in the sky
+#   - near-snow band at the bottom fades out over a wide band → the procedural snow takes over without a seam
+_orig_write = B.write_splat
+def _feathered_write(path, parts, seed=7):
+    if len(parts) >= 1:
+        pos, sc, col, a, q = parts[0]
+        z = np.maximum(-pos[:, 2], 1e-3)
+        Wp, Hp = SCALE * W, SCALE * H
+        fpx = (Wp / 2) / np.tan(np.radians(B.HFOV / 2))
+        un = (pos[:, 0] / z * fpx) / (Wp / 2)            # −1..1 across the photo (beyond = extension)
+        vn = (-pos[:, 1] / z * fpx) / (Hp / 2)           # −1 top .. +1 bottom
+        far = z > cfg['zf'] * 0.8
+        r = np.maximum(np.abs(un), np.abs(vn) * 1.1)
+        sky_f = 1 - B.smoothstep(0.35, 0.92, r)
+        bot_f = 1 - B.smoothstep(0.28, 0.95, vn)        # wide band from below the skis to the bottom edge
+        a = a * np.where(far, sky_f, bot_f)
+        parts = [(pos, sc, col, a, q)] + list(parts[1:])
+    return _orig_write(path, parts, seed)
+B.write_splat = _feathered_write
+
+import inspect, textwrap
+_src = inspect.getsource(B.build)
+_old = _src[_src.index("    hs = 2 if max(H, W) > 700 else 1"):_src.index("    if cfg.get('keep_bg_color')")]
+_new = '''    fill = _row_fill((img * 255).astype(np.uint8), hole).astype(np.float32) / 255
+    wgt = cv2.GaussianBlur(cv2.dilate(hard, np.ones((9, 9), np.uint8)).astype(np.float32), (0, 0), 4)
+    wgt = np.maximum(wgt, cv2.dilate(hard, np.ones((5, 5), np.uint8)).astype(np.float32))
+    c_bg = img * (1 - wgt[..., None]) + fill * wgt[..., None]
+'''
+assert _old in _src
+B.__dict__['_row_fill'] = None  # placeholder, set below once defined
+
+# ---- polish: fill the hole behind the skier row by row (clouds, treeline and slope are horizontal structures), with
+# texture borrowed from the rows above/below, instead of TELEA's pale vertical smear (it showed as a ghost column
+# beside him when the camera orbits), and blend it in with a soft wide ramp instead of the pipeline's hard 5 px ring
+# (that ring left a thin crease up through the clouds). Done on a runtime-patched copy of build() — the memories tool
+# file itself is not modified.
+def _row_fill(src, mask, radius=None, flags=None):
+    out = src.astype(np.float32).copy()
+    hole = mask > 0
+    Hh, Ww = hole.shape
+    for y in range(Hh):
+        row = hole[y]
+        if not row.any():
+            continue
+        x = 0
+        while x < Ww:
+            if not row[x]:
+                x += 1; continue
+            x0 = x
+            while x < Ww and row[x]:
+                x += 1
+            x1 = x   # hole run [x0, x1)
+            L = out[y, max(0, x0 - 4):x0].mean(0) if x0 > 0 else None
+            R = out[y, x1:min(Ww, x1 + 4)].mean(0) if x1 < Ww else None
+            if L is None: L = R
+            if R is None: R = L
+            if L is None:
+                continue
+            t = (np.arange(x0, x1) - x0 + 0.5) / max(x1 - x0, 1)
+            out[y, x0:x1] = L[None] * (1 - t[:, None]) + R[None] * t[:, None]
+    # texture: add high-frequency detail sampled from just outside the hole (vertical neighbours)
+    base = cv2.GaussianBlur(src.astype(np.float32), (0, 0), 2)
+    detail = (src.astype(np.float32) - base) * (~cv2.dilate(hole.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(bool))[..., None]   # never borrow the skier's own edges
+    shifted = np.roll(detail, 9, axis=0) * 0.5 + np.roll(detail, -9, axis=0) * 0.5
+    out = np.where(hole[..., None], out + shifted * 0.6, out)
+    out = np.where(hole[..., None], cv2.GaussianBlur(out, (0, 0), 0.8), out)
+    return np.clip(out, 0, 255).astype(np.uint8)
+B.__dict__['_row_fill'] = _row_fill
+exec(compile(_src.replace(_old, _new), B.__file__, 'exec'), B.__dict__)   # B.build now uses the soft row fill
 meta = B.build(NAME, SRC, cfg)
 
 # ---- scene metadata for the runtime world (same pinhole as build.py)
@@ -106,6 +177,8 @@ zen = img2[: max(4, H2 // 12)][sky2[: max(4, H2 // 12)]]
 out = dict(meta, ground=[float(c) for c in coef], skier=skier,
            sky_zenith=[float(x) for x in (zen.mean(0) if len(zen) else skyc.mean(0))],
            sky_horizon=[float(x) for x in np.percentile(skyc, 75, axis=0)] if len(skyc) else [0.8, 0.85, 0.9],
-           snow=[float(x) for x in np.median(img2[gsel & (img2.mean(-1) > 0.6)], 0)])
+           snow=[float(x) for x in np.median(img2[gsel & (img2.mean(-1) > 0.6)], 0)],
+           snow_near=[float(x) for x in np.median(img2[gsel & (vv > H2 * 0.75)], 0)],
+           snow_shadow=[float(x) for x in np.percentile(img2[gsel & (vv > H2 * 0.6)], 15, axis=0)])
 json.dump(out, open(f'{OUT}/{NAME}.json', 'w'), indent=1)
 print(json.dumps({k: out[k] for k in ('ground', 'skier', 'sky_zenith', 'sky_horizon', 'snow', 'n_bg', 'n_fg')}, indent=1))

@@ -31,7 +31,7 @@ type SkiMeta = {
   hfov: number; zn: number; zf: number;
   ground: [number, number, number];
   skier: { centre: number[]; feet: number[]; head: number[] };
-  sky_zenith: number[]; sky_horizon: number[]; snow: number[];
+  sky_zenith: number[]; sky_horizon: number[]; snow: number[]; snow_near?: number[]; snow_shadow?: number[];
 };
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
@@ -72,7 +72,9 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const uTime = uniform(0);
   const uZenith = uniform(new Color('#26508a'));
   const uHorizon = uniform(new Color('#9fb0c2'));
-  const uSnow = uniform(new Color('#c7cbcd'));
+  const uSnow = uniform(new Color('#c7cbcd'));       // sunlit snow (photo)
+  const uSnowNear = uniform(new Color('#a9b0b3'));   // the photo's near, trodden snow
+  const uSnowShadow = uniform(new Color('#5a6880')); // the photo's blue snow shadows
   const uSnowBox = uniform(new Vector3());   // centre of the falling-snow box (follows the camera target)
   const uFeet = uniform(new Vector3(0, -1, -2.5));
   const uSpray = uniform(0);
@@ -104,14 +106,17 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     const p = positionWorld;
     const grain = mx_noise_float(vec3(p.xz.mul(1.7), 0.5)).mul(0.5).add(0.5);
     const big = mx_noise_float(vec3(p.xz.mul(0.08), 1.0)).mul(0.5).add(0.5);
-    let c: any = uSnow.mul(mix(0.84, 1.05, big)).mul(mix(0.9, 1.06, grain));
-    // trodden snow like the photo: blue-shadowed dimples at two scales + fine sparkle
-    const dimple = mx_noise_float(vec3(p.xz.mul(0.9), 2.0)).mul(0.5).add(0.5);
-    const ripple = mx_noise_float(vec3(p.x.mul(0.35), p.z.mul(1.2), 3.0)).mul(0.5).add(0.5);
-    const shade = smoothstep(0.5, 0.85, dimple).mul(0.55).add(smoothstep(0.6, 0.9, ripple).mul(0.35));
-    c = mix(c, c.mul(vec3(0.62, 0.72, 0.92)), clamp(shade, 0, 0.8));
-    const sparkle = smoothstep(0.92, 0.99, mx_noise_float(vec3(p.xz.mul(14.0), 4.0)).mul(0.5).add(0.5));
-    c = c.add(sparkle.mul(0.25));
+    // matched to the photo's near snow: trodden base, sunlit crests, blue shadow dimples (sampled colours)
+    let c: any = mix(uSnowNear, uSnow, smoothstep(0.35, 0.75, big)).mul(mix(0.93, 1.05, grain));
+    const dimple = mx_noise_float(vec3(p.xz.mul(1.1), 2.0)).mul(0.5).add(0.5);
+    const dimple2 = mx_noise_float(vec3(p.xz.mul(3.2), 5.0)).mul(0.5).add(0.5);
+    const ripple = mx_noise_float(vec3(p.x.mul(0.4), p.z.mul(1.3), 3.0)).mul(0.5).add(0.5);
+    const shade = smoothstep(0.55, 0.85, dimple).mul(0.6).add(smoothstep(0.62, 0.9, dimple2).mul(0.35)).add(smoothstep(0.65, 0.9, ripple).mul(0.3));
+    c = mix(c, uSnowShadow, clamp(shade, 0, 0.75));
+    c = c.add(smoothstep(0.7, 0.95, float(1).sub(dimple)).mul(0.06));                 // crest highlights
+    // occasional twinkle: sparse glints that come and go
+    const glint = mx_noise_float(vec3(p.xz.mul(16.0), uTime.mul(0.6))).mul(0.5).add(0.5);
+    c = c.add(smoothstep(0.9, 0.97, glint).mul(0.45));
     const d = length(p.sub(cameraPosition));
     c = mix(c, uHorizon.mul(1.02), smoothstep(40.0, 420.0, d));
     return vec4(c, 1);
@@ -162,7 +167,8 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const BOX = new Vector3(22, 12, 26);
   const fall = uTime.mul(mix(0.35, 0.9, h4));
   const rel = vec3(
-    fract(h1.add(uTime.mul(0.012))).sub(0.5).mul(BOX.x).add(sin(uTime.mul(0.6).add(h2.mul(30))).mul(0.25)),
+    fract(h1.add(uTime.mul(0.012)).add(sin(uTime.mul(0.23)).mul(0.03)).add(sin(uTime.mul(0.071).add(1.3)).mul(0.05))).sub(0.5).mul(BOX.x)
+      .add(sin(uTime.mul(0.6).add(h2.mul(30))).mul(0.25).mul(float(1).add(sin(uTime.mul(0.37)).mul(0.6)))),   // gusty wind
     fract(h2.sub(fall.div(BOX.y))).sub(0.5).mul(BOX.y),
     h3.sub(0.5).mul(BOX.z));
   flakeMat.positionNode = uSnowBox.add(rel);
@@ -225,11 +231,13 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     uZenith.value.copy(srgb(meta.sky_zenith, 0.72));
     uHorizon.value.copy(srgb(meta.sky_horizon, 0.86));
     uSnow.value.copy(srgb(meta.snow, 0.98));
+    if (meta.snow_near) uSnowNear.value.copy(srgb(meta.snow_near, 1.0));
+    if (meta.snow_shadow) uSnowShadow.value.copy(srgb(meta.snow_shadow, 1.0));
     background.copy(uHorizon.value).multiplyScalar(0.5);
     // ground plane: normal (−a, 1, −b), through (0, c, 0), a few cm below the splat's snow
     const nrm = new Vector3(-a, 1, -b).normalize();
     ground.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), nrm);
-    ground.position.set(0, c - 0.22, 0);
+    ground.position.set(0, c - 0.04, 0);   // at the photo snow's surface: the feathered splat dissolves into it
     // pines: clustered bands beyond the capture, never inside the photo frustum (it has its own treeline)
     const tanH = Math.tan(((meta.hfov / 2 + 4) * Math.PI) / 180);
     const m4 = new Matrix4(), q = new Quaternion(), s3 = new Vector3(), p3 = new Vector3();
@@ -274,7 +282,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   })();
 
   // ------------------------------------------------------------------ camera path
-  const debug: { glide?: number; exit?: number; px?: number; py?: number } = {};
+  const debug: { glide?: number; exit?: number; px?: number; py?: number; hide?: number } = {};
   let t = 0, revealClock = -1;
   const camPos = new Vector3(), look = new Vector3(), tmp = new Vector3(), past = new Vector3();
   function poseCamera(f: PortalFrame, exit: number) {
@@ -283,17 +291,19 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     // ~0.34 here → ~40% on screen after the post's centre magnification (fish-eye + camcorder zoom ≈ 1.2×)
     const frac = ctx.isPhone || f.camera.aspect < 1 ? 0.25 : 0.34;   // phones: stronger fish-eye magnification
     const rest = skierH / (2 * frac * Math.tan((vfov * Math.PI) / 360));
-    const g = debug.glide ?? (revealClock < 0 ? 0 : clamp01(revealClock / 7));
-    const e = inOutCubic(g);
+    const g = debug.glide ?? (revealClock < 0 ? 0 : clamp01(revealClock / 8));
+    const e = g * g * g * (g * (g * 6 - 15) + 10);   // smootherstep: very gentle start
     const px = debug.px ?? f.parallax.x, py = debug.py ?? f.parallax.y;
     // orbit (yaw around the skier): start −8° further back and a little higher → rest +3°, idle drift ±2.5°,
     // pointer ±6°. The splat is a 2.5D capture: stay near the photo's eye line so it never shows its seams.
     const drift = Math.sin((t * 2 * Math.PI) / 16) * 2.5;
-    const yaw = ((-8 + 11 * e + drift * e + px * 6) * Math.PI) / 180;
-    const R = rest * (1.6 - 0.6 * e);
-    const lift = 0.55 * (1 - e) + 0.1 + py * 0.3 + Math.sin((t * 2 * Math.PI) / 11) * 0.05;
+    const yaw = ((-5 + 8 * e + drift * e + px * 6) * Math.PI) / 180;
+    const R = rest * (1.35 - 0.35 * e);
+    const lift = 0.2 * (1 - e) + 0.1 + py * 0.3 + Math.sin((t * 2 * Math.PI) / 11) * 0.05;
     camPos.set(pivot.x + Math.sin(yaw) * R, pivot.y + lift + 0.2, pivot.z + Math.cos(yaw) * R);
-    look.copy(pivot).add(tmp.set(0, 0.45 - 0.15 * (1 - e), 0));
+    // portrait screens: aim higher so the scene sits lower and the tagline has calm sky behind it
+    const aimUp = f.camera.aspect < 1 ? 0.75 : 0;
+    look.copy(pivot).add(tmp.set(0, 0.45 - 0.08 * (1 - e) + aimUp, 0));
     // exit: ski past him downhill (to his right, low), looking far down the slope
     if (exit > 0) {
       const x = inOutCubic(exit);
@@ -319,7 +329,11 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     poseCamera(f, exit);
     uSnowBox.value.copy(cam.position).lerp(pivot, 0.55);
     uSpray.value = 0.35 + 0.65 * Math.max(0, Math.sin(t * 0.9)) ** 3;
+    // exit: the photo layer dissolves while we ski past him (at grazing angles its flat splats would show);
+    // the procedural slope + snow carry the motion into the compositor's zoom-dissolve
+    splat.setOpacity(1 - Math.min(1, Math.max(0, (exit - 0.25) / 0.45)));
     splat.update(dt, cam, { x: 0, y: 0, inside: false });
+    if (debug.hide !== undefined) { splat.object.visible = (debug.hide & 1) === 0; sky.visible = (debug.hide & 2) === 0; flakes.visible = (debug.hide & 4) === 0; }
   }
 
   function render(renderer: WebGPURenderer, camera: PerspectiveCamera, rt: RenderTarget) {

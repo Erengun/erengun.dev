@@ -47,7 +47,7 @@
       const quality = (q.get('quality') as 'high' | 'medium') ?? (isWebGL ? 'medium' : 'high');
       const portal = createIntroPortal({ renderer, isPhone: false, quality });
       const dbg = (portal as any).debug ?? {};
-      for (const k of ['threshold', 'grid', 'frame', 'drift', 'reveal', 'exit', 'glide', 'px', 'py']) if (q.has(k)) dbg[k] = +q.get(k)!;
+      for (const k of ['threshold', 'grid', 'frame', 'drift', 'reveal', 'exit', 'glide', 'px', 'py', 'hide']) if (q.has(k)) dbg[k] = +q.get(k)!;
       if (q.has('cx')) dbg.cursor = [+q.get('cx')!, +q.get('cy')!];
 
       // inner camera = the app's camera expressed in the portal plane's frame (FOV 110, see app.ts)
