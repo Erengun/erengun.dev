@@ -71,7 +71,7 @@ export const PROJECTS: Project[] = [
     title: 'Subara',
     info: 'A subscription manager for iPhone and iPad, built with Flutter: spending charts, a payment calendar, reminders before renewals, widgets and Live Activities. Data stays on device.',
     roles: ['Design', 'Development', 'iOS'],
-    slides: 6,
+    slides: 5,
     palette: ['#5b3df5', '#ff8fc7', '#f6f3ff'],
   },
 ];
