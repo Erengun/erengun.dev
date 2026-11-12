@@ -47,6 +47,7 @@
       if (q.has('threshold')) portal.debug.threshold = +q.get('threshold')!;
       if (q.has('grid')) portal.debug.grid = +q.get('grid')!;
       if (q.has('frame')) portal.debug.frame = +q.get('frame')!;
+      if (q.has('drift')) (portal.debug as any).drift = +q.get('drift')!;
 
       // inner camera = the app's camera expressed in the portal plane's frame (FOV 110, see app.ts)
       const FOV = 110;

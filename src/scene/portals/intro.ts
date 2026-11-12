@@ -18,7 +18,7 @@
 import {
   Scene, Color, Group, Sprite, Mesh, PlaneGeometry, SpriteNodeMaterial, MeshBasicNodeMaterial, Texture,
   NearestFilter, NoColorSpace, AdditiveBlending, RenderTarget, HalfFloatType, QuadMesh, Vector2, Vector3, Matrix4,
-  type WebGPURenderer, type PerspectiveCamera,
+  PerspectiveCamera, type WebGPURenderer,
 } from 'three/webgpu';
 import {
   Fn, uniform, float, int, ivec2, vec2, vec3, vec4, instanceIndex, textureLoad, texture, varying, uv, screenUV,
@@ -35,10 +35,12 @@ const CELL_A = EXTENT / (N - 1); // atlas texel pitch in grid units
 const HALF_A = (N - 1) / 2;
 const CUTOFF = 0.35;
 const OPACITY = 0.66;
-const GROUP_SCALE = 0.40;      // grid units → portal units (tuned for the FOV-110 inner camera)
+const GROUP_SCALE = 0.33;      // grid units → portal units (tuned for the FOV-110 inner camera)
 const FRAME_DIST = 2.2;        // distance camera → frame baseline when fully open
 const CAM_OPEN = 0.406;        // inner camera distance to the portal plane when open (coverDepth·0.8)
-const GROUP_Y = 0.0;
+const GROUP_Y = 0.30;
+const GROUP_X = 0.45;            // figure centred-right: name (left) and tagline (right) stay readable
+const DRIFT_YAW = (8 * Math.PI) / 180, DRIFT_PITCH = (2 * Math.PI) / 180; // gentle camera orbit
 const TEAL = new Color().setRGB(121 / 255, 199 / 255, 199 / 255); // sRGB → linear handled by Color
 // spec ends the grid at #222; the lead asked for the grid to stay the main read, so it rests at a dim teal-grey
 const GRID_ROOT = 0.035;  // linear grey of root-level lines at rest (~55/255): background grid stays dim
@@ -53,7 +55,7 @@ const LIGHTS: [number, [number, number, number]][] = [
 ];
 
 // spec relief gain is 3; the ultra-close photo portrait uses less so the FOV-110 camera doesn't balloon the face
-const RELIEF = 1.6;
+const RELIEF = 1.4;
 const relief = (d: number) => (Math.floor(Math.max(d, CUTOFF) * 100) / 100 - CUTOFF) * RELIEF + CUTOFF;
 const inOutQuart = (t: number) => (t < 0.5 ? 8 * t ** 4 : 1 - (-2 * t + 2) ** 4 / 2);
 const outQuad = (t: number) => 1 - (1 - t) * (1 - t);
@@ -120,6 +122,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const d4 = load(dataTex, tc);
   const depth = d4.r;
   const nmin = d4.g;
+  const lineMap = d4.b; // thin-line map from the photo (glasses frames, brows, lids): drawn as bright voxels
   // relief gradient (for the ≤10° normal tilt)
   const dxp = load(dataTex, tc.add(ivec2(1, 0))).r, dxm = load(dataTex, tc.sub(ivec2(1, 0))).r;
   const dyp = load(dataTex, tc.sub(ivec2(0, 1))).r, dym = load(dataTex, tc.add(ivec2(0, 1))).r; // image rows go down
@@ -162,6 +165,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   };
   const P = [cosPal(0), cosPal(1 / 3), cosPal(2 / 3)];
   const colRaw = load(colorTex, tc).rgb;
+  const vRawL = varying(dot(colRaw, vec3(0.299, 0.587, 0.114)), 'vRawL'); // photo luma (sRGB) for the tone curve
   const gradeFn = Fn(([c0, mv]: any[]) => {
     let c = c0.sub(0.5).mul(0.84).add(0.5);
     const l = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -185,7 +189,14 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   ).add(qOff);
   const vLevel = load(qtTex, qtc).r.mul(255 / QT.levelScale);
   const edgeF = smoothstep(2.0, 4.2, vLevel);
-  const vBright = varying(mix(0.5, 1.0, edgeF).add(moving.mul(0.5)), 'vBright');
+  const vBright = varying(mix(0.92, 1.0, edgeF).add(moving.mul(0.5)), 'vBright'); // near-full brightness: the photo carries the face
+  const vHero = varying(smoothstep(0.2, 0.8, lineMap), 'vHero'); // data.B = skier matte (incl. skis/poles)
+  // the scene dissolves toward the photo's frame edges (no floating rectangular slab); the skier never fades
+  const eu = ix.toFloat().div(G - 1), ev = iy.toFloat().div(G - 1);
+  const edgeFade = smoothstep(0.0, 0.16, min(min(eu, float(1).sub(eu)), float(1).sub(ev)));
+  const fadeRaw = max(edgeFade, smoothstep(0.2, 0.8, lineMap));
+  const vFade = varying(fadeRaw, 'vFade');
+  voxel.scaleNode = (voxel.scaleNode as any).mul(smoothstep(0.0, 0.6, fadeRaw)); // faded voxels shrink away
   const vColor = varying(gradeFn(colRaw, moving), 'vColor');
   const vGrad = varying(grad, 'vGrad');
   const vMoving = varying(moving, 'vMoving');
@@ -207,10 +218,15 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     // neutral grey: the photo's own luma carries the likeness (beard/brows/hair dark, skin light); the three
     // lights only modulate it (bevel highlights), then the contour factor dims the interior
     const lumC = dot(vColor, vec3(0.2126, 0.7152, 0.0722));
-    const shade = float(0.5).add(clamp(lam.mul(1 / 2.2), 0, 1).mul(0.6));
-    const base = float(0.18).add(smoothstep(0.08, 0.6, lumC).mul(0.82)).mul(0.36).mul(shade); // floor: dark hair/beard still read as volume
-    const grey = mix(base, lumC.mul(0.6).add(0.05), vMoving.mul(0.35));
-    return vec4(vec3(grey.mul(vBright).add(0.004)), 1);
+    // photo luma at near-full brightness (perceptual), darks lifted so dark hair/beard read as volume against black;
+    // the lights only modulate gently. Warm-neutral grey.
+    const shade = float(0.88).add(clamp(lam.mul(1 / 2.2), 0, 1).mul(0.22));
+    // tone curve on the raw photo luma: hair/beard/moustache dark grey, skin light grey, clear separation
+    const toneS = float(0.07).add(smoothstep(0.06, 0.82, vRawL).mul(0.72)).mul(shade);
+    let grey: any = pow(toneS, float(2.2)).mul(1.1);                      // back to linear (×1.1: opacity .66 over black)
+    grey = mix(grey, lumC.mul(0.8).add(0.06), vMoving.mul(0.35));
+    grey = grey.mul(vBright).mul(mix(0.3, 1.0, vHero)).mul(vFade);        // the skier is the hero; snow/trees dimmed
+    return vec4(vec3(1.0, 0.965, 0.92).mul(grey).add(0.004), 1);
   })();
   voxel.opacityNode = Fn(() => {
     const q = uv().mul(2).sub(1);
@@ -236,7 +252,9 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const uvF = positionGeometry.xy.div(EXTENT).add(0.5);
   const inside = uvF.x.greaterThanEqual(0).and(uvF.x.lessThanEqual(1)).and(uvF.y.greaterThanEqual(0)).and(uvF.y.lessThanEqual(1));
   const gtc = ivec2(clamp(uvF.x.mul(N - 1).add(0.5), 0, N - 1).toInt(), clamp(float(1).sub(uvF.y).mul(N - 1).add(0.5), 0, N - 1).toInt()).add(base);
-  const gd = select(inside, load(dataTex, gtc).r, float(0));
+  const gdat = load(dataTex, gtc);
+  const gd = select(inside, gdat.r, float(0));
+  const vGHero = varying(select(inside, gdat.b, float(0)), 'vGHero');
   const gRel = max(gd, CUTOFF).sub(CUTOFF).mul(RELIEF).add(CUTOFF).sub(CELL * 1.2);
   gridMat.positionNode = vec3(positionGeometry.xy, gRel);
   const vUvF = varying(uvF, 'vUvF');
@@ -258,8 +276,10 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     const line = float(1).sub(smoothstep(0.35, 0.85, min(dd.x, dd.y)));
     // reveal: teal (spec) → rest: neutral grey, brighter for finer levels (contour lines) than for root lines
     // inside the subject only the fine contour cells stay bright; coarse interior lines dim so the face reads
-    const inSubject = select(vGd.greaterThan(CUTOFF), float(1), float(0));
-    const interiorDim = mix(1.0, mix(0.3, 1.0, smoothstep(2.5, 4.0, lv)), inSubject);
+    const inSubject = smoothstep(0.2, 0.8, vGHero); // lines stay subtle on the skier, visible on the scene
+    // empty sky: full grid; scene (snow, trees): visible but calm; skier: subtle overlay only
+    const onScene = select(vGd.greaterThan(CUTOFF), float(1), float(0));
+    const interiorDim = mix(mix(1.0, 0.16, onScene), mix(0.08, 0.3, smoothstep(3.0, 5.0, lv)), inSubject);
     const rest = vec3(mix(GRID_ROOT, GRID_FINE, smoothstep(0.0, 3.0, lv)).mul(interiorDim));
     const gridCol = mix(vec3(TEAL.r, TEAL.g, TEAL.b).mul(0.6), rest, uReveal);
     const band = float(1).sub(smoothstep(0.0, 0.06, abs(vGd.sub(uThreshold)))).mul(select(vGd.greaterThan(CUTOFF), float(1), float(0)));
@@ -354,6 +374,26 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   // ------------------------------------------------------------------ state
   let frameIdx = 0;
   let playT = 0;
+  // Dolly 'lens' camera: same view direction and same framing of the portrait baseline plane as the inner camera,
+  // but a narrow FOV from further back, so the relief doesn't balloon (the FOV-110 inner camera at close range
+  // magnifies near voxels heavily). Used for rendering and picking.
+  const LENS_FOV = 30;
+  const lensCam = new PerspectiveCamera(LENS_FOV, 1, 0.05, 500);
+  const fwd = new Vector3();
+  const gpos = new Vector3();
+  function updateLens(c: PerspectiveCamera) {
+    c.getWorldDirection(fwd);
+    group.getWorldPosition(gpos);
+    const D = Math.max(0.1, gpos.sub(c.position).dot(fwd) + CUTOFF * GROUP_SCALE);
+    const k = Math.tan((c.fov * Math.PI) / 360) / Math.tan((LENS_FOV * Math.PI) / 360);
+    lensCam.position.copy(c.position).addScaledVector(fwd, -D * (k - 1));
+    lensCam.quaternion.copy(c.quaternion);
+    lensCam.aspect = c.aspect;
+    lensCam.far = D * k + 50;
+    lensCam.updateProjectionMatrix();
+    lensCam.updateMatrixWorld();
+  }
+  let driftT = 0;
   let revealClock = -1; // seconds since the gate opened, accumulated from clamped dt (a compile stall can't skip the reveal)
   let revealT = 0;
   let gridT = 0;
@@ -368,7 +408,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const ro = new Vector3();
   const rp = new Vector3();
   /** test-page overrides (src/pages/test-intro.astro); unused by the app */
-  const debug: { threshold?: number; grid?: number; frame?: number; state?: { th: number; revealSince: number } } = {};
+  const debug: { threshold?: number; grid?: number; frame?: number; drift?: number; state?: { th: number; revealSince: number } } = {};
 
   function depthAt(gx: number, gy: number): number {
     if (!cpuDepth) return 0;
@@ -380,7 +420,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
 
   function locate(f: PortalFrame) {
     // ray through the pointer, in group-local (grid) units
-    const cam = f.camera;
+    const cam = lensCam; // pick with the same (dolly) camera we render with
     ro.setFromMatrixPosition(cam.matrixWorld);
     rp.set(f.pointer.x, f.pointer.y, 0.5).applyMatrix4(cam.projectionMatrixInverse).applyMatrix4(cam.matrixWorld);
     inv.copy(group.matrixWorld).invert();
@@ -407,11 +447,16 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     const active = f.focus > 0.001 || f.openness > 0.001;
     // content placement: frame baseline FRAME_DIST in front of the camera when open, moves by -openness
     const z0 = CAM_OPEN - FRAME_DIST + 1 - CUTOFF * GROUP_SCALE;
-    group.position.set(0, GROUP_Y, z0 - f.openness);
-    group.rotation.y = f.parallax.x * 0.06 * f.focus;
-    group.rotation.x = -f.parallax.y * 0.04 * f.focus;
+    group.position.set(GROUP_X, GROUP_Y, z0 - f.openness);
     if (!active) return;
     const dt = Math.min(f.dt, 0.1);
+    // camera drift: slow small orbit (±8° yaw, ±2° pitch) + pointer / tilt parallax
+    driftT += dt;
+    group.rotation.y = Math.sin((driftT * 2 * Math.PI) / 11) * DRIFT_YAW + f.parallax.x * 0.08 * f.focus;
+    group.rotation.x = Math.sin((driftT * 2 * Math.PI) / 15) * DRIFT_PITCH - f.parallax.y * 0.05 * f.focus;
+    if (debug.drift !== undefined) { group.rotation.y = debug.drift * DRIFT_YAW; group.rotation.x = 0; }
+    group.updateMatrixWorld();
+    updateLens(f.camera);
 
     // playback: 30 fps ping-pong
     playT += dt;
@@ -471,7 +516,8 @@ export function createIntroPortal(ctx: PortalContext): Portal {
 
     renderer.setRenderTarget(sceneRT);
     renderer.clear();
-    renderer.render(scene, camera);
+    void camera;
+    renderer.render(scene, lensCam);
     renderer.setRenderTarget(blurA); downQuad.render(renderer);
     renderer.setRenderTarget(blurB); hQuad.render(renderer);
     renderer.setRenderTarget(blurA); vQuad.render(renderer);
