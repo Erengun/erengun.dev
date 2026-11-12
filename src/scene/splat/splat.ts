@@ -309,6 +309,8 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
     sortDir.set(0, 0, -1);
     requestSort();
     await firstSort;
+    // visible from here on so renderer.compileAsync warm-ups include it (update() keeps it in sync with opacity)
+    mesh.visible = opacity > 0.001;
   })();
 
   // ---- per-frame

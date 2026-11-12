@@ -92,8 +92,8 @@ function grain(c: C, amt = 10) {
 }
 /** site nav bar */
 function nav(c: C, logo: string, links: string[], col: string, y = 34, logoFont = `700 15px ${SANS}`) {
-  text(c, logo, 44, y, logoFont, col);
-  let x = SLIDE_W - 44;
+  text(c, logo, 64, y, logoFont, col);
+  let x = SLIDE_W - 64;
   for (let i = links.length - 1; i >= 0; i--) {
     c.font = `500 12px ${SANS}`;
     const w = c.measureText(links[i]).width;
@@ -254,14 +254,14 @@ const oge: Draw[] = [
     c.fillRect(0, 0, SLIDE_W, SLIDE_H);
     nav(c, 'öge', ['How it works', 'Receipts', 'Docs', 'GitHub'], OGE_K, 40, `900 22px ${BLACK}`);
     shadow(c, 0, 'rgba(0,0,0,.18)', 4);
-    text(c, 'ONE DESK', 52, 170, `900 92px ${BLACK}`, OGE_K, 'left', -4);
-    text(c, 'FOR EVERYTHING', 52, 248, `900 50px ${BLACK}`, OGE_K, 'left', -2);
-    text(c, "YOU'RE BUILDING.", 52, 312, `900 50px ${BLACK}`, OGE_C, 'left', -2);
+    text(c, 'ONE DESK', 72, 170, `900 92px ${BLACK}`, OGE_K, 'left', -4);
+    text(c, 'FOR EVERYTHING', 72, 248, `900 50px ${BLACK}`, OGE_K, 'left', -2);
+    text(c, "YOU'RE BUILDING.", 72, 312, `900 50px ${BLACK}`, OGE_C, 'left', -2);
     noShadow(c);
-    para(c, 'AI multiplied execution. Your attention is the bottleneck now.', 56, 384, 330, 16, 21, OGE_K, 600);
-    fillRR(c, 56, 440, 286, 44, 8, OGE_K);
-    text(c, '$ oge "fix the payment retry bug"', 72, 467, `400 12px ${MONO}`, OGE_C);
-    text(c, 'PRE-ALPHA · GO · CLAUDE CODE / CODEX / ANTIGRAVITY', 56, 556, `700 10px ${SANS}`, OGE_K, 'left', 1.5);
+    para(c, 'AI multiplied execution. Your attention is the bottleneck now.', 76, 384, 330, 16, 21, OGE_K, 600);
+    fillRR(c, 76, 440, 286, 44, 8, OGE_K);
+    text(c, '$ oge "fix the payment retry bug"', 92, 467, `400 12px ${MONO}`, OGE_C);
+    text(c, 'PRE-ALPHA · GO · CLAUDE CODE / CODEX / ANTIGRAVITY', 76, 556, `700 10px ${SANS}`, OGE_K, 'left', 1.5);
     c.save();
     c.translate(790, 300);
     c.rotate(0.05);
@@ -403,14 +403,14 @@ const ferman: Draw[] = [
     c.fillRect(0, 0, SLIDE_W, SLIDE_H);
     nav(c, '◆ FERMAN', ['Docs', 'Self-host', 'CLI', 'GitHub'], FE_L, 40, `800 14px ${SANS}`);
     shadow(c, 0, 'rgba(0,0,0,.5)', 5);
-    text(c, 'FERMAN', 46, 220, `400 190px ${COND}`, FE_G, 'left', 2);
+    text(c, 'FERMAN', 66, 220, `400 190px ${COND}`, FE_G, 'left', 2);
     noShadow(c);
-    text(c, 'Self-hosted live updates.', 52, 280, `800 32px ${SANS}`, FE_L, 'left', -1);
-    para(c, 'An update engine and server in Rust for sideloaded and enterprise apps. Signed patches, channels and staged rollouts.', 54, 322, 380, 15, 22, '#8d9ab0', 500);
-    fillRR(c, 54, 400, 300, 44, 8, '#05080f');
-    text(c, '$ ferman patch --channel beta --rollout 10', 70, 427, `400 11px ${MONO}`, FE_G);
+    text(c, 'Self-hosted live updates.', 72, 280, `800 32px ${SANS}`, FE_L, 'left', -1);
+    para(c, 'An update engine and server in Rust for sideloaded and enterprise apps. Signed patches, channels and staged rollouts.', 74, 322, 380, 15, 22, '#8d9ab0', 500);
+    fillRR(c, 74, 400, 300, 44, 8, '#05080f');
+    text(c, '$ ferman patch --channel beta --rollout 10', 90, 427, `400 11px ${MONO}`, FE_G);
     ['Android', 'Windows', 'iOS', 'Flutter', 'React Native'].forEach((t, i, a) => {
-      let x = 54;
+      let x = 74;
       for (let j = 0; j < i; j++) { c.font = `700 10px ${SANS}`; x += c.measureText(a[j].toUpperCase()).width + 30; }
       pill(c, x, 520, t.toUpperCase(), '#16203a', FE_L, 10, 9);
     });
@@ -549,14 +549,14 @@ const cni: Draw[] = [
     c.fillRect(0, 0, SLIDE_W, SLIDE_H);
     nav(c, 'cached_network_image_ce', ['pub.dev', 'Docs', 'Migration', 'GitHub'], '#fff', 40, `700 14px ${MONO}`);
     shadow(c, 0, 'rgba(0,20,60,.45)', 5);
-    text(c, 'Zero-jank', 52, 160, `900 74px ${BLACK}`, '#fff', 'left', -3);
-    text(c, 'image caching', 52, 240, `900 74px ${BLACK}`, '#fff', 'left', -3);
-    text(c, 'for Flutter.', 52, 320, `900 74px ${BLACK}`, CN_A, 'left', -3);
+    text(c, 'Zero-jank', 72, 160, `900 74px ${BLACK}`, '#fff', 'left', -3);
+    text(c, 'image caching', 72, 240, `900 74px ${BLACK}`, '#fff', 'left', -3);
+    text(c, 'for Flutter.', 72, 320, `900 74px ${BLACK}`, CN_A, 'left', -3);
     noShadow(c);
-    para(c, 'The maintained fork of cached_network_image. Rebuilt on hive_ce. Same API.', 56, 370, 380, 16, 22, 'rgba(255,255,255,.88)', 500);
-    fillRR(c, 56, 424, 330, 44, 8, 'rgba(0,0,0,.28)');
-    text(c, '$ flutter pub add cached_network_image_ce', 72, 451, `400 12px ${MONO}`, '#fff');
-    phone(c, 660, 60, 230, (cc, w, h) => galleryScreen(cc, w, h), '#0c0c0f', 0.04);
+    para(c, 'The maintained fork of cached_network_image. Rebuilt on hive_ce. Same API.', 76, 370, 380, 16, 22, 'rgba(255,255,255,.88)', 500);
+    fillRR(c, 76, 424, 330, 44, 8, 'rgba(0,0,0,.28)');
+    text(c, '$ flutter pub add cached_network_image_ce', 92, 451, `400 12px ${MONO}`, '#fff');
+    phone(c, 660, 80, 230, (cc, w, h) => galleryScreen(cc, w, h), '#0c0c0f', 0.04);
     c.save();
     c.translate(600, 470);
     c.rotate(-0.08);
@@ -686,12 +686,12 @@ const elek: Draw[] = [
     c.fillStyle = EL_L;
     c.fillRect(0, 0, SLIDE_W, SLIDE_H);
     nav(c, 'elek', ['Docs', 'Benchmarks', 'pub.dev', 'GitHub'], EL_K, 40, `900 22px ${BLACK}`);
-    text(c, '107×', 40, 300, `900 236px ${BLACK}`, EL_K, 'left', -14);
-    text(c, 'Your coding agent is fast.', 52, 372, `800 30px ${SANS}`, EL_K, 'left', -1);
-    text(c, "Your test suite isn't.", 52, 410, `800 30px ${SANS}`, EL_K, 'left', -1);
-    fillRR(c, 52, 446, 236, 44, 8, EL_K);
-    text(c, '$ dart pub add dev:elek', 68, 473, `400 13px ${MONO}`, EL_L);
-    text(c, 'INCREMENTAL TEST RUNNER · DART & FLUTTER · 0.1 EXPERIMENTAL', 52, 556, `700 10px ${SANS}`, EL_K, 'left', 1.5);
+    text(c, '107×', 60, 300, `900 236px ${BLACK}`, EL_K, 'left', -14);
+    text(c, 'Your coding agent is fast.', 72, 372, `800 30px ${SANS}`, EL_K, 'left', -1);
+    text(c, "Your test suite isn't.", 72, 410, `800 30px ${SANS}`, EL_K, 'left', -1);
+    fillRR(c, 72, 446, 236, 44, 8, EL_K);
+    text(c, '$ dart pub add dev:elek', 88, 473, `400 13px ${MONO}`, EL_L);
+    text(c, 'INCREMENTAL TEST RUNNER · DART & FLUTTER · 0.1 EXPERIMENTAL', 72, 556, `700 10px ${SANS}`, EL_K, 'left', 1.5);
     sieve(c, 820, 330, 140, EL_K, EL_L);
     // a few "test files" falling through
     for (let i = 0; i < 6; i++) fillRR(c, 740 + i * 30, 500 + (i % 3) * 18, 18, 22, 3, EL_K);
@@ -837,15 +837,15 @@ const subara: Draw[] = [
     suBg(c, SLIDE_W, SLIDE_H);
     nav(c, 'Subara', ['Features', 'Widgets', 'Privacy', 'App Store'], '#fff', 40, `800 18px ${SANS}`);
     shadow(c, 0, 'rgba(30,0,90,.35)', 6);
-    text(c, 'Every', 52, 170, `900 92px ${BLACK}`, '#fff', 'left', -4);
-    text(c, 'subscription.', 52, 262, `900 76px ${BLACK}`, '#fff', 'left', -4);
-    text(c, 'One place.', 52, 346, `900 76px ${BLACK}`, SU_P, 'left', -4);
+    text(c, 'Every', 72, 170, `900 92px ${BLACK}`, '#fff', 'left', -4);
+    text(c, 'subscription.', 72, 262, `900 76px ${BLACK}`, '#fff', 'left', -4);
+    text(c, 'One place.', 72, 346, `900 76px ${BLACK}`, SU_P, 'left', -4);
     noShadow(c);
-    para(c, 'Track renewals, see where the money goes, get a nudge before you pay. Your data never leaves the phone.', 56, 392, 360, 16, 22, 'rgba(255,255,255,.88)', 500);
-    fillRR(c, 56, 466, 170, 48, 24, '#fff');
-    text(c, ' App Store', 141, 496, `800 15px ${SANS}`, SU_V, 'center');
-    text(c, 'FREE · IPHONE & IPAD', 244, 496, `700 11px ${SANS}`, '#fff', 'left', 1.5);
-    phone(c, 640, 46, 240, (cc, w, h) => subaraList(cc, w, h), '#14102a', 0.05);
+    para(c, 'Track renewals, see where the money goes, get a nudge before you pay. Your data never leaves the phone.', 76, 392, 360, 16, 22, 'rgba(255,255,255,.88)', 500);
+    fillRR(c, 76, 466, 170, 48, 24, '#fff');
+    text(c, ' App Store', 161, 496, `800 15px ${SANS}`, SU_V, 'center');
+    text(c, 'FREE · IPHONE & IPAD', 264, 496, `700 11px ${SANS}`, '#fff', 'left', 1.5);
+    phone(c, 640, 66, 240, (cc, w, h) => subaraList(cc, w, h), '#14102a', 0.05);
     glass(c, 520, 420, 200, 84, 22, 0.24);
     text(c, 'Streamly', 548, 452, `800 15px ${SANS}`, '#fff');
     text(c, 'Renews in 2 days · $9.99', 548, 478, `500 12px ${SANS}`, 'rgba(255,255,255,.85)');

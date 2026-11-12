@@ -758,6 +758,8 @@ def make_splats(N):
             seen_hero[idx] = True
         print(name, 'visible', len(idx))
     vis = best_score > 0
+    # drop the sparse overhead clutter in the sky strip (beams/cables high above the alley read as floating blobs)
+    vis &= ~((P[:, 2] > 4.6) & (np.abs(P[:, 0]) < 0.85))
     print('visible', vis.sum(), 'of', len(P), 'hero', seen_hero.sum())
     P, Nn, dens, colour, hero, fz = P[vis], Nn[vis], dens[vis], colour[vis], seen_hero[vis], fz[vis]
 

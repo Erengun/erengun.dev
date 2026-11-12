@@ -5,6 +5,8 @@
 //   ?file=dummy       load /splats/<file>.splat (default alley)
 //   ?t=<seconds>      freeze the camera path at time t
 //   ?phone            phone subsampling
+//   ?fov=<deg>        camera vertical fov (default 62)
+//   ?op=<0..1>        setOpacity
 ---
 <!doctype html>
 <html lang="en">
@@ -85,6 +87,8 @@
       addEventListener('resize', resize);
       resize();
 
+      (window as any).__splat = splat;
+      if (q.has('op')) splat.setOpacity(Number(q.get('op')));
       const t0 = performance.now();
       await splat.ready;
       const loadMs = performance.now() - t0;
