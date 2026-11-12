@@ -1,543 +1,274 @@
 /**
- * Intro portal (tile 0): the "glitch portrait" (spec-3d §5).
+ * Intro portal: "DOT-MATRIX YOU". Eren's portrait rebuilt from glowing LED dots and dot-font glyphs (OffBit dot font
+ * atlas), intentionally low-res and graphic.
  *
- * Source: an original Blender-rendered bust (tools/blender/portrait), 54 frames of colour + depth packed into
- * atlases in /public/portrait (no WebCodecs video). Played ping-pong at 30 fps.
+ * Data (tools/portrait/dots_prep.py, from the local photo pipeline): a 128×128 RGBA texture,
+ *   R = LED intensity (local-contrast luma + edge emphasis), G = depth, B = ink (dark features + edges), A = matte.
+ * Glyphs: tools/portrait/glyph_atlas.py → 8×4 atlas: 0..9 luma ramp " .:-=+*#%@", 10..31 letters/symbols.
  *
- *  - voxels: ONE instanced draw (Sprite with count = G·G·layers, G = 221 high / 151 medium; SpriteNodeMaterial). No per-instance
- *    attributes: the cell + layer come from instanceIndex; colour/depth/neighbour-min are fetched in the vertex
- *    shader with textureLoad. Each voxel is a camera-facing rounded quad with a fake bevel normal (stands in for
- *    the reference's octahedral impostor; at ~5–8 px per voxel the result is the same), lit by hand with the
- *    three #E0FFFF directional lights, opacity .66.
- *  - grid: a subdivided plane displaced by the relief, drawing per-frame quadtree cell edges (1 px, fwidth),
- *    leaf levels from a precomputed atlas, teal → #222 as the reveal threshold drops.
- *  - composite: chromatic aberration, teal edge glow, radial vignette, quarter-res gaussian glow added ×.27.
- *  - pointer: CPU ray-march against the CPU copy of the depth frame (spec "locate" pass), then a stateless
- *    vertex-shader push from a smoothed cursor + velocity + hover-enter ripple (works on WebGPU and WebGL2).
+ * One instanced draw (Sprite with count = 128², SpriteNodeMaterial, additive glow), no per-instance attributes:
+ * cell = instanceIndex. Small relief from depth; rendered through a narrow "dolly" lens with the same framing as the
+ * inner camera, so the relief parallaxes (pointer/tilt + slow drift) without wide-angle distortion.
+ * Motion: power-on wave + glyph scramble on reveal, idle scramble waves + scanline sweep, cursor repel/scale/scramble
+ * + ripple on hover-enter, progress-driven exit (dots stream into depth) from f.focus (journey: focus = 1 − exit).
+ * Works on WebGPU and WebGL2 (no compute).
  */
 import {
   Scene, Color, Group, Sprite, Mesh, PlaneGeometry, SpriteNodeMaterial, MeshBasicNodeMaterial, Texture,
-  NearestFilter, NoColorSpace, AdditiveBlending, RenderTarget, HalfFloatType, QuadMesh, Vector2, Vector3, Matrix4,
-  PerspectiveCamera, type WebGPURenderer,
+  NearestFilter, LinearFilter, NoColorSpace, AdditiveBlending, Vector2, Vector3, Matrix4, PerspectiveCamera,
+  type WebGPURenderer, type RenderTarget,
 } from 'three/webgpu';
 import {
-  Fn, uniform, float, int, ivec2, vec2, vec3, vec4, instanceIndex, textureLoad, texture, varying, uv, screenUV,
-  smoothstep, mix, clamp, floor, fract, max, min, abs, length, normalize, dot, pow, exp2, fwidth, log2, sign,
-  cameraViewMatrix, select, hash, positionGeometry,
+  Fn, uniform, float, int, ivec2, vec2, vec3, vec4, instanceIndex, textureLoad, texture, varying, uv,
+  smoothstep, mix, clamp, floor, fract, max, min, abs, length, exp, select, hash, sin, fwidth, positionGeometry,
 } from 'three/tsl';
 import type { Portal, PortalContext, PortalFrame } from '../types';
 
-// ------------------------------------------------------------------ constants (spec §5)
 const BASE = '/portrait/';
-const N = 221;                 // atlas frame size (texels); the voxel grid G is 221 (high) or 151 (medium, subsampled)
-const EXTENT = 13.7;           // grid units across the frame
-const CELL_A = EXTENT / (N - 1); // atlas texel pitch in grid units
-const HALF_A = (N - 1) / 2;
-const CUTOFF = 0.35;
-const OPACITY = 0.66;
-const GROUP_SCALE = 0.33;      // grid units → portal units (tuned for the FOV-110 inner camera)
-const FRAME_DIST = 2.2;        // distance camera → frame baseline when fully open
-const CAM_OPEN = 0.406;        // inner camera distance to the portal plane when open (coverDepth·0.8)
-const GROUP_Y = 0.30;
-const GROUP_X = 0.45;            // figure centred-right: name (left) and tagline (right) stay readable
-const DRIFT_YAW = (8 * Math.PI) / 180, DRIFT_PITCH = (2 * Math.PI) / 180; // gentle camera orbit
-const TEAL = new Color().setRGB(121 / 255, 199 / 255, 199 / 255); // sRGB → linear handled by Color
-// spec ends the grid at #222; the lead asked for the grid to stay the main read, so it rests at a dim teal-grey
-const GRID_ROOT = 0.035;  // linear grey of root-level lines at rest (~55/255): background grid stays dim
-const GRID_FINE = 0.15;   // linear grey of the finest lines (~120/255): the figure's contour reads brightest
-// per-frame quadtree layout (must match tools/blender/portrait/pack.py)
-const QT = { rootsX: 12, rootsY: 7, maxDepth: 5, w: 384, h: 224, levelScale: 50 };
-// three directional lights (#E0FFFF, spec intensities/directions); used as grey modulation of the photo luma
-const LIGHTS: [number, [number, number, number]][] = [
-  [1.95, [1, 0.17, -0.05]], // top
-  [0.9, [-1, -0.01, -0.46]], // left
-  [1.25, [1, 0.25, 0.45]],  // right
-];
-
-// spec relief gain is 3; the ultra-close photo portrait uses less so the FOV-110 camera doesn't balloon the face
-const RELIEF = 1.4;
-const relief = (d: number) => (Math.floor(Math.max(d, CUTOFF) * 100) / 100 - CUTOFF) * RELIEF + CUTOFF;
-const inOutQuart = (t: number) => (t < 0.5 ? 8 * t ** 4 : 1 - (-2 * t + 2) ** 4 / 2);
-const outQuad = (t: number) => 1 - (1 - t) * (1 - t);
-const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
-
-type Meta = { frames: number; size: number; cols: number; rows: number; fps: number; quadtree: { rootsX: number; rootsY: number; maxDepth: number; w: number; h: number; levelScale: number } };
+const C = 128;                      // dot columns/rows
+const ICE = new Color('#cde7e9');   // warm off-white / ice LED colour (linear via Color)
+const FRAME_DIST = 2.2;             // camera → dot plane (portal units, inner-camera space)
+const RELIEF = 0.22;                // depth relief as a fraction of the frame width (small: stays frontal)
+const LENS_FOV = 28;                // dolly lens
+const REVEAL_S = 1.6;
+const GLYPH_COLS = 8, GLYPH_ROWS = 4;
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
     const im = new Image();
     im.decoding = 'async';
     im.onload = () => res(im);
-    im.onerror = () => rej(new Error('intro portrait: failed to load ' + src));
+    im.onerror = () => rej(new Error('intro dots: failed to load ' + src));
     im.src = src;
   });
 }
+const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+const outQuad = (t: number) => 1 - (1 - t) * (1 - t);
 
-export function createIntroPortal(ctx: PortalContext): Portal {
-  const layers = ctx.quality === 'high' ? 3 : 2;
-  const G = ctx.quality === 'high' ? 221 : 151;   // voxels per side (spec: 151; ultra-close portrait wants more on high)
-  const CELL = EXTENT / (G - 1);                   // voxel pitch
+export function createIntroPortal(_ctx: PortalContext): Portal {
   const scene = new Scene();
   const background = new Color('#000000');
   const group = new Group();
-  group.scale.setScalar(GROUP_SCALE);
   scene.add(group);
+  const src = typeof location !== 'undefined' && new URLSearchParams(location.search).get('src') === 'ski' ? 'ski' : 'face';
 
-  // textures get their images once the atlases arrive
-  const colorTex = new Texture();
   const dataTex = new Texture();
-  const qtTex = new Texture();
-  for (const t of [colorTex, dataTex, qtTex]) {
-    t.flipY = false; t.generateMipmaps = false; t.minFilter = t.magFilter = NearestFilter; t.colorSpace = NoColorSpace;
-  }
+  const glyphTex = new Texture();
+  dataTex.flipY = false; dataTex.generateMipmaps = false; dataTex.minFilter = dataTex.magFilter = NearestFilter; dataTex.colorSpace = NoColorSpace;
+  glyphTex.flipY = false; glyphTex.generateMipmaps = false; glyphTex.minFilter = glyphTex.magFilter = LinearFilter; glyphTex.colorSpace = NoColorSpace;
 
   // ------------------------------------------------------------------ uniforms
-  const uFrameOff = uniform(new Vector2(0, 0));   // atlas pixel offset of the current frame (colour/data)
-  const uQtOff = uniform(new Vector2(0, 0));      // quadtree atlas offset
-  const uThreshold = uniform(1);
-  const uGridMix = uniform(0);
-  const uReveal = uniform(0);                     // 0..1 progress of the threshold sweep (grid colour)
-  const uCursor = uniform(new Vector2(999, 999)); // grid units
-  const uVel = uniform(new Vector2(0, 0));        // smoothed cursor velocity, grid units / s
+  const uFW = uniform(5);                         // frame width (portal units)
+  const uTime = uniform(0);
+  const uReveal = uniform(0);                     // 0..~1.15 power-on wave progress
+  const uExit = uniform(0);                       // 0..1 exit progress
+  const uCursor = uniform(new Vector2(99, 99));   // local plane coords (portal units)
+  const uVel = uniform(new Vector2());
   const uHover = uniform(0);
-  const uWave = uniform(new Vector2(0, 0));
+  const uWave = uniform(new Vector2());
   const uWaveP = uniform(1);
 
-  // ------------------------------------------------------------------ voxel material
-  const NN = G * G;
-  const half = (G - 1) / 2;
-  const load = (tex: Texture, p: any) => textureLoad(tex, p, int(0));
-  const voxel = new SpriteNodeMaterial({ transparent: true, depthWrite: true, depthTest: true });
-  voxel.sizeAttenuation = true;
-
-  // all of this runs per vertex (positionNode / scaleNode are vertex-stage); fragment receives varyings
+  // ------------------------------------------------------------------ per-dot (vertex stage)
   const idx = instanceIndex.toInt();
-  const layer = idx.div(NN);
-  const k = idx.mod(NN);
-  const ix = k.mod(G);
-  const iy = k.div(G);
-  const base = ivec2(uFrameOff);
-  const toTexel = (i: any) => i.toFloat().mul((N - 1) / (G - 1)).add(0.5).toInt();
-  const tc = ivec2(toTexel(ix), toTexel(iy)).add(base);
-  const d4 = load(dataTex, tc);
-  const depth = d4.r;
-  const nmin = d4.g;
-  const lineMap = d4.b; // thin-line map from the photo (glasses frames, brows, lids): drawn as bright voxels
-  // relief gradient (for the ≤10° normal tilt)
-  const dxp = load(dataTex, tc.add(ivec2(1, 0))).r, dxm = load(dataTex, tc.sub(ivec2(1, 0))).r;
-  const dyp = load(dataTex, tc.sub(ivec2(0, 1))).r, dym = load(dataTex, tc.add(ivec2(0, 1))).r; // image rows go down
-  const grad = vec2(dxp.sub(dxm), dyp.sub(dym)).mul(3.0 / (2 * CELL_A) * 0.06);
+  const col = idx.mod(C), row = idx.div(C);
+  const fx = col.toFloat().add(0.5).div(C), fy = row.toFloat().add(0.5).div(C);   // 0..1, fy from the top
+  const d4 = textureLoad(dataTex, ivec2(col, row), int(0));
+  const inten0 = d4.r, depth = d4.g, ink = d4.b, matte = d4.a;
+  const fi = idx.toFloat();
+  const h = hash(fi), h2 = hash(fi.add(17.31)), h3 = hash(fi.add(51.7));
+  // sparse dim background dots
+  const bgDot = select(h.greaterThan(0.86), float(0.07), float(0.0)).mul(float(1).sub(matte));
+  const inten = max(inten0, bgDot);
+  const cell = uFW.div(C);
+  const base = vec3(fx.sub(0.5).mul(uFW), float(0.5).sub(fy).mul(uFW),
+    select(depth.greaterThan(0.02), depth.sub(0.5).mul(uFW).mul(RELIEF), uFW.mul(-0.12)));
 
-  const dC = max(depth, CUTOFF);
-  const rel = floor(dC.mul(100)).div(100).sub(CUTOFF).mul(RELIEF).add(CUTOFF);
-  const visible = select(nmin.greaterThanEqual(CUTOFF - 0.002), float(1), float(0));
-  const weight = smoothstep(uThreshold.sub(0.03), uThreshold.add(0.03), depth).mul(visible);
-  const cxy = vec2(ix.toFloat().sub(half), float(half).sub(iy.toFloat())).mul(CELL);
-
-  // cursor push (stateless approximation of the spec's per-voxel sim) + ripple
-  const rnd = hash(k.toFloat().add(layer.toFloat().mul(7.31)));
-  const toC = cxy.sub(uCursor);
+  // reveal: left→right power-on wave with jitter, glyphs scramble while powering on
+  const th = mix(fx, h, 0.25).mul(0.85);
+  const on = smoothstep(th, th.add(0.1), uReveal);
+  const revealScr = smoothstep(th, th.add(0.04), uReveal).mul(float(1).sub(smoothstep(th.add(0.12), th.add(0.28), uReveal)));
+  // idle scramble wave (diagonal), scanline sweep
+  const wavePos = fract(uTime.div(7)).mul(1.8).sub(0.4);
+  const idleScr = float(1).sub(smoothstep(0.0, 0.05, abs(fx.add(fy).mul(0.5).sub(wavePos)))).mul(select(h2.lessThan(0.55), float(1), float(0)));
+  const sd = fy.sub(fract(uTime.div(6.5)));
+  const scan = exp(sd.mul(sd).div(-0.0009)).mul(0.45);
+  // cursor: repel + scale + scramble, ripple ring on hover-enter
+  const toC = base.xy.sub(uCursor);
   const dist = length(toC);
-  const fall = float(1).sub(smoothstep(0.0, 1.1, dist.mul(rnd.mul(0.7).add(0.65)))).mul(uHover); // = smoothstep(1.1, 0, ·); WGSL rejects reversed edges
+  const R = uFW.mul(0.11);
+  const fall = float(1).sub(smoothstep(0.0, R, dist.mul(h3.mul(0.5).add(0.75)))).mul(uHover);
+  const dir = toC.div(max(dist, 1e-4));
   const speed = length(uVel);
-  const speedN = clamp(speed.div(6.0), 0, 1);
-  const radial = toC.div(max(dist, 1e-4));
-  const velDir = uVel.div(max(speed, 1e-4));
-  const pushXY = radial.mul(fall.mul(float(0.06).add(speedN.mul(0.55)))).add(velDir.mul(fall.mul(speedN).mul(0.9)));
-  const pushZ = fall.mul(float(0.1).add(speedN.mul(1.1)));
-  const toW = cxy.sub(uWave);
+  const toW = base.xy.sub(uWave);
   const wd = length(toW);
-  const ring = float(1).sub(smoothstep(0.0, 2.3, abs(wd.sub(uWaveP.mul(18))))).mul(float(1).sub(uWaveP));
-  const waveXY = toW.div(max(wd, 1e-4)).mul(ring.mul(0.35));
-  const jitter = rnd.mul(0.8).add(0.6);
-  const offXY = pushXY.add(waveXY).mul(jitter);
-  const offZ = pushZ.add(ring.mul(0.6)).mul(jitter);
-  const moving = clamp(length(vec3(offXY, offZ)).div(0.35), 0, 1);
+  const ring = float(1).sub(smoothstep(0.0, uFW.mul(0.04), abs(wd.sub(uWaveP.mul(uFW).mul(0.9))))).mul(float(1).sub(uWaveP));
+  const push = dir.mul(fall.mul(cell.mul(2.2).add(min(speed.mul(0.05), cell.mul(6)))))
+    .add(toW.div(max(wd, 1e-4)).mul(ring.mul(cell.mul(1.5))));
+  const lift = fall.mul(uFW.mul(0.05)).add(ring.mul(uFW.mul(0.02)));
+  // exit: dots stream into depth with per-dot delay, then fade
+  const delay = h.mul(0.45);
+  const ee = clamp(uExit.sub(delay).div(0.55), 0, 1);
+  const ee2 = ee.mul(ee);
+  const exitOff = vec3(fx.sub(0.5).mul(ee2).mul(uFW).mul(0.3), ee2.mul(h2.sub(0.7)).mul(uFW).mul(0.25), ee2.mul(h2.mul(4).add(1.5)).mul(uFW).negate());
+  const exitA = float(1).sub(smoothstep(0.65, 1.0, ee));
+  // tiny per-dot breathing so it never looks frozen
+  const shimmer = sin(uTime.mul(1.3).add(h.mul(40))).mul(cell.mul(0.04));
 
-  voxel.positionNode = vec3(cxy.add(offXY), rel.sub(layer.toFloat().mul(CELL)).add(offZ));
-  voxel.scaleNode = vec2(weight.mul(CELL * 0.86).mul(float(1).add(moving.mul(0.25))));
+  const pos = base.add(vec3(push, lift.add(shimmer))).add(exitOff);
+  const mat = new SpriteNodeMaterial({ transparent: true, depthWrite: false, depthTest: false, blending: AdditiveBlending });
+  mat.positionNode = pos;
+  mat.scaleNode = vec2(cell.mul(2.3).mul(float(1).add(fall.mul(0.9))).mul(float(1).sub(ee.mul(0.4))));
 
-  // colour: grade (contrast .84, whites +.21), sRGB→linear, moving voxels → #F0FBFF + sat/contrast boost,
-  // then the cosine-palette 3×3 matrix (columns = palette(0, 1/3, 2/3) / 1.5 so white stays white)
-  const cosPal = (t: number) => {
-    const p = [0.263, 0.416, 0.557];
-    return p.map((pi) => 0.5 + 0.5 * Math.cos(2 * Math.PI * (t + pi)) ) as [number, number, number];
-  };
-  const P = [cosPal(0), cosPal(1 / 3), cosPal(2 / 3)];
-  const colRaw = load(colorTex, tc).rgb;
-  const vRawL = varying(dot(colRaw, vec3(0.299, 0.587, 0.114)), 'vRawL'); // photo luma (sRGB) for the tone curve
-  const gradeFn = Fn(([c0, mv]: any[]) => {
-    let c = c0.sub(0.5).mul(0.84).add(0.5);
-    const l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-    c = c.add(smoothstep(0.5, 1.0, l).mul(0.21));
-    c = pow(clamp(c, 0, 1), vec3(2.2));
-    const l2 = dot(c, vec3(0.2126, 0.7152, 0.0722));
-    c = mix(vec3(l2), c, mix(1, 2.61, mv));
-    c = c.sub(0.18).mul(mix(1, 2.64, mv)).add(0.18).max(0);
-    c = mix(c, vec3(0.871, 0.965, 1.0), mv.mul(0.6));
-    const r = vec3(P[0][0], P[0][1], P[0][2]).mul(c.x);
-    const g = vec3(P[1][0], P[1][1], P[1][2]).mul(c.y);
-    const b = vec3(P[2][0], P[2][1], P[2][2]).mul(c.z);
-    return r.add(g).add(b).div(1.5);
-  });
-  // outline read: voxels are lit only where the quadtree is fine (silhouette + feature contours);
-  // the face/head interior (coarse cells) stays dark, like the reference
-  const qOff = ivec2(uQtOff);
-  const qtc = ivec2(
-    clamp(ix.toFloat().div(G - 1).mul(QT.w), 0, QT.w - 1).toInt(),
-    clamp(iy.toFloat().div(G - 1).mul(QT.h), 0, QT.h - 1).toInt(),
-  ).add(qOff);
-  const vLevel = load(qtTex, qtc).r.mul(255 / QT.levelScale);
-  const edgeF = smoothstep(2.0, 4.2, vLevel);
-  const vBright = varying(mix(0.92, 1.0, edgeF).add(moving.mul(0.5)), 'vBright'); // near-full brightness: the photo carries the face
-  const vHero = varying(smoothstep(0.2, 0.8, lineMap), 'vHero'); // data.B = skier matte (incl. skis/poles)
-  // the scene dissolves toward the photo's frame edges (no floating rectangular slab); the skier never fades
-  const eu = ix.toFloat().div(G - 1), ev = iy.toFloat().div(G - 1);
-  const edgeFade = smoothstep(0.0, 0.16, min(min(eu, float(1).sub(eu)), float(1).sub(ev)));
-  const fadeRaw = max(edgeFade, smoothstep(0.2, 0.8, lineMap));
-  const vFade = varying(fadeRaw, 'vFade');
-  voxel.scaleNode = (voxel.scaleNode as any).mul(smoothstep(0.0, 0.6, fadeRaw)); // faded voxels shrink away
-  const vColor = varying(gradeFn(colRaw, moving), 'vColor');
-  const vGrad = varying(grad, 'vGrad');
-  const vMoving = varying(moving, 'vMoving');
+  const scramble = max(max(revealScr, idleScr), smoothstep(0.15, 0.4, fall));
+  // ink cells (dark features + contours) are dense glyphs; a sparse subset of bright cells too (ASCII sparkle)
+  const isInk = ink.greaterThan(0.35);
+  const isGlyph = select(isInk.or(h.lessThan(0.08).and(inten.greaterThan(0.35))), float(1), float(0));
+  // ink: darker → denser glyph (+ * # % @); bright sparkle cells use the luma ramp
+  const ramp = select(isInk, floor(clamp(ink, 0, 0.999).mul(5)).add(5), floor(clamp(inten, 0, 0.999).mul(9)).add(1));
+  const tick = floor(uTime.mul(16));
+  const rnd = floor(hash(fi.add(tick.mul(13.7))).mul(22)).add(10);
+  const glyph = select(scramble.greaterThan(0.5), rnd, ramp);
+  const showGlyph = isGlyph.greaterThan(0.5).or(scramble.greaterThan(0.5).and(inten.greaterThan(0.12)));
+  const vGlyph = varying(select(showGlyph, glyph, float(-1)), 'vGlyph');
+  const glyphLevel = select(isInk, mix(0.30, 0.46, ink), inten);   // ink glyphs: steady mid brightness
+  const vInt = varying(select(isGlyph.greaterThan(0.5), glyphLevel, inten).mul(on).mul(exitA).mul(float(1).add(scan)).mul(float(1).add(fall.mul(0.6))), 'vInt');
 
-  // fragment: rounded voxel + fake bevel normal + 3 lambert lights (view space)
-  voxel.colorNode = Fn(() => {
+  // ------------------------------------------------------------------ fragment: LED dot or dot-font glyph, soft glow
+  mat.colorNode = Fn(() => {
     const q = uv().mul(2).sub(1);
-    const bev: any = sign(q).mul(smoothstep(0.42, 1.0, abs(q))).mul(1.15);
-    let g: any = vGrad;
-    const gl = length(g);
-    g = g.mul(min(gl, 0.176).div(max(gl, 1e-5)));
-    const n = normalize(vec3(bev.add(g), 1));
-    let lam: any = float(0);
-    for (const [I, d] of LIGHTS) {
-      const L = normalize(cameraViewMatrix.mul(vec4(new Vector3(...d).normalize(), 0)).xyz);
-      lam = lam.add(max(dot(n, L), 0).mul(I));
-    }
-    // dim, low-contrast voxels: the quadtree grid is the main read (reference vp0_5)
-    // neutral grey: the photo's own luma carries the likeness (beard/brows/hair dark, skin light); the three
-    // lights only modulate it (bevel highlights), then the contour factor dims the interior
-    const lumC = dot(vColor, vec3(0.2126, 0.7152, 0.0722));
-    // photo luma at near-full brightness (perceptual), darks lifted so dark hair/beard read as volume against black;
-    // the lights only modulate gently. Warm-neutral grey.
-    const shade = float(0.88).add(clamp(lam.mul(1 / 2.2), 0, 1).mul(0.22));
-    // tone curve on the raw photo luma: hair/beard/moustache dark grey, skin light grey, clear separation
-    const toneS = float(0.07).add(smoothstep(0.06, 0.82, vRawL).mul(0.72)).mul(shade);
-    let grey: any = pow(toneS, float(2.2)).mul(1.1);                      // back to linear (×1.1: opacity .66 over black)
-    grey = mix(grey, lumC.mul(0.8).add(0.06), vMoving.mul(0.35));
-    grey = grey.mul(vBright).mul(mix(0.3, 1.0, vHero)).mul(vFade);        // the skier is the hero; snow/trees dimmed
-    return vec4(vec3(1.0, 0.965, 0.92).mul(grey).add(0.004), 1);
+    const d = length(q);
+    const I = vInt;
+    // LED: core radius follows intensity (halftone), plus a soft CRT halo
+    const r = mix(0.05, 0.38, clamp(I, 0, 1));
+    const core = float(1).sub(smoothstep(r.mul(0.65), r, d));
+    const halo = exp(d.mul(d).mul(-9.0)).mul(0.22);
+    const led = core.add(halo).mul(I.pow(1.25)).mul(1.4);
+    // glyph: atlas sampled in a ~1.2-cell box at the sprite centre
+    const g = max(vGlyph, 0);
+    const gx = g.mod(GLYPH_COLS), gy = floor(g.div(GLYPH_COLS));
+    const lu = uv().sub(0.5).mul(2.3 / 1.2).add(0.5);
+    const inBox = select(lu.x.greaterThan(0).and(lu.x.lessThan(1)).and(lu.y.greaterThan(0)).and(lu.y.lessThan(1)), float(1), float(0));
+    const auv = vec2(gx.add(lu.x).div(GLYPH_COLS), gy.add(float(1).sub(lu.y)).div(GLYPH_ROWS));
+    const ga = texture(glyphTex, auv).a.mul(inBox);
+    const gly = ga.mul(I.mul(1.45)).add(halo.mul(I).mul(0.4));
+    const a = select(vGlyph.lessThan(0), led, gly);
+    return vec4(vec3(ICE.r, ICE.g, ICE.b).mul(a), a);
   })();
-  voxel.opacityNode = Fn(() => {
-    const q = uv().mul(2).sub(1);
-    const r = 0.36;
-    const dq = max(abs(q).sub(1 - r), 0);
-    const sd = length(dq).sub(r);
-    return select(sd.lessThan(0), float(OPACITY), float(0)).mul(float(1).sub(vMoving.mul(0.25)));
-  })();
-  voxel.alphaTest = 0.05;
+  mat.opacityNode = float(1);
 
-  const voxels = new Sprite(voxel);
-  voxels.count = NN * layers;
-  voxels.frustumCulled = false;
-  voxels.renderOrder = 1;
-  group.add(voxels);
+  const dots = new Sprite(mat);
+  dots.count = C * C;
+  dots.frustumCulled = false;
+  dots.renderOrder = 2;
+  group.add(dots);
 
-  // ------------------------------------------------------------------ quadtree grid plane
-  const meta0: Meta = { frames: 54, size: N, cols: 8, rows: 7, fps: 30, quadtree: QT };
-  const GRID_SPAN = EXTENT * 3.2;
-  const gridGeo = new PlaneGeometry(GRID_SPAN, GRID_SPAN, 220, 220);
-  const gridMat = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false, depthTest: false });
-  // vertex: displace by relief (unquantized), slightly behind the voxels
-  const uvF = positionGeometry.xy.div(EXTENT).add(0.5);
-  const inside = uvF.x.greaterThanEqual(0).and(uvF.x.lessThanEqual(1)).and(uvF.y.greaterThanEqual(0)).and(uvF.y.lessThanEqual(1));
-  const gtc = ivec2(clamp(uvF.x.mul(N - 1).add(0.5), 0, N - 1).toInt(), clamp(float(1).sub(uvF.y).mul(N - 1).add(0.5), 0, N - 1).toInt()).add(base);
-  const gdat = load(dataTex, gtc);
-  const gd = select(inside, gdat.r, float(0));
-  const vGHero = varying(select(inside, gdat.b, float(0)), 'vGHero');
-  const gRel = max(gd, CUTOFF).sub(CUTOFF).mul(RELIEF).add(CUTOFF).sub(CELL * 1.2);
-  gridMat.positionNode = vec3(positionGeometry.xy, gRel);
-  const vUvF = varying(uvF, 'vUvF');
-  const vGd = varying(gd, 'vGd');
+  // ------------------------------------------------------------------ faint grid behind (every 8 dots)
+  const gridMat = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false, depthTest: false, blending: AdditiveBlending });
   gridMat.colorNode = Fn(() => {
-    const q = vUvF.mul(vec2(QT.rootsX, QT.rootsY)); // 12×7 roots → tall cells on the square plane (as in the reference)
-    const qi = ivec2(clamp(vUvF.x.mul(QT.w), 0, QT.w - 1).toInt(), clamp(float(1).sub(vUvF.y).mul(QT.h), 0, QT.h - 1).toInt()).add(ivec2(uQtOff));
-    const inF = vUvF.x.greaterThanEqual(0).and(vUvF.x.lessThanEqual(1)).and(vUvF.y.greaterThanEqual(0)).and(vUvF.y.lessThanEqual(1));
-    const lvRaw = floor(load(qtTex, qi).r.mul(255 / QT.levelScale).add(0.5));
-    const lv0 = select(inF, lvRaw, float(0));
-    const fw = max(fwidth(q).x, fwidth(q).y); // root px along the short side
-    const cap = floor(log2(float(1).div(max(fw, 1e-6)).div(4)));
-    const lv = clamp(min(lv0, cap), 0, QT.maxDepth);
-    const s = exp2(lv);
-    const gq = q.mul(s);
-    const f = fract(gq);
-    const w = fwidth(q).mul(s);
-    const dd = min(f, float(1).sub(f)).div(max(w, vec2(1e-6)));
-    const line = float(1).sub(smoothstep(0.35, 0.85, min(dd.x, dd.y)));
-    // reveal: teal (spec) → rest: neutral grey, brighter for finer levels (contour lines) than for root lines
-    // inside the subject only the fine contour cells stay bright; coarse interior lines dim so the face reads
-    const inSubject = smoothstep(0.2, 0.8, vGHero); // lines stay subtle on the skier, visible on the scene
-    // empty sky: full grid; scene (snow, trees): visible but calm; skier: subtle overlay only
-    const onScene = select(vGd.greaterThan(CUTOFF), float(1), float(0));
-    const interiorDim = mix(mix(1.0, 0.16, onScene), mix(0.08, 0.3, smoothstep(3.0, 5.0, lv)), inSubject);
-    const rest = vec3(mix(GRID_ROOT, GRID_FINE, smoothstep(0.0, 3.0, lv)).mul(interiorDim));
-    const gridCol = mix(vec3(TEAL.r, TEAL.g, TEAL.b).mul(0.6), rest, uReveal);
-    const band = float(1).sub(smoothstep(0.0, 0.06, abs(vGd.sub(uThreshold)))).mul(select(vGd.greaterThan(CUTOFF), float(1), float(0)));
-    const c = gridCol.add(vec3(TEAL.r, TEAL.g, TEAL.b).mul(band.mul(1.2).mul(float(1).sub(uReveal))));
-    return vec4(c.mul(line).mul(uGridMix), 1);
+    const p = positionGeometry.xy.mul(3).mul(C / 8);   // plane is scaled ×3·FW; cells of 8 dots
+    const f = fract(p);
+    const w = fwidth(p);
+    const dd = min(f, float(1).sub(f)).div(max(w, vec2(1e-5)));
+    const line = float(1).sub(smoothstep(0.3, 1.0, min(dd.x, dd.y)));
+    const fade = float(1).sub(uExit).mul(smoothstep(0.0, 0.6, uReveal));
+    return vec4(vec3(ICE.r, ICE.g, ICE.b).mul(line.mul(0.022).mul(fade)), 1);
   })();
-  gridMat.opacityNode = float(1);
-  gridMat.blending = AdditiveBlending; // lines add onto black
-  const grid = new Mesh(gridGeo, gridMat);
+  const grid = new Mesh(new PlaneGeometry(1, 1), gridMat);
   grid.frustumCulled = false;
-  grid.renderOrder = 2; // drawn after the voxels, additive, no depth test: lines read over the face
+  grid.renderOrder = 0;
   group.add(grid);
 
-  // ------------------------------------------------------------------ composite (CA, edge glow, vignette, glow ×.27)
-  const sceneRT = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true });
-  const blurA = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: false });
-  const blurB = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: false });
-  const uTexel = uniform(new Vector2(1, 1));     // full-res texel
-  const uTexelQ = uniform(new Vector2(1, 1));    // quarter-res texel
-  const uAspect = uniform(1);                    // H / W
-
-  const downMat = new MeshBasicNodeMaterial();
-  downMat.colorNode = Fn(() => {
-    const o = uTexel.mul(1.0);
-    const s = texture(sceneRT.texture, screenUV.add(vec2(o.x, o.y))).rgb
-      .add(texture(sceneRT.texture, screenUV.add(vec2(o.x.negate(), o.y))).rgb)
-      .add(texture(sceneRT.texture, screenUV.add(vec2(o.x, o.y.negate()))).rgb)
-      .add(texture(sceneRT.texture, screenUV.sub(o)).rgb);
-    return vec4(s.mul(0.25), 1);
-  })();
-  const blurMat = (src: RenderTarget, dir: [number, number]) => {
-    const m = new MeshBasicNodeMaterial();
-    const sigma = 5 * 0.44;
-    const taps: [number, number][] = [];
-    let sum = 0;
-    for (let i = -6; i <= 6; i++) { const w = Math.exp(-(i * i) / (2 * sigma * sigma)); taps.push([i, w]); sum += w; }
-    m.colorNode = Fn(() => {
-      let acc: any = vec3(0);
-      for (const [i, w] of taps) {
-        const off = uTexelQ.mul(vec2(dir[0] * i, dir[1] * i));
-        acc = acc.add(texture(src.texture, screenUV.add(off)).rgb.mul(w / sum));
-      }
-      return vec4(acc, 1);
-    })();
-    return m;
-  };
-  const hBlur = blurMat(blurA, [1, 0]);
-  const vBlur = blurMat(blurB, [0, 1]);
-  const compMat = new MeshBasicNodeMaterial();
-  compMat.colorNode = Fn(() => {
-    const ca = uAspect.mul(0.002);
-    const r = texture(sceneRT.texture, screenUV.add(vec2(ca, 0))).r;
-    const g = texture(sceneRT.texture, screenUV).g;
-    const b = texture(sceneRT.texture, screenUV.sub(vec2(ca, 0))).b;
-    const col = vec3(r, g, b);
-    const glow = texture(blurA.texture, screenUV).rgb;
-    const lum = (c: any) => dot(c, vec3(0.2126, 0.7152, 0.0722));
-    const edge = max(lum(glow).sub(lum(col)), 0);
-    const teal = vec3(TEAL.r, TEAL.g, TEAL.b);
-    const d = length(screenUV.sub(0.5)).div(Math.SQRT1_2);
-    const vig = float(1).sub(smoothstep(0.6, 0.95, d).mul(0.8));
-    // flat/dim like the reference: no teal edge halo, glow well below the spec's ×.27
-    const outc = col.add(teal.mul(edge.mul(0.0))).mul(vig).add(glow.mul(0.1));
-    return vec4(outc, 1);
-  })();
-  const downQuad = new QuadMesh(downMat);
-  const hQuad = new QuadMesh(hBlur);
-  const vQuad = new QuadMesh(vBlur);
-  const compQuad = new QuadMesh(compMat);
-
   // ------------------------------------------------------------------ assets
-  let meta = meta0;
-  let cpuDepth: Uint8ClampedArray | null = null;
-  let atlasW = 0;
   const ready = (async () => {
-    meta = await fetch(BASE + 'meta.json').then((r) => r.json());
-    const [ci, di, qi] = await Promise.all(['color.webp', 'data.webp', 'quadtree.webp'].map((f) => loadImage(BASE + f)));
-    colorTex.image = ci; colorTex.needsUpdate = true;
+    const [di, gi] = await Promise.all([loadImage(BASE + `dots-${src}.png`), loadImage(BASE + 'glyphs.png')]);
     dataTex.image = di; dataTex.needsUpdate = true;
-    qtTex.image = qi; qtTex.needsUpdate = true;
-    // CPU copy of the depth channel for the cursor ray-march
-    const cv = document.createElement('canvas');
-    cv.width = di.width; cv.height = di.height;
-    const c2 = cv.getContext('2d', { willReadFrequently: true })!;
-    c2.drawImage(di, 0, 0);
-    const px = c2.getImageData(0, 0, di.width, di.height).data;
-    cpuDepth = new Uint8ClampedArray(di.width * di.height);
-    for (let i = 0; i < cpuDepth.length; i++) cpuDepth[i] = px[i * 4];
-    atlasW = di.width;
+    glyphTex.image = gi; glyphTex.needsUpdate = true;
   })();
 
-  // ------------------------------------------------------------------ state
-  let frameIdx = 0;
-  let playT = 0;
-  // Dolly 'lens' camera: same view direction and same framing of the portrait baseline plane as the inner camera,
-  // but a narrow FOV from further back, so the relief doesn't balloon (the FOV-110 inner camera at close range
-  // magnifies near voxels heavily). Used for rendering and picking.
-  const LENS_FOV = 30;
+  // ------------------------------------------------------------------ lens + state
   const lensCam = new PerspectiveCamera(LENS_FOV, 1, 0.05, 500);
-  const fwd = new Vector3();
-  const gpos = new Vector3();
+  const fwd = new Vector3(), gpos = new Vector3(), ro = new Vector3(), rp = new Vector3();
+  const inv = new Matrix4();
   function updateLens(c: PerspectiveCamera) {
     c.getWorldDirection(fwd);
     group.getWorldPosition(gpos);
-    const D = Math.max(0.1, gpos.sub(c.position).dot(fwd) + CUTOFF * GROUP_SCALE);
+    const D = Math.max(0.1, gpos.sub(c.position).dot(fwd));
     const k = Math.tan((c.fov * Math.PI) / 360) / Math.tan((LENS_FOV * Math.PI) / 360);
     lensCam.position.copy(c.position).addScaledVector(fwd, -D * (k - 1));
     lensCam.quaternion.copy(c.quaternion);
     lensCam.aspect = c.aspect;
-    lensCam.far = D * k + 50;
+    lensCam.far = D * k + 100;
     lensCam.updateProjectionMatrix();
     lensCam.updateMatrixWorld();
+    // frame width: ~fill the height, never much wider than the view (phones)
+    const visH = 2 * D * Math.tan((c.fov * Math.PI) / 360);
+    const visW = visH * c.aspect;
+    uFW.value = Math.min(visH * 0.7, visW * 1.05);
+    grid.scale.set(uFW.value * 3, uFW.value * 3, 1);
+    grid.position.z = -uFW.value * 0.15;
   }
-  let driftT = 0;
-  let revealClock = -1; // seconds since the gate opened, accumulated from clamped dt (a compile stall can't skip the reveal)
-  let revealT = 0;
-  let gridT = 0;
-  let hit = false;
-  let wasHit = false;
-  let waveClock = -1;
-  const cursor = new Vector2(999, 999);
-  const prevCursor = new Vector2(999, 999);
-  const vel = new Vector2();
-  const tmpV = new Vector2();
-  const inv = new Matrix4();
-  const ro = new Vector3();
-  const rp = new Vector3();
-  /** test-page overrides (src/pages/test-intro.astro); unused by the app */
-  const debug: { threshold?: number; grid?: number; frame?: number; drift?: number; state?: { th: number; revealSince: number } } = {};
 
-  function depthAt(gx: number, gy: number): number {
-    if (!cpuDepth) return 0;
-    const ix = Math.round(gx / CELL_A + HALF_A), iy = Math.round(HALF_A - gy / CELL_A);
-    if (ix < 0 || iy < 0 || ix >= N || iy >= N) return 0;
-    const ox = (frameIdx % meta.cols) * N, oy = Math.floor(frameIdx / meta.cols) * N;
-    return cpuDepth[(oy + iy) * atlasW + ox + ix] / 255;
-  }
+  const debug: { reveal?: number; exit?: number; cursor?: [number, number] } = {};
+  let t = 0, revealClock = -1, hit = false, wasHit = false, waveClock = -1;
+  const cursor = new Vector2(99, 99), prev = new Vector2(99, 99), vel = new Vector2(), tmp = new Vector2();
 
   function locate(f: PortalFrame) {
-    // ray through the pointer, in group-local (grid) units
-    const cam = lensCam; // pick with the same (dolly) camera we render with
-    ro.setFromMatrixPosition(cam.matrixWorld);
-    rp.set(f.pointer.x, f.pointer.y, 0.5).applyMatrix4(cam.projectionMatrixInverse).applyMatrix4(cam.matrixWorld);
+    ro.setFromMatrixPosition(lensCam.matrixWorld);
+    rp.set(f.pointer.x, f.pointer.y, 0.5).applyMatrix4(lensCam.projectionMatrixInverse).applyMatrix4(lensCam.matrixWorld);
     inv.copy(group.matrixWorld).invert();
-    ro.applyMatrix4(inv);
-    rp.applyMatrix4(inv).sub(ro);
+    ro.applyMatrix4(inv); rp.applyMatrix4(inv).sub(ro);
     if (Math.abs(rp.z) < 1e-6) return false;
-    const zTop = relief(1), zBot = CUTOFF;
-    for (let s = 0; s <= 32; s++) {
-      const z = zTop - ((zTop - zBot) * s) / 32;
-      const t = (z - ro.z) / rp.z;
-      const x = ro.x + rp.x * t, y = ro.y + rp.y * t;
-      let r = 0;
-      for (const [ox, oy] of [[0, 0], [0.1, 0], [-0.1, 0], [0, 0.1], [0, -0.1]]) {
-        const d = depthAt(x + ox, y + oy);
-        if (d >= Math.max(uThreshold.value, CUTOFF)) r = Math.max(r, relief(d));
-      }
-      if (r >= z && r > CUTOFF) { cursor.set(x, y); return true; }
-      if (s === 32) cursor.set(x, y);
-    }
-    return false;
+    const s = -ro.z / rp.z;
+    cursor.set(ro.x + rp.x * s, ro.y + rp.y * s);
+    const half = uFW.value / 2;
+    return Math.abs(cursor.x) < half && Math.abs(cursor.y) < half;
   }
 
   function update(f: PortalFrame) {
-    const active = f.focus > 0.001 || f.openness > 0.001;
-    // content placement: frame baseline FRAME_DIST in front of the camera when open, moves by -openness
-    const z0 = CAM_OPEN - FRAME_DIST + 1 - CUTOFF * GROUP_SCALE;
-    group.position.set(GROUP_X, GROUP_Y, z0 - f.openness);
-    if (!active) return;
     const dt = Math.min(f.dt, 0.1);
-    // camera drift: slow small orbit (±8° yaw, ±2° pitch) + pointer / tilt parallax
-    driftT += dt;
-    group.rotation.y = Math.sin((driftT * 2 * Math.PI) / 11) * DRIFT_YAW + f.parallax.x * 0.08 * f.focus;
-    group.rotation.x = Math.sin((driftT * 2 * Math.PI) / 15) * DRIFT_PITCH - f.parallax.y * 0.05 * f.focus;
-    if (debug.drift !== undefined) { group.rotation.y = debug.drift * DRIFT_YAW; group.rotation.x = 0; }
-    group.updateMatrixWorld();
-    updateLens(f.camera);
-
-    // playback: 30 fps ping-pong
-    playT += dt;
-    const F = meta.frames;
-    const step = Math.floor(playT * meta.fps) % (2 * (F - 1));
-    frameIdx = step < F ? step : 2 * (F - 1) - step;
-    if (debug.frame !== undefined) frameIdx = Math.min(F - 1, debug.frame);
-    uFrameOff.value.set((frameIdx % meta.cols) * N, Math.floor(frameIdx / meta.cols) * N);
-    uQtOff.value.set((frameIdx % meta.cols) * QT.w, Math.floor(frameIdx / meta.cols) * QT.h);
-
-    // reveal: threshold 1 → .2 over 3 s inOutQuart, grid mix 0 → 1 over 1.5 s outQuad
+    t += dt;
+    uTime.value = t;
+    const exit = debug.exit ?? clamp01(1 - f.focus);
+    uExit.value = exit;
     if (f.gateOpen && revealClock < 0) revealClock = 0;
     else if (revealClock >= 0) revealClock += dt;
-    if (revealClock >= 0) {
-      revealT = clamp01(revealClock / 3);
-      gridT = clamp01(revealClock / 1.5);
-    }
-    let th = 1 - 0.8 * inOutQuart(revealT);
-    if (debug.threshold !== undefined) th = debug.threshold;
-    uThreshold.value = th;
-    debug.state = { th, revealSince: revealClock };
-    uReveal.value = (1 - th) / 0.8;
-    uGridMix.value = debug.grid ?? outQuad(gridT);
-
-    // pointer
+    uReveal.value = debug.reveal ?? (revealClock < 0 ? 0 : clamp01(revealClock / REVEAL_S) * 1.15);
+    // placement + slow drift / parallax (small rotations: the lens keeps it undistorted)
+    group.position.set(0, 0, 0.406 - FRAME_DIST);
+    group.rotation.y = Math.sin((t * 2 * Math.PI) / 12) * 0.045 + f.parallax.x * 0.07 * (1 - exit);
+    group.rotation.x = Math.sin((t * 2 * Math.PI) / 9) * 0.025 - f.parallax.y * 0.045 * (1 - exit);
     group.updateMatrixWorld();
-    const interactive = uReveal.value > 0.5 && f.pointer.inside && f.focus > 0.5;
+    updateLens(f.camera);
+    // pointer
+    const interactive = f.pointer.inside && exit < 0.3 && uReveal.value > 0.6;
     hit = interactive ? locate(f) : false;
-    if (interactive) {
-      if (prevCursor.x > 900) prevCursor.copy(cursor);
-      tmpV.copy(cursor).sub(prevCursor).divideScalar(Math.max(dt, 1e-3));
-      if (tmpV.length() > 200) tmpV.set(0, 0);
-      prevCursor.copy(cursor);
-      vel.lerp(tmpV, 1 - Math.exp(-60 * dt));
-    } else {
-      prevCursor.set(999, 999);
-    }
-    vel.multiplyScalar(Math.exp(-15 * dt));
+    if (debug.cursor) { cursor.set(debug.cursor[0] * uFW.value * 0.5, debug.cursor[1] * uFW.value * 0.5); hit = true; }
+    if (hit) {
+      if (prev.x > 90) prev.copy(cursor);
+      tmp.copy(cursor).sub(prev).divideScalar(Math.max(dt, 1e-3));
+      if (tmp.length() > 60) tmp.set(0, 0);
+      prev.copy(cursor);
+      vel.lerp(tmp, 1 - Math.exp(-30 * dt));
+    } else prev.set(99, 99);
+    vel.multiplyScalar(Math.exp(-6 * dt));
     uVel.value.copy(vel);
     uCursor.value.copy(cursor);
-    uHover.value += ((hit ? 1 : 0) - uHover.value) * (1 - Math.exp(-10 * dt));
+    uHover.value += ((hit ? 1 : 0) - uHover.value) * (1 - Math.exp(-(hit ? 12 : 4) * dt)); // spring-ish settle
     if (hit && !wasHit) { waveClock = 0; uWave.value.copy(cursor); } else if (waveClock >= 0) waveClock += dt;
     wasHit = hit;
-    uWaveP.value = waveClock < 0 ? 1 : outQuad(clamp01(waveClock / 1.5));
+    uWaveP.value = waveClock < 0 ? 1 : outQuad(clamp01(waveClock / 1.4));
   }
 
-  function render(renderer: WebGPURenderer, camera: PerspectiveCamera, rt: RenderTarget) {
-    const w = rt.width, h = rt.height;
-    const s = ctx.quality === 'high' ? 1 : 0.75;
-    const sw = Math.max(1, Math.round(w * s)), sh = Math.max(1, Math.round(h * s));
-    if (sceneRT.width !== sw || sceneRT.height !== sh) sceneRT.setSize(sw, sh);
-    const qw = Math.max(1, Math.round(w / 4)), qh = Math.max(1, Math.round(h / 4));
-    if (blurA.width !== qw || blurA.height !== qh) { blurA.setSize(qw, qh); blurB.setSize(qw, qh); }
-    uTexel.value.set(1 / sw, 1 / sh);
-    uTexelQ.value.set(1 / qw, 1 / qh);
-    uAspect.value = h / w;
-
-    renderer.setRenderTarget(sceneRT);
-    renderer.clear();
-    void camera;
-    renderer.render(scene, lensCam);
-    renderer.setRenderTarget(blurA); downQuad.render(renderer);
-    renderer.setRenderTarget(blurB); hQuad.render(renderer);
-    renderer.setRenderTarget(blurA); vQuad.render(renderer);
+  function render(renderer: WebGPURenderer, _camera: PerspectiveCamera, rt: RenderTarget) {
     renderer.setRenderTarget(rt);
     renderer.clear();
-    compQuad.render(renderer);
+    renderer.render(scene, lensCam);
   }
 
   const portal: Portal & { debug: typeof debug } = {
-    debug,
-    scene,
-    background,
-    ready,
-    update,
-    render,
+    debug, scene, background, ready, update, render,
     dispose() {
-      sceneRT.dispose(); blurA.dispose(); blurB.dispose();
-      colorTex.dispose(); dataTex.dispose(); qtTex.dispose();
-      gridGeo.dispose(); gridMat.dispose(); voxel.dispose();
-      downMat.dispose(); hBlur.dispose(); vBlur.dispose(); compMat.dispose();
+      dataTex.dispose(); glyphTex.dispose(); mat.dispose(); gridMat.dispose(); grid.geometry.dispose();
     },
   };
   return portal;

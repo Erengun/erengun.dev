@@ -8,6 +8,8 @@
 //   gate=0           keep the preloader gate closed (default open at load)
 //   px,py            fixed pointer NDC (for screenshots)
 //   post             run through the real post chain (fish-eye + camcorder/VHS)
+//   reveal, exit     dot-matrix intro: override reveal / exit progress;  cx,cy: fixed cursor (-1..1 of the frame)
+//   src=ski          dot-matrix intro: ski-photo variant
 ---
 <!doctype html>
 <html lang="en">
@@ -44,10 +46,9 @@
       const isWebGL = !!(renderer.backend as any).isWebGLBackend;
       const quality = (q.get('quality') as 'high' | 'medium') ?? (isWebGL ? 'medium' : 'high');
       const portal = createIntroPortal({ renderer, isPhone: false, quality });
-      if (q.has('threshold')) portal.debug.threshold = +q.get('threshold')!;
-      if (q.has('grid')) portal.debug.grid = +q.get('grid')!;
-      if (q.has('frame')) portal.debug.frame = +q.get('frame')!;
-      if (q.has('drift')) (portal.debug as any).drift = +q.get('drift')!;
+      const dbg = (portal as any).debug ?? {};
+      for (const k of ['threshold', 'grid', 'frame', 'drift', 'reveal', 'exit']) if (q.has(k)) dbg[k] = +q.get(k)!;
+      if (q.has('cx')) dbg.cursor = [+q.get('cx')!, +q.get('cy')!];
 
       // inner camera = the app's camera expressed in the portal plane's frame (FOV 110, see app.ts)
       const FOV = 110;
