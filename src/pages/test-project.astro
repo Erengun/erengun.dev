@@ -1,13 +1,13 @@
 ---
 // Test page for the project portals (src/scene/portals/project*.ts). Query params:
-//   ?p=0..3              which project (default 0)
+//   ?p=0..n              which project (default 0)
 //   ?mode=carousel|inside  start resting on the carousel (default) or flown into the project
 //   ?slide=n             initial slide when inside
 //   ?webgl               force the WebGL2 backend
 //   ?px=..&py=..         fixed parallax input (-1..1) instead of the mouse
 //   ?roomonly            hide the slide strip (inspect the room)
 //   ?all                 show all four portals side by side on the carousel (helix like the app)
-// Keys: o = toggle open/close, ←/→ = slide, 0-3 = project
+// Keys: o = toggle open/close, ←/→ = slide, 0-4 = project
 import { PROJECTS } from '../lib/content';
 ---
 <!doctype html>
@@ -113,7 +113,7 @@ import { PROJECTS } from '../lib/content';
         if (e.key === 'o') setInside(!inside);
         if (e.key === 'ArrowRight') $route.setKey('slide', (s + 1) % n);
         if (e.key === 'ArrowLeft') $route.setKey('slide', (s - 1 + n) % n);
-        if (/^[0-3]$/.test(e.key)) { setInside(false); pi = Number(e.key); }
+        if (/^[0-9]$/.test(e.key)) { setInside(false); pi = Math.min(Number(e.key), PROJECTS.length - 1); }
       });
       function setInside(v: boolean) {
         inside = v;

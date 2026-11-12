@@ -13,6 +13,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
     <title>test: splat</title>
+    <link rel="icon" href="data:," />
     <style>
       html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
       #c { position: fixed; inset: 0; }
@@ -28,7 +29,7 @@
         MeshBasicNodeMaterial, OrthographicCamera, Group,
       } from 'three/webgpu';
       import { texture, screenUV } from 'three/tsl';
-      import { createSplat } from '../scene/splat/splat.wip';
+      import { createSplat } from '../scene/splat/splat';
 
       const q = new URLSearchParams(location.search);
       const forceWebGL = q.has('webgl');

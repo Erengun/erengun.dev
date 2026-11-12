@@ -183,7 +183,7 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
   function buildMaterial(d: ReturnType<typeof parseSplat>) {
     const vColor = varyingProperty('vec4', 'vSplatColor');
     const vUv = varyingProperty('vec2', 'vSplatUv');
-    const order = instancedBufferAttribute(orderAttr!, 'float');
+    const order = instancedBufferAttribute(orderAttr!, 'float') as any;
 
     mat.vertexNode = Fn(() => {
       const fy = floor(order.add(0.5).div(TEX_W));

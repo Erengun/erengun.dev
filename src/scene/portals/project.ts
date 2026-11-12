@@ -26,14 +26,18 @@ const LOCK_PX = 6;
 const ADVANCE_V = 0.0015; // |velocity px/ms| / slidePx
 
 type RoomCfg = { url: string; darkness: number; saturation: number; tint: string; exposure: number; contrast: number };
-// per project: 0 star sky, 1..3 rooms
+// per project index (content.ts order): null = procedural star sky
+//   0 Öge: warm gallery ("the desk")      1 Ferman: dark studio corridor, gold-tinted
+//   2 Cached Network Image CE: star sky    3 Elek: studio corridor with a lime cast
+//   4 Subara: lavender gallery
 const ROOMS: (RoomCfg | null)[] = [
+  { url: '/models/gallery-tile.glb', darkness: 0.5, saturation: 0.55, tint: '#ffdcc2', exposure: 0.72, contrast: 3.2 },
+  { url: '/models/studio-corridor.glb', darkness: 0.3, saturation: 1, tint: '#ffe4b0', exposure: 1, contrast: 1.7 },
   null,
-  { url: '/models/gallery-tile.glb', darkness: 0.45, saturation: 0, tint: '#ffffff', exposure: 0.75, contrast: 3.2 },
-  { url: '/models/studio-corridor.glb', darkness: 0.3, saturation: 1, tint: '#e8efff', exposure: 1, contrast: 1.7 },
+  { url: '/models/studio-corridor.glb', darkness: 0.25, saturation: 1, tint: '#e2ffa8', exposure: 1.05, contrast: 1.6 },
   { url: '/models/gallery-tile.glb', darkness: 0.55, saturation: 0.6, tint: '#d4c8ff', exposure: 0.7, contrast: 3 },
 ];
-const BACKGROUNDS = ['#010209', '#000000', '#000000', '#000000'];
+const BACKGROUNDS = ['#000000', '#000000', '#010209', '#000000', '#000000'];
 
 const outCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 const smooth = (t: number) => t * t * (3 - 2 * t);
@@ -126,7 +130,7 @@ export function createProjectPortal(ctx: PortalContext, project: Project, index:
   content.add(strip);
 
   // ---- room / sky
-  const roomCfg = ROOMS[index] ?? null;
+  const roomCfg = index < ROOMS.length ? ROOMS[index] : null; // extra projects fall back to the star sky
   const room = new Group();
   content.add(room);
   if (!roomCfg) {

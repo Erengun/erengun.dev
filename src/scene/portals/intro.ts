@@ -34,14 +34,14 @@ const EXTENT = 13.7;           // grid units across the frame
 const CELL = EXTENT / (N - 1); // voxel pitch
 const CUTOFF = 0.35;
 const OPACITY = 0.66;
-const GROUP_SCALE = 0.42;      // grid units → portal units (tuned for the FOV-110 inner camera)
+const GROUP_SCALE = 0.31;      // grid units → portal units (tuned for the FOV-110 inner camera)
 const FRAME_DIST = 2.2;        // distance camera → frame baseline when fully open
 const CAM_OPEN = 0.406;        // inner camera distance to the portal plane when open (coverDepth·0.8)
-const GROUP_Y = 0.0;
+const GROUP_Y = 0.1;
 const TEAL = new Color().setRGB(121 / 255, 199 / 255, 199 / 255); // sRGB → linear handled by Color
 // spec ends the grid at #222; the lead asked for the grid to stay the main read, so it rests at a dim teal-grey
 const GRID_ROOT = 0.035;  // linear grey of root-level lines at rest (~55/255): background grid stays dim
-const GRID_FINE = 0.19;   // linear grey of the finest lines (~120/255): the figure's contour reads brightest
+const GRID_FINE = 0.15;   // linear grey of the finest lines (~120/255): the figure's contour reads brightest
 // per-frame quadtree layout (must match tools/blender/portrait/pack.py)
 const QT = { rootsX: 12, rootsY: 7, maxDepth: 4, w: 192, h: 112, levelScale: 60 };
 const LIGHT = new Color('#E0FFFF');
@@ -201,7 +201,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     let lit: any = vColor.mul(vec3(LIGHT.r, LIGHT.g, LIGHT.b)).mul(lam.mul(1 / Math.PI)).mul(1.4);
     // neutral grey (no tint), flat/dim; brightness follows the contour factor
     const grey = dot(mix(lit, vColor.mul(0.7).add(0.03), vMoving.mul(0.35)), vec3(0.2126, 0.7152, 0.0722));
-    return vec4(vec3(grey.mul(0.9).add(0.01).mul(vBright)), 1);
+    return vec4(vec3(grey.mul(0.75).add(0.008).mul(vBright)), 1);
   })();
   voxel.opacityNode = Fn(() => {
     const q = uv().mul(2).sub(1);
