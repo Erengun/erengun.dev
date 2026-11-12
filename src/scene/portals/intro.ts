@@ -185,7 +185,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
       lam = lam.add(max(dot(n, L), 0).mul(I));
     }
     // dim, low-contrast voxels: the quadtree grid is the main read (reference vp0_5)
-    let lit: any = vColor.mul(vec3(LIGHT.r, LIGHT.g, LIGHT.b)).mul(lam.mul(1 / Math.PI)).mul(1.15);
+    let lit: any = vColor.mul(vec3(LIGHT.r, LIGHT.g, LIGHT.b)).mul(lam.mul(1 / Math.PI)).mul(1.4);
     lit = mix(vec3(dot(lit, vec3(0.2126, 0.7152, 0.0722))), lit, 0.8).mul(0.8).add(0.012);
     return vec4(mix(lit, vColor.mul(0.7).add(0.03), vMoving.mul(0.35)), 1);
   })();
@@ -205,7 +205,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   group.add(voxels);
 
   // ------------------------------------------------------------------ quadtree grid plane
-  const meta0: Meta = { frames: 54, size: N, cols: 8, rows: 7, fps: 30, quadtree: { rootsX: 16, rootsY: 9, maxDepth: 4, w: 256, h: 144, levelScale: 60 } }; // must match pack.py
+  const meta0: Meta = { frames: 54, size: N, cols: 8, rows: 7, fps: 30, quadtree: { rootsX: 12, rootsY: 7, maxDepth: 4, w: 192, h: 112, levelScale: 60 } }; // must match pack.py
   const QT = meta0.quadtree;
   const GRID_SPAN = EXTENT * 3.2;
   const gridGeo = new PlaneGeometry(GRID_SPAN, GRID_SPAN, 220, 220);
@@ -220,7 +220,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const vUvF = varying(uvF, 'vUvF');
   const vGd = varying(gd, 'vGd');
   gridMat.colorNode = Fn(() => {
-    const q = vUvF.mul(vec2(QT.rootsX, QT.rootsY)); // 16×9 roots → tall cells on the square plane (as in the reference)
+    const q = vUvF.mul(vec2(QT.rootsX, QT.rootsY)); // 12×7 roots → tall cells on the square plane (as in the reference)
     const qi = ivec2(clamp(vUvF.x.mul(QT.w), 0, QT.w - 1).toInt(), clamp(float(1).sub(vUvF.y).mul(QT.h), 0, QT.h - 1).toInt()).add(ivec2(uQtOff));
     const inF = vUvF.x.greaterThanEqual(0).and(vUvF.x.lessThanEqual(1)).and(vUvF.y.greaterThanEqual(0)).and(vUvF.y.lessThanEqual(1));
     const lvRaw = floor(load(qtTex, qi).r.mul(255 / QT.levelScale).add(0.5));

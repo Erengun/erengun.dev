@@ -236,7 +236,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     for (const t of tiles) {
       // openness target
       let target = 0;
-      if (t.i === 0) target = 1 - smoothstep(0, 0.85, idx);
+      if (t.i === 0) target = 1 - smoothstep(0.45, 0.95, idx);
       else if (t.i === LAST_INDEX) target = invLerp(LAST_INDEX - 0.4, LAST_INDEX - 0.03, idx);
       else target = insideProject === t.i - 1 ? 1 : 0;
       const boundary = t.i === 0 || t.i === LAST_INDEX;

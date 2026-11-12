@@ -705,7 +705,7 @@ def make_splats(N):
         return w
 
     # uniform candidates with rejection by weight → density rho_u * p
-    rho_u = 30000.0  # candidates per m² before rejection (max density)
+    rho_u = 80000.0  # candidates per m² before rejection (max density)
     cands, cn, cdens = [], [], []
     cdf = np.cumsum(a) / A
     total = int(rho_u * A)
@@ -755,15 +755,22 @@ def make_splats(N):
         print(name, 'visible', len(idx))
     vis = best_score > 0
     print('visible', vis.sum(), 'of', len(P), 'hero', seen_hero.sum())
-    P, Nn, dens, colour = P[vis], Nn[vis], dens[vis], colour[vis]
+    P, Nn, dens, colour, hero = P[vis], Nn[vis], dens[vis], colour[vis], seen_hero[vis]
 
-    # subsample to N (uniform), density scales accordingly
-    if len(P) > N:
-        sel = t_rng.choice(len(P), N, replace=False)
-        dens = dens[sel] * (N / len(P))
-        P, Nn, colour = P[sel], Nn[sel], colour[sel]
+    # subsample to N: most of the budget goes to surfaces the hero view sees; density scales accordingly
+    nh = min(int(hero.sum()), int(0.82 * N))
+    no = min(int((~hero).sum()), N - nh)
+    parts = []
+    for mask, k in ((hero, nh), (~hero, no)):
+        ids = np.where(mask)[0]
+        sel = t_rng.choice(len(ids), k, replace=False)
+        parts.append((ids[sel], k / len(ids)))
+    sel = np.concatenate([p[0] for p in parts])
+    dens = np.concatenate([dens[p[0]] * p[1] for p in parts])
+    P, Nn, colour = P[sel], Nn[sel], colour[sel]
+    print('hero splats', nh, 'other', no)
     n = len(P)
-    sig_t = 0.62 / np.sqrt(dens)
+    sig_t = 0.72 / np.sqrt(dens)
     sig_n = np.maximum(sig_t * 0.12, 0.0008)
 
     # ---- lantern glow halos (soft, bright, low alpha) ≈ baked bloom
@@ -775,7 +782,7 @@ def make_splats(N):
             halos_P.append(c + v * np.array([r, r, h / 2]) * t_rng.uniform(0.9, 1.6))
             halos_c.append(np.clip(g * (1.0 if red else 0.95) * 1.0, 0, 1))
             halos_s.append(t_rng.uniform(0.6, 1.1) * r)
-            halos_a.append(0.10 if red else 0.07)
+            halos_a.append(0.07 if red else 0.05)
     hp = np.array(halos_P); hc = np.array(halos_c); hs = np.array(halos_s); ha = np.array(halos_a)
 
     # ---- blender → three frame; build orthonormal frames from normals

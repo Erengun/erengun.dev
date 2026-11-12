@@ -6,7 +6,7 @@ out/data.webp      lossless: R = depth (near = 1), G = min depth of the 8 neighb
 out/quadtree.webp  lossless: per-frame quadtree leaf level (0..MAXD) * 60 on a QW x QH grid (Q* = ROOTS_* * 2^MAXD)
 out/meta.json      layout + quadtree params
 
-Quadtree: ROOTS_X x ROOTS_Y (16 x 9, as if the source were a 16:9 video: on the square voxel plane the root
+Quadtree: ROOTS_X x ROOTS_Y (12 x 7, ~16:9 as if the source were a landscape video: on the square voxel plane the root
 cells come out tall, like the reference's) root cells over the frame; a node splits while the depth range or luma range inside it is
 above a threshold: the depth test uses the residual from a best-fit plane, so smooth slopes stay coarse and only
 silhouettes / creases (nose, brows, lips, hairline, jaw) refine; flat background stays at root level.
@@ -23,8 +23,8 @@ F = len(colors)
 N = Image.open(colors[0]).size[0]
 COLS = 8
 ROWS = (F + COLS - 1) // COLS
-ROOTS_X, ROOTS_Y, MAXD = 16, 9, 4
-QW, QH = ROOTS_X * 2 ** MAXD, ROOTS_Y * 2 ** MAXD  # 256 x 144
+ROOTS_X, ROOTS_Y, MAXD = 12, 7, 4
+QW, QH = ROOTS_X * 2 ** MAXD, ROOTS_Y * 2 ** MAXD  # 192 x 112
 LEVEL_SCALE = 60
 D_SPLIT, L_SPLIT = 0.016, 0.25   # plane-fit residual (depth), luma range
 
