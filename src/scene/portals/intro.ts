@@ -35,10 +35,10 @@ const CELL_A = EXTENT / (N - 1); // atlas texel pitch in grid units
 const HALF_A = (N - 1) / 2;
 const CUTOFF = 0.35;
 const OPACITY = 0.66;
-const GROUP_SCALE = 0.40;      // grid units → portal units (tuned for the FOV-110 inner camera)
+const GROUP_SCALE = 0.34;      // grid units → portal units (tuned for the FOV-110 inner camera)
 const FRAME_DIST = 2.2;        // distance camera → frame baseline when fully open
 const CAM_OPEN = 0.406;        // inner camera distance to the portal plane when open (coverDepth·0.8)
-const GROUP_Y = 0.0;
+const GROUP_Y = -0.05;
 const TEAL = new Color().setRGB(121 / 255, 199 / 255, 199 / 255); // sRGB → linear handled by Color
 // spec ends the grid at #222; the lead asked for the grid to stay the main read, so it rests at a dim teal-grey
 const GRID_ROOT = 0.035;  // linear grey of root-level lines at rest (~55/255): background grid stays dim
@@ -53,7 +53,7 @@ const LIGHTS: [number, [number, number, number]][] = [
 ];
 
 // spec relief gain is 3; the ultra-close photo portrait uses less so the FOV-110 camera doesn't balloon the face
-const RELIEF = 1.6;
+const RELIEF = 1.4;
 const relief = (d: number) => (Math.floor(Math.max(d, CUTOFF) * 100) / 100 - CUTOFF) * RELIEF + CUTOFF;
 const inOutQuart = (t: number) => (t < 0.5 ? 8 * t ** 4 : 1 - (-2 * t + 2) ** 4 / 2);
 const outQuad = (t: number) => 1 - (1 - t) * (1 - t);
@@ -120,6 +120,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const d4 = load(dataTex, tc);
   const depth = d4.r;
   const nmin = d4.g;
+  const lineMap = d4.b; // thin-line map from the photo (glasses frames, brows, lids): drawn as bright voxels
   // relief gradient (for the ≤10° normal tilt)
   const dxp = load(dataTex, tc.add(ivec2(1, 0))).r, dxm = load(dataTex, tc.sub(ivec2(1, 0))).r;
   const dyp = load(dataTex, tc.sub(ivec2(0, 1))).r, dym = load(dataTex, tc.add(ivec2(0, 1))).r; // image rows go down
@@ -162,6 +163,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   };
   const P = [cosPal(0), cosPal(1 / 3), cosPal(2 / 3)];
   const colRaw = load(colorTex, tc).rgb;
+  const vRawL = varying(dot(colRaw, vec3(0.299, 0.587, 0.114)), 'vRawL'); // photo luma (sRGB) for the tone curve
   const gradeFn = Fn(([c0, mv]: any[]) => {
     let c = c0.sub(0.5).mul(0.84).add(0.5);
     const l = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -185,7 +187,8 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   ).add(qOff);
   const vLevel = load(qtTex, qtc).r.mul(255 / QT.levelScale);
   const edgeF = smoothstep(2.0, 4.2, vLevel);
-  const vBright = varying(mix(0.5, 1.0, edgeF).add(moving.mul(0.5)), 'vBright');
+  const vBright = varying(mix(0.92, 1.0, edgeF).add(moving.mul(0.5)), 'vBright'); // near-full brightness: the photo carries the face
+  const vLine = varying(smoothstep(0.5, 0.95, lineMap), 'vLine');
   const vColor = varying(gradeFn(colRaw, moving), 'vColor');
   const vGrad = varying(grad, 'vGrad');
   const vMoving = varying(moving, 'vMoving');
@@ -207,10 +210,15 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     // neutral grey: the photo's own luma carries the likeness (beard/brows/hair dark, skin light); the three
     // lights only modulate it (bevel highlights), then the contour factor dims the interior
     const lumC = dot(vColor, vec3(0.2126, 0.7152, 0.0722));
-    const shade = float(0.5).add(clamp(lam.mul(1 / 2.2), 0, 1).mul(0.6));
-    const base = float(0.18).add(smoothstep(0.08, 0.6, lumC).mul(0.82)).mul(0.36).mul(shade); // floor: dark hair/beard still read as volume
-    const grey = mix(base, lumC.mul(0.6).add(0.05), vMoving.mul(0.35));
-    return vec4(vec3(grey.mul(vBright).add(0.004)), 1);
+    // photo luma at near-full brightness (perceptual), darks lifted so dark hair/beard read as volume against black;
+    // the lights only modulate gently. Warm-neutral grey.
+    const shade = float(0.88).add(clamp(lam.mul(1 / 2.2), 0, 1).mul(0.22));
+    // tone curve on the raw photo luma: hair/beard/moustache dark grey, skin light grey, clear separation
+    const toneS = float(0.07).add(smoothstep(0.06, 0.82, vRawL).mul(0.72)).mul(shade);
+    let grey: any = pow(toneS, float(2.2)).mul(1.1);                      // back to linear (×1.1: opacity .66 over black)
+    grey = mix(grey, lumC.mul(0.8).add(0.06), vMoving.mul(0.35));
+    grey = mix(grey.mul(vBright), float(0.42), vLine.mul(0.4));           // thin bright glasses rims, subtle
+    return vec4(vec3(1.0, 0.965, 0.92).mul(grey).add(0.004), 1);
   })();
   voxel.opacityNode = Fn(() => {
     const q = uv().mul(2).sub(1);
@@ -259,7 +267,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     // reveal: teal (spec) → rest: neutral grey, brighter for finer levels (contour lines) than for root lines
     // inside the subject only the fine contour cells stay bright; coarse interior lines dim so the face reads
     const inSubject = select(vGd.greaterThan(CUTOFF), float(1), float(0));
-    const interiorDim = mix(1.0, mix(0.3, 1.0, smoothstep(2.5, 4.0, lv)), inSubject);
+    const interiorDim = mix(1.0, mix(0.08, 0.3, smoothstep(3.0, 5.0, lv)), inSubject); // grid only a subtle overlay on the face
     const rest = vec3(mix(GRID_ROOT, GRID_FINE, smoothstep(0.0, 3.0, lv)).mul(interiorDim));
     const gridCol = mix(vec3(TEAL.r, TEAL.g, TEAL.b).mul(0.6), rest, uReveal);
     const band = float(1).sub(smoothstep(0.0, 0.06, abs(vGd.sub(uThreshold)))).mul(select(vGd.greaterThan(CUTOFF), float(1), float(0)));

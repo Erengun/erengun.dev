@@ -2,7 +2,7 @@
 Pack the rendered portrait frames into runtime atlases (run with `python3 -I pack.py <frames_dir> <out_dir>`).
 
 out/color.webp     colour frames (lossy), COLS x ROWS grid of N x N cells
-out/data.webp      lossless: R = depth (near = 1), G = min depth of the 8 neighbours + self, B = 0
+out/data.webp      lossless: R = depth (near = 1), G = min depth of the 8 neighbours + self, B = thin-line map (or 0)
 out/quadtree.webp  lossless: per-frame quadtree leaf level (0..MAXD) * 60 on a QW x QH grid (Q* = ROOTS_* * 2^MAXD)
 out/meta.json      layout + quadtree params
 
@@ -27,6 +27,7 @@ ROOTS_X, ROOTS_Y, MAXD = 12, 7, 5
 QW, QH = ROOTS_X * 2 ** MAXD, ROOTS_Y * 2 ** MAXD  # 384 x 224
 LEVEL_SCALE = 50
 D_SPLIT, L_SPLIT = 0.016, 0.25   # plane-fit residual (depth), luma range
+E_SPLIT = 0.45                     # optional thin-line map (edges_XXX.png from tools/portrait/from_photo.py)
 
 col_atlas = Image.new('RGB', (COLS * N, ROWS * N))
 dat_atlas = np.zeros((ROWS * N, COLS * N, 3), np.uint8)
@@ -42,7 +43,7 @@ def plane_residual(d):
     coef, *_ = np.linalg.lstsq(A, d.ravel(), rcond=None)
     return float(np.abs(d.ravel() - A @ coef).max())
 
-def quadtree(depth, luma):
+def quadtree(depth, luma, edges=None):
     lv = np.zeros((QH, QW), np.uint8)
     def rec(x, y, s, level):
         if level >= MAXD:
@@ -50,7 +51,8 @@ def quadtree(depth, luma):
             return
         d = depth[y:y + s, x:x + s]
         l = luma[y:y + s, x:x + s]
-        if (plane_residual(d) > D_SPLIT) or (l.max() - l.min() > L_SPLIT):
+        e = edges[y:y + s, x:x + s] if edges is not None else None
+        if (plane_residual(d) > D_SPLIT) or (l.max() - l.min() > L_SPLIT) or (e is not None and e.max() > E_SPLIT):
             h = s // 2
             for (ox, oy) in ((0, 0), (1, 0), (0, 1), (1, 1)):
                 rec(x + ox * h, y + oy * h, h, level + 1)
@@ -74,10 +76,17 @@ for k, (cp, dp) in enumerate(zip(colors, depths)):
     nmin = np.min([pad[1 + oy:1 + oy + N, 1 + ox:1 + ox + N] for oy in (-1, 0, 1) for ox in (-1, 0, 1)], axis=0)
     dat_atlas[cy * N:(cy + 1) * N, cx * N:(cx + 1) * N, 0] = np.round(d * 255)
     dat_atlas[cy * N:(cy + 1) * N, cx * N:(cx + 1) * N, 1] = np.round(nmin * 255)
+    ep0 = cp.replace('color_', 'edges_')
+    if os.path.exists(ep0):   # B = thin-line map (glasses frames, brows...), drawn brighter by the runtime
+        dat_atlas[cy * N:(cy + 1) * N, cx * N:(cx + 1) * N, 2] = (np.array(Image.open(ep0).convert('L')) > 140) * 255  # binary: compresses well
     # quadtree on a QW x QH resample (nearest for depth, bilinear for luma)
     dq = np.array(Image.fromarray((d * 255).astype(np.uint8)).resize((QW, QH), Image.NEAREST)).astype(float) / 255
     lq = np.array(c.convert('L').resize((QW, QH), Image.BILINEAR)).astype(float) / 255
-    qt_atlas[cy * QH:(cy + 1) * QH, cx * QW:(cx + 1) * QW] = quadtree(dq, lq) * LEVEL_SCALE
+    ep = cp.replace('color_', 'edges_')
+    eq = None
+    if os.path.exists(ep):
+        eq = np.array(Image.open(ep).convert('L').resize((QW, QH), Image.BILINEAR)).astype(float) / 255
+    qt_atlas[cy * QH:(cy + 1) * QH, cx * QW:(cx + 1) * QW] = quadtree(dq, lq, eq) * LEVEL_SCALE
 
 col_atlas.save(os.path.join(out, 'color.webp'), 'WEBP', quality=88, method=6)
 Image.fromarray(dat_atlas).save(os.path.join(out, 'data.webp'), 'WEBP', lossless=True, method=6)

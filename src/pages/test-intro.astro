@@ -7,6 +7,7 @@
 //   frame=N          freeze playback on frame N
 //   gate=0           keep the preloader gate closed (default open at load)
 //   px,py            fixed pointer NDC (for screenshots)
+//   post             run through the real post chain (fish-eye + camcorder/VHS)
 ---
 <!doctype html>
 <html lang="en">
@@ -26,8 +27,10 @@
     <div id="app"></div>
     <div id="hud"></div>
     <script>
-      import { WebGPURenderer, PerspectiveCamera, RenderTarget, HalfFloatType, QuadMesh, MeshBasicNodeMaterial, Vector2 } from 'three/webgpu';
-      import { texture, screenUV } from 'three/tsl';
+      import { WebGPURenderer, PerspectiveCamera, RenderTarget, HalfFloatType, QuadMesh, MeshBasicNodeMaterial, Vector2, Scene, Mesh, PlaneGeometry, OrthographicCamera, RenderPipeline } from 'three/webgpu';
+      import { texture, screenUV, uniform, pass } from 'three/tsl';
+      import { createPostChain } from '../scene/post';
+      import { fishEye, overscanScale } from '../scene/post/fisheye';
       import { createIntroPortal } from '../scene/portals/intro';
       import { PORTAL_H, PORTAL_W, type PortalFrame } from '../scene/types';
 
@@ -52,15 +55,32 @@
       const blit = new MeshBasicNodeMaterial();
       blit.colorNode = texture(rt.texture, screenUV);
       const quad = new QuadMesh(blit);
+      // ?post: run the portal image through the real post chain (fish-eye + overscan + camcorder/VHS), like the app
+      const usePost = q.has('post');
+      const uFish = uniform(0.1), uOverscan = uniform(1);
+      let pipeline: RenderPipeline | null = null, post: ReturnType<typeof createPostChain> | null = null;
+      if (usePost) {
+        const ps = new Scene();
+        const pm = new MeshBasicNodeMaterial(); pm.colorNode = texture(rt.texture, screenUV); pm.toneMapped = false;
+        ps.add(new Mesh(new PlaneGeometry(2, 2), pm));
+        const oc = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        post = createPostChain({ renderer, scenePass: pass(ps, oc), uFish, uOverscan, fishEye });
+        pipeline = new RenderPipeline(renderer);
+        pipeline.outputNode = post.output;
+      }
 
       function resize() {
         const w = innerWidth, h = innerHeight;
         renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
         renderer.setSize(w, h, false);
-        camera.aspect = w / h;
+        const ov = usePost ? overscanScale(w / h, uFish.value) : 1;
+        uOverscan.value = ov;
+        camera.fov = (2 * Math.atan(Math.tan((FOV * Math.PI) / 360) * ov) * 180) / Math.PI;   // overscanned pass camera
+        camera.aspect = w / h / ov;
         camera.updateProjectionMatrix();
         const s = renderer.getDrawingBufferSize(new Vector2());
         rt.setSize(s.x, s.y);
+        post?.setSize(s.x, s.y);
       }
       addEventListener('resize', resize);
       resize();
@@ -86,7 +106,7 @@
       (window as any).__intro = { portal, pointer, camera };
 
       function coverDistance() {
-        const t = Math.tan((FOV * Math.PI) / 360);
+        const t = Math.tan((camera.fov * Math.PI) / 360);
         const cover = Math.min(PORTAL_H / (2 * t), PORTAL_W / (2 * t * camera.aspect));
         const target = cover * (1 - 0.2 * Math.min(1, openness / 1));
         const ease = openness * openness * (3 - 2 * openness);
@@ -113,7 +133,10 @@
         if (portal.render) portal.render(renderer, camera, rt);
         else { renderer.clear(); renderer.render(portal.scene, camera); }
         renderer.setRenderTarget(null);
-        quad.render(renderer);
+        if (pipeline && post) {
+          post.update(dt, time, { isHome: true, isPhone: false, inside: false, idx: 0, sceneT: 0, lastOpen: 0 });
+          pipeline.render();
+        } else quad.render(renderer);
         frames++; fpsT += dt;
         if (fpsT > 0.5) { fps = frames / fpsT; frames = 0; fpsT = 0; hud.textContent = `${isWebGL ? 'webgl2' : 'webgpu'} ${quality} ${fps.toFixed(0)} fps`; }
         requestAnimationFrame(loop);
