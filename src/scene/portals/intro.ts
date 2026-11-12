@@ -34,13 +34,16 @@ const EXTENT = 13.7;           // grid units across the frame
 const CELL = EXTENT / (N - 1); // voxel pitch
 const CUTOFF = 0.35;
 const OPACITY = 0.66;
-const GROUP_SCALE = 0.35;      // grid units → portal units (tuned for the FOV-110 inner camera)
+const GROUP_SCALE = 0.42;      // grid units → portal units (tuned for the FOV-110 inner camera)
 const FRAME_DIST = 2.2;        // distance camera → frame baseline when fully open
 const CAM_OPEN = 0.406;        // inner camera distance to the portal plane when open (coverDepth·0.8)
-const GROUP_Y = -0.12;
+const GROUP_Y = 0.0;
 const TEAL = new Color().setRGB(121 / 255, 199 / 255, 199 / 255); // sRGB → linear handled by Color
 // spec ends the grid at #222; the lead asked for the grid to stay the main read, so it rests at a dim teal-grey
-const GRID_END = new Color().setRGB(52 / 255, 68 / 255, 68 / 255);
+const GRID_ROOT = 0.035;  // linear grey of root-level lines at rest (~55/255): background grid stays dim
+const GRID_FINE = 0.19;   // linear grey of the finest lines (~120/255): the figure's contour reads brightest
+// per-frame quadtree layout (must match tools/blender/portrait/pack.py)
+const QT = { rootsX: 12, rootsY: 7, maxDepth: 4, w: 192, h: 112, levelScale: 60 };
 const LIGHT = new Color('#E0FFFF');
 const LIGHTS: [number, [number, number, number]][] = [
   [1.95, [1, 0.17, -0.05]], // top
@@ -167,6 +170,16 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     const b = vec3(P[2][0], P[2][1], P[2][2]).mul(c.z);
     return r.add(g).add(b).div(1.5);
   });
+  // outline read: voxels are lit only where the quadtree is fine (silhouette + feature contours);
+  // the face/head interior (coarse cells) stays dark, like the reference
+  const qOff = ivec2(uQtOff);
+  const qtc = ivec2(
+    clamp(ix.toFloat().div(N - 1).mul(QT.w), 0, QT.w - 1).toInt(),
+    clamp(iy.toFloat().div(N - 1).mul(QT.h), 0, QT.h - 1).toInt(),
+  ).add(qOff);
+  const vLevel = load(qtTex, qtc).r.mul(255 / QT.levelScale);
+  const edgeF = smoothstep(1.6, 3.2, vLevel);
+  const vBright = varying(mix(0.07, 1.0, edgeF).add(moving.mul(0.5)), 'vBright');
   const vColor = varying(gradeFn(colRaw, moving), 'vColor');
   const vGrad = varying(grad, 'vGrad');
   const vMoving = varying(moving, 'vMoving');
@@ -186,8 +199,9 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     }
     // dim, low-contrast voxels: the quadtree grid is the main read (reference vp0_5)
     let lit: any = vColor.mul(vec3(LIGHT.r, LIGHT.g, LIGHT.b)).mul(lam.mul(1 / Math.PI)).mul(1.4);
-    lit = mix(vec3(dot(lit, vec3(0.2126, 0.7152, 0.0722))), lit, 0.8).mul(0.8).add(0.012);
-    return vec4(mix(lit, vColor.mul(0.7).add(0.03), vMoving.mul(0.35)), 1);
+    // neutral grey (no tint), flat/dim; brightness follows the contour factor
+    const grey = dot(mix(lit, vColor.mul(0.7).add(0.03), vMoving.mul(0.35)), vec3(0.2126, 0.7152, 0.0722));
+    return vec4(vec3(grey.mul(0.9).add(0.01).mul(vBright)), 1);
   })();
   voxel.opacityNode = Fn(() => {
     const q = uv().mul(2).sub(1);
@@ -205,8 +219,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   group.add(voxels);
 
   // ------------------------------------------------------------------ quadtree grid plane
-  const meta0: Meta = { frames: 54, size: N, cols: 8, rows: 7, fps: 30, quadtree: { rootsX: 12, rootsY: 7, maxDepth: 4, w: 192, h: 112, levelScale: 60 } }; // must match pack.py
-  const QT = meta0.quadtree;
+  const meta0: Meta = { frames: 54, size: N, cols: 8, rows: 7, fps: 30, quadtree: QT };
   const GRID_SPAN = EXTENT * 3.2;
   const gridGeo = new PlaneGeometry(GRID_SPAN, GRID_SPAN, 220, 220);
   const gridMat = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false, depthTest: false });
@@ -234,9 +247,11 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     const w = fwidth(q).mul(s);
     const dd = min(f, float(1).sub(f)).div(max(w, vec2(1e-6)));
     const line = float(1).sub(smoothstep(0.35, 0.85, min(dd.x, dd.y)));
-    const gridCol = mix(vec3(TEAL.r, TEAL.g, TEAL.b).mul(0.6), vec3(GRID_END.r, GRID_END.g, GRID_END.b), uReveal); // ×.6: reference lines read ~105/255 after its VHS pass
+    // reveal: teal (spec) → rest: neutral grey, brighter for finer levels (contour lines) than for root lines
+    const rest = vec3(mix(GRID_ROOT, GRID_FINE, smoothstep(0.0, 3.0, lv)));
+    const gridCol = mix(vec3(TEAL.r, TEAL.g, TEAL.b).mul(0.6), rest, uReveal);
     const band = float(1).sub(smoothstep(0.0, 0.06, abs(vGd.sub(uThreshold)))).mul(select(vGd.greaterThan(CUTOFF), float(1), float(0)));
-    const c = gridCol.add(vec3(TEAL.r, TEAL.g, TEAL.b).mul(band.mul(1.2)));
+    const c = gridCol.add(vec3(TEAL.r, TEAL.g, TEAL.b).mul(band.mul(1.2).mul(float(1).sub(uReveal))));
     return vec4(c.mul(line).mul(uGridMix), 1);
   })();
   gridMat.opacityNode = float(1);
@@ -294,7 +309,8 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     const teal = vec3(TEAL.r, TEAL.g, TEAL.b);
     const d = length(screenUV.sub(0.5)).div(Math.SQRT1_2);
     const vig = float(1).sub(smoothstep(0.6, 0.95, d).mul(0.8));
-    const outc = col.add(teal.mul(edge.mul(0.3))).mul(vig).add(glow.mul(0.27));
+    // flat/dim like the reference: no teal edge halo, glow well below the spec's ×.27
+    const outc = col.add(teal.mul(edge.mul(0.0))).mul(vig).add(glow.mul(0.1));
     return vec4(outc, 1);
   })();
   const downQuad = new QuadMesh(downMat);

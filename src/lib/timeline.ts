@@ -1,6 +1,8 @@
-// Scroll timeline (spec-3d §3 "Scroll → carousel rotation").
-export const TILE_COUNT = 6;
-export const LAST_INDEX = 5;
+// Scroll timeline (spec-3d §3 "Scroll → carousel rotation"), generalised to any project count.
+import { PROJECTS } from './content';
+export const PROJECT_COUNT = PROJECTS.length;
+export const TILE_COUNT = PROJECT_COUNT + 2;
+export const LAST_INDEX = PROJECT_COUNT + 1;
 export const STEP = Math.PI / 12; // 15° per tile
 export const OPENING_TILES = 0.4;
 export const OPENING_VP = 1.6;
@@ -43,7 +45,7 @@ export function stageBlend(t: number): number {
 }
 
 /** viewport positions to snap to */
-export const SNAP_VP = [0, 1, 2, 3, 4, SCENE_START, SCENE_START + (WIPES[0].start + WIPES[0].length) * SCENE_VP];
+export const SNAP_VP = [...Array.from({ length: PROJECT_COUNT + 1 }, (_, i) => i), SCENE_START, SCENE_START + (WIPES[0].start + WIPES[0].length) * SCENE_VP];
 
 export const routeToVp = (route: string): number => {
   if (route === 'intro') return 0;

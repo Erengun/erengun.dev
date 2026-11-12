@@ -111,7 +111,7 @@ sculpt(body, 0.006, 40)
 root = bpy.data.objects.new('Root', None)
 scene.collection.objects.link(root)
 root.location = (0, 0, 1.5)
-root.rotation_euler = (0, 0, math.radians(-24))
+root.rotation_euler = (0, 0, math.radians(26))   # body 3/4; the head adds ~16° more (face toward screen-right)
 pivot = bpy.data.objects.new('Pivot', None)
 scene.collection.objects.link(pivot)
 pivot.parent = root
@@ -134,12 +134,12 @@ body.data.materials.append(mat_flat('Shirt', (0.16, 0.17, 0.19)))
 
 # ---------------------------------------------------------------- camera + lights
 cam_d = bpy.data.cameras.new('Cam')
-cam_d.lens = 120
+cam_d.lens = 105
 cam_d.sensor_width = 36
 cam = bpy.data.objects.new('Cam', cam_d)
 scene.collection.objects.link(cam)
 CAM_DIST = 1.40
-cam.location = (0, -CAM_DIST, 1.605)
+cam.location = (0, -CAM_DIST, 1.56)
 cam.rotation_euler = (math.radians(90), 0, 0)
 scene.camera = cam
 
@@ -195,7 +195,7 @@ r.image_settings.color_mode = 'RGB'
 def animate(i):
     t = i / max(FRAMES - 1, 1)
     e = 0.5 - 0.5 * math.cos(math.pi * t)             # zero velocity at both ends (ping-pong friendly)
-    pivot.rotation_euler = (math.radians(-1.5 + 2.5 * math.sin(math.pi * t)), 0, math.radians(-4 + 8 * e))
+    pivot.rotation_euler = (math.radians(-1.5 + 2.5 * math.sin(math.pi * t)), 0, math.radians(12 + 8 * e))
     s = 1 + 0.012 * math.sin(math.pi * t)
     body.scale = (1 + 0.005 * math.sin(math.pi * t), 1, s)
     scene.frame_set(1)

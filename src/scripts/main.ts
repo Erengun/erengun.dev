@@ -2,7 +2,7 @@ import Lenis from 'lenis';
 import Snap from 'lenis/snap';
 import { createTimeline } from 'animejs';
 import { $route, $preloader, $scrollCommand, scroll, overlays, tilt, type Route } from '../lib/stores';
-import { TOTAL_VP, SNAP_VP, SCENE_START, SCENE_VP, sceneProgress, stageBlend, clamp, routeToVp, damp } from '../lib/timeline';
+import { PROJECT_COUNT, TOTAL_VP, SNAP_VP, SCENE_START, SCENE_VP, sceneProgress, stageBlend, clamp, routeToVp, damp } from '../lib/timeline';
 import { scramble, initHoverScramble } from './scramble';
 import { initMenu } from './menu';
 import { initTilt } from './tilt';
@@ -210,11 +210,11 @@ function loop(now: number) {
   const { route } = $route.get();
   // user scroll closes an open project
   if (route?.startsWith('project') && Math.abs(scroll.velocity) > 0.05 && !scroll.isProgrammatic) closeProject();
-  setSnap(!scroll.isPhone && !route?.startsWith('project') && $preloader.get().isGateOpen && scroll.vp < SCENE_START + 0.05 + (SNAP_VP[6] - SCENE_START));
+  setSnap(!scroll.isPhone && !route?.startsWith('project') && $preloader.get().isGateOpen && scroll.vp < SCENE_START + 0.05 + (SNAP_VP[SNAP_VP.length - 1] - SCENE_START));
 
   // work nav
-  workList.style.setProperty('--active-index', String(clamp(Math.ceil(scroll.vp - 0.5), 1, 4) - 1));
-  $$('[data-work-item]').forEach((b, i) => b.toggleAttribute('aria-current', i === clamp(Math.ceil(scroll.vp - 0.5), 1, 4) - 1));
+  workList.style.setProperty('--active-index', String(clamp(Math.ceil(scroll.vp - 0.5), 1, PROJECT_COUNT) - 1));
+  $$('[data-work-item]').forEach((b, i) => b.toggleAttribute('aria-current', i === clamp(Math.ceil(scroll.vp - 0.5), 1, PROJECT_COUNT) - 1));
 
   renderer?.frame(dt, now / 1000);
   updateLabels();

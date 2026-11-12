@@ -5,7 +5,7 @@ import {
 import { texture, screenUV, uniform, mix, color, pass, vec4 } from 'three/tsl';
 import { $route, $preloader, scroll, tilt, overlays, pointer as sharedPointer, type Route } from '../lib/stores';
 import {
-  STEP, LAST_INDEX, TILE_COUNT, carouselIndex, sceneProgress, invLerp, clamp, damp, smoothstep,
+  STEP, LAST_INDEX, TILE_COUNT, SCENE_START, PROJECT_COUNT, carouselIndex, sceneProgress, invLerp, clamp, damp, smoothstep,
 } from '../lib/timeline';
 import { PORTAL_H, PORTAL_W, type Portal, type PortalFrame, type PortalContext } from './types';
 import { fishEye, fishEyeCPU, fishEyeInverseCPU, overscanScale } from './post/fisheye';
@@ -145,7 +145,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     if (hit < 0) return;
     const idx = carouselIndex(scroll.vp);
     if (hit === 0 || hit === LAST_INDEX) {
-      hooks.scrollToVp(hit === 0 ? 0 : 6.2, true);
+      hooks.scrollToVp(hit === 0 ? 0 : SCENE_START, true);
     } else if (Math.abs(idx - hit) < 0.25) {
       hooks.openProject(hit - 1);
     } else {
@@ -334,7 +334,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   // labels: place each project's DOM label on its tile centre (through the fish-eye)
   function updateLabels(idx: number) {
     const w = container.clientWidth, h = container.clientHeight;
-    for (let p = 0; p < 4; p++) {
+    for (let p = 0; p < PROJECT_COUNT; p++) {
       const t = tiles[p + 1];
       const hidden = !t.visible || Math.abs(idx - t.i) > 0.6 || insideProject >= 0 || !$preloader.get().isGateOpen;
       overlays.labelHidden[p] = hidden;

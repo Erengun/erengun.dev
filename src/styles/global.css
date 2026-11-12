@@ -277,7 +277,7 @@ body.is--carousel:not(.is--loading) .work { visibility: visible; opacity: 1; }
 .work__list button:hover, .work__list button[aria-current] { color: #000; }
 .work__list button[aria-current] { transform: translateX(.5625rem); }
 .work__dot {
-  position: absolute; left: 0; top: 0; height: calc(100% / 4); display: flex; align-items: center;
+  position: absolute; left: 0; top: 0; height: calc(100% / var(--n, 4)); display: flex; align-items: center;
   transform: translateY(calc(var(--active-index, 0) * 100%)); transition: transform var(--dur-menu) var(--ease-menu);
 }
 .work__dot i { width: 4px; height: 4px; background: #000; border-radius: 9999px; }

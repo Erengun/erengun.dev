@@ -1,4 +1,5 @@
 import { atom, map } from 'nanostores';
+import { PROJECTS } from './content';
 
 export type Route = null | 'intro' | 'last' | `project-${number}`;
 
@@ -26,8 +27,8 @@ export const $scrollCommand = atom<{ to: number; eased?: boolean; id: number } |
 
 /** per-frame overlay data the renderer publishes */
 export const overlays = {
-  labelMatrices: new Float32Array(16 * 4),
-  labelHidden: [true, true, true, true],
+  labelMatrices: new Float32Array(16 * PROJECTS.length),
+  labelHidden: PROJECTS.map(() => true),
   hoveredIndex: -1,
   stageBlend: 0,
   lastParallax: '',

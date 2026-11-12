@@ -693,6 +693,10 @@ def make_splats(N):
     tris, tobj, a = tris[keep], tobj[keep], a[keep]
     nrm = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
     nrm /= np.linalg.norm(nrm, axis=1, keepdims=True)
+    # feature size per triangle: shortest edge (thin cables/bottles should not become fat blobs)
+    e = np.stack([np.linalg.norm(tris[:, 1] - tris[:, 0], axis=1), np.linalg.norm(tris[:, 2] - tris[:, 1], axis=1),
+                  np.linalg.norm(tris[:, 0] - tris[:, 2], axis=1)], 1)
+    feat = e.min(1)
     A = a.sum()
     print('triangles', len(tris), 'area', A)
     eye = np.array([0, 0, EYE])
@@ -706,7 +710,7 @@ def make_splats(N):
 
     # uniform candidates with rejection by weight → density rho_u * p
     rho_u = 80000.0  # candidates per m² before rejection (max density)
-    cands, cn, cdens = [], [], []
+    cands, cn, cdens, cfeat = [], [], [], []
     cdf = np.cumsum(a) / A
     total = int(rho_u * A)
     batch = 4_000_000
@@ -721,9 +725,9 @@ def make_splats(N):
         P = np.einsum('ij,ijk->ik', bc, tris[ti])
         p = np.minimum(weight(P) / 1.0 * 1.0 / (1.0 / 1.1 ** 2), 1.0)
         acc = t_rng.random(m) < p
-        cands.append(P[acc]); cn.append(nrm[ti[acc]]); cdens.append(rho_u * p[acc])
+        cands.append(P[acc]); cn.append(nrm[ti[acc]]); cdens.append(rho_u * p[acc]); cfeat.append(feat[ti[acc]])
         done += m
-    P = np.concatenate(cands); Nn = np.concatenate(cn); dens = np.concatenate(cdens)
+    P = np.concatenate(cands); Nn = np.concatenate(cn); dens = np.concatenate(cdens); fz = np.concatenate(cfeat)
     print('candidates', len(P))
 
     # ---- visibility + colour from the rendered views
@@ -755,7 +759,7 @@ def make_splats(N):
         print(name, 'visible', len(idx))
     vis = best_score > 0
     print('visible', vis.sum(), 'of', len(P), 'hero', seen_hero.sum())
-    P, Nn, dens, colour, hero = P[vis], Nn[vis], dens[vis], colour[vis], seen_hero[vis]
+    P, Nn, dens, colour, hero, fz = P[vis], Nn[vis], dens[vis], colour[vis], seen_hero[vis], fz[vis]
 
     # subsample to N: most of the budget goes to surfaces the hero view sees; density scales accordingly
     nh = min(int(hero.sum()), int(0.82 * N))
@@ -767,10 +771,12 @@ def make_splats(N):
         parts.append((ids[sel], k / len(ids)))
     sel = np.concatenate([p[0] for p in parts])
     dens = np.concatenate([dens[p[0]] * p[1] for p in parts])
-    P, Nn, colour = P[sel], Nn[sel], colour[sel]
+    P, Nn, colour, fz = P[sel], Nn[sel], colour[sel], fz[sel]
     print('hero splats', nh, 'other', no)
     n = len(P)
-    sig_t = 0.72 / np.sqrt(dens)
+    sig_t = np.minimum(0.72 / np.sqrt(dens), np.maximum(0.45 * fz, 0.003))
+    # grade toward the reference's deep red night look (darker, less green/blue)
+    colour = np.clip(colour * np.array([1.0, 0.8, 0.74]), 0, 1) ** 1.18
     sig_n = np.maximum(sig_t * 0.12, 0.0008)
 
     # ---- lantern glow halos (soft, bright, low alpha) ≈ baked bloom

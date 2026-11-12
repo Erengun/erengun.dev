@@ -1,5 +1,6 @@
 import { CanvasTexture, Mesh, PlaneGeometry, MeshBasicNodeMaterial, RepeatWrapping, SRGBColorSpace, type PerspectiveCamera } from 'three/webgpu';
 import { texture, uv, uniform, vec2, float } from 'three/tsl';
+import { LAST_INDEX } from '../lib/timeline';
 
 // Terminal-log billboard behind the carousel (spec-3d §6.4). Own log text.
 const LOG = [
@@ -62,7 +63,7 @@ export function createTerminal() {
     mesh,
     update(dt: number, idx: number, cam: PerspectiveCamera, visible: number) {
       uScroll.value = (uScroll.value + dt * 0.03) % 1;
-      const target = idx > 0.3 && idx < 4.7 ? visible : 0;
+      const target = idx > 0.3 && idx < LAST_INDEX - 0.3 ? visible : 0;
       op += (target - op) * Math.min(1, dt / 0.3 * 2);
       uOpacity.value = op;
       mesh.visible = op > 0.001;

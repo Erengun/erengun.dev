@@ -736,7 +736,7 @@ const tinywall: Draw[] = [
   },
 ];
 
-const DESIGNS: Record<string, Draw[]> = { 'riverpod-template': riverpod, legallens, rider, tinywall };
+const DESIGNS: Record<string, Draw[]> = { oge: rider, ferman: tinywall, 'cached-network-image-ce': riverpod, elek: legallens };
 
 let fontsReady: Promise<void> | null = null;
 function loadFonts() {
