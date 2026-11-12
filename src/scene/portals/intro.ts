@@ -1,229 +1,312 @@
 /**
- * Intro portal: "DOT-MATRIX YOU". Eren's portrait rebuilt from glowing LED dots and dot-font glyphs (OffBit dot font
- * atlas), intentionally low-res and graphic.
+ * Intro stage: an immersive SKI SCENE built from Eren's ski photo (a place, not a portrait).
  *
- * Data (tools/portrait/dots_prep.py, from the local photo pipeline): a 128×128 RGBA texture,
- *   R = LED intensity (local-contrast luma + edge emphasis), G = depth, B = ink (dark features + edges), A = matte.
- * Glyphs: tools/portrait/glyph_atlas.py → 8×4 atlas: 0..9 luma ramp " .:-=+*#%@", 10..31 letters/symbols.
- *
- * One instanced draw (Sprite with count = 128², SpriteNodeMaterial, additive glow), no per-instance attributes:
- * cell = instanceIndex. Small relief from depth; rendered through a narrow "dolly" lens with the same framing as the
- * inner camera, so the relief parallaxes (pointer/tilt + slow drift) without wide-angle distortion.
- * Motion: power-on wave + glyph scramble on reveal, idle scramble waves + scanline sweep, cursor repel/scale/scramble
- * + ripple on hover-enter, progress-driven exit (dots stream into depth) from f.focus (journey: focus = 1 − exit).
- * Works on WebGPU and WebGL2 (no compute).
+ * Hero: the photo as a layered gaussian splat (tools/portrait/ski_world.py → /intro/ski.splat, using the memories
+ * pipeline: background inpainted behind the skier, skier + skis/poles as a clean foreground layer, sky pushed far,
+ * borders extended and faded). Splat space: photo camera at the origin looking −Z, +Y up, metres.
+ * Around it a procedural world in the same frame (/intro/ski.json: ground plane fit, skier position, sky colours):
+ *   - snow ground aligned to the photo's slope, flat near the capture, gently undulating far away
+ *   - instanced stylised pines continuing the treeline (kept out of the photo's frustum so they never cover it)
+ *   - a distant mountain ridge, a sky dome in the photo's sky colours with soft cloud noise
+ *   - falling snow + a little powder spray at the skis
+ * Camera: starts wide and a little high, glides toward him with a ~15° orbit after the gate opens (≈7 s), then a slow idle
+ * drift + pointer/tilt orbit parallax; the exit (focus = 1 − exit) skis past him downhill into the corridor.
+ * Same module/export as before (createIntroPortal), the journey wrapper keeps working. WebGPU + WebGL2.
  */
 import {
-  Scene, Color, Group, Sprite, Mesh, PlaneGeometry, SpriteNodeMaterial, MeshBasicNodeMaterial, Texture,
-  NearestFilter, LinearFilter, NoColorSpace, AdditiveBlending, Vector2, Vector3, Matrix4, PerspectiveCamera,
+  Scene, Color, Group, Mesh, PlaneGeometry, SphereGeometry, ConeGeometry, CylinderGeometry, BufferGeometry,
+  BufferAttribute, InstancedMesh, MeshBasicNodeMaterial, SpriteNodeMaterial, Sprite, PerspectiveCamera,
+  Vector3, Quaternion, Matrix4, BackSide, AdditiveBlending, SRGBColorSpace, QuadMesh,
   type WebGPURenderer, type RenderTarget,
 } from 'three/webgpu';
 import {
-  Fn, uniform, float, int, ivec2, vec2, vec3, vec4, instanceIndex, textureLoad, texture, varying, uv,
-  smoothstep, mix, clamp, floor, fract, max, min, abs, length, exp, select, hash, sin, fwidth, positionGeometry,
+  Fn, uniform, float, vec2, vec3, vec4, instanceIndex, hash, fract, sin, mix, smoothstep, clamp, length,
+  positionWorld, positionLocal, positionGeometry, normalLocal, cameraPosition, uv, screenUV, mx_noise_float, abs, select,
 } from 'three/tsl';
+import { createSplat, type SplatHandle } from '../splat/splat';
 import type { Portal, PortalContext, PortalFrame } from '../types';
 
-const BASE = '/portrait/';
-const C = 128;                      // dot columns/rows
-const ICE = new Color('#cde7e9');   // warm off-white / ice LED colour (linear via Color)
-const FRAME_DIST = 2.2;             // camera → dot plane (portal units, inner-camera space)
-const RELIEF = 0.22;                // depth relief as a fraction of the frame width (small: stays frontal)
-const LENS_FOV = 28;                // dolly lens
-const WIDEN = 1.12;                 // horizontal stretch of the portrait (user: "make face wider")
-const REVEAL_S = 1.6;
-const GLYPH_COLS = 8, GLYPH_ROWS = 4;
+const BASE = '/intro/';
+type SkiMeta = {
+  hfov: number; zn: number; zf: number;
+  ground: [number, number, number];
+  skier: { centre: number[]; feet: number[]; head: number[] };
+  sky_zenith: number[]; sky_horizon: number[]; snow: number[];
+};
 
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((res, rej) => {
-    const im = new Image();
-    im.decoding = 'async';
-    im.onload = () => res(im);
-    im.onerror = () => rej(new Error('intro dots: failed to load ' + src));
-    im.src = src;
-  });
-}
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
-const outQuad = (t: number) => 1 - (1 - t) * (1 - t);
+const inOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const srgb = (a: number[], k = 1) => new Color().setRGB(a[0] * k, a[1] * k, a[2] * k, SRGBColorSpace);
 
-export function createIntroPortal(_ctx: PortalContext): Portal {
+/** one stylised pine: trunk + three stacked cones, merged (non-indexed) */
+function pineGeometry(): BufferGeometry {
+  const parts = [
+    new CylinderGeometry(0.06, 0.09, 0.5, 6).translate(0, 0.25, 0),
+    new ConeGeometry(0.55, 0.9, 7).translate(0, 0.75, 0),
+    new ConeGeometry(0.42, 0.75, 7).translate(0, 1.15, 0),
+    new ConeGeometry(0.28, 0.6, 7).translate(0, 1.5, 0),
+  ].map((g) => g.toNonIndexed());
+  const n = parts.reduce((s, g) => s + g.getAttribute('position').count, 0);
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3);
+  let o = 0;
+  for (const g of parts) {
+    pos.set(g.getAttribute('position').array as Float32Array, o * 3);
+    nor.set(g.getAttribute('normal').array as Float32Array, o * 3);
+    o += g.getAttribute('position').count;
+    g.dispose();
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute('position', new BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new BufferAttribute(nor, 3));
+  return geo;
+}
+
+export function createIntroPortal(ctx: PortalContext): Portal {
   const scene = new Scene();
-  const background = new Color('#000000');
-  const group = new Group();
-  scene.add(group);
-  const src = typeof location !== 'undefined' && new URLSearchParams(location.search).get('src') === 'ski' ? 'ski' : 'face';
-
-  const dataTex = new Texture();
-  const glyphTex = new Texture();
-  dataTex.flipY = false; dataTex.generateMipmaps = false; dataTex.minFilter = dataTex.magFilter = NearestFilter; dataTex.colorSpace = NoColorSpace;
-  glyphTex.flipY = false; glyphTex.generateMipmaps = false; glyphTex.minFilter = glyphTex.magFilter = LinearFilter; glyphTex.colorSpace = NoColorSpace;
+  const background = new Color('#0b1220');
+  const world = new Group();
+  scene.add(world);
+  const cam = new PerspectiveCamera(48, 1, 0.05, 2000);
 
   // ------------------------------------------------------------------ uniforms
-  const uFW = uniform(5);                         // frame width (portal units)
   const uTime = uniform(0);
-  const uReveal = uniform(0);                     // 0..~1.15 power-on wave progress
-  const uExit = uniform(0);                       // 0..1 exit progress
-  const uCursor = uniform(new Vector2(99, 99));   // local plane coords (portal units)
-  const uVel = uniform(new Vector2());
-  const uHover = uniform(0);
-  const uWave = uniform(new Vector2());
-  const uWaveP = uniform(1);
+  const uZenith = uniform(new Color('#26508a'));
+  const uHorizon = uniform(new Color('#9fb0c2'));
+  const uSnow = uniform(new Color('#c7cbcd'));
+  const uSnowBox = uniform(new Vector3());   // centre of the falling-snow box (follows the camera target)
+  const uFeet = uniform(new Vector3(0, -1, -2.5));
+  const uSpray = uniform(0);
 
-  // ------------------------------------------------------------------ per-dot (vertex stage)
-  const idx = instanceIndex.toInt();
-  const col = idx.mod(C), row = idx.div(C);
-  const fx = col.toFloat().add(0.5).div(C), fy = row.toFloat().add(0.5).div(C);   // 0..1, fy from the top
-  const d4 = textureLoad(dataTex, ivec2(col, row), int(0));
-  const inten0 = d4.r, depth = d4.g, ink = d4.b, matte = d4.a;
-  const fi = idx.toFloat();
-  const h = hash(fi), h2 = hash(fi.add(17.31)), h3 = hash(fi.add(51.7));
-  // sparse dim background dots
-  const bgDot = select(h.greaterThan(0.86), float(0.07), float(0.0)).mul(float(1).sub(matte));
-  const inten = max(inten0, bgDot);
-  const cell = uFW.div(C);
-  const base = vec3(fx.sub(0.5).mul(uFW), float(0.5).sub(fy).mul(uFW),
-    select(depth.greaterThan(0.02), depth.sub(0.5).mul(uFW).mul(RELIEF), uFW.mul(-0.12)));
-
-  // reveal: left→right power-on wave with jitter, glyphs scramble while powering on
-  const th = mix(fx, h, 0.25).mul(0.85);
-  const on = smoothstep(th, th.add(0.1), uReveal);
-  const revealScr = smoothstep(th, th.add(0.04), uReveal).mul(float(1).sub(smoothstep(th.add(0.12), th.add(0.28), uReveal)));
-  // idle scramble wave (diagonal), scanline sweep
-  const wavePos = fract(uTime.div(7)).mul(1.8).sub(0.4);
-  const idleScr = float(1).sub(smoothstep(0.0, 0.05, abs(fx.add(fy).mul(0.5).sub(wavePos)))).mul(select(h2.lessThan(0.55), float(1), float(0)));
-  const sd = fy.sub(fract(uTime.div(6.5)));
-  const scan = exp(sd.mul(sd).div(-0.0009)).mul(0.45);
-  // cursor: repel + scale + scramble, ripple ring on hover-enter
-  const toC = base.xy.sub(uCursor);
-  const dist = length(toC);
-  const R = uFW.mul(0.11);
-  const fall = float(1).sub(smoothstep(0.0, R, dist.mul(h3.mul(0.5).add(0.75)))).mul(uHover);
-  const dir = toC.div(max(dist, 1e-4));
-  const speed = length(uVel);
-  const toW = base.xy.sub(uWave);
-  const wd = length(toW);
-  const ring = float(1).sub(smoothstep(0.0, uFW.mul(0.04), abs(wd.sub(uWaveP.mul(uFW).mul(0.9))))).mul(float(1).sub(uWaveP));
-  const push = dir.mul(fall.mul(cell.mul(2.2).add(min(speed.mul(0.05), cell.mul(6)))))
-    .add(toW.div(max(wd, 1e-4)).mul(ring.mul(cell.mul(1.5))));
-  const lift = fall.mul(uFW.mul(0.05)).add(ring.mul(uFW.mul(0.02)));
-  // exit: dots stream into depth with per-dot delay, then fade
-  const delay = h.mul(0.45);
-  const ee = clamp(uExit.sub(delay).div(0.55), 0, 1);
-  const ee2 = ee.mul(ee);
-  const exitOff = vec3(fx.sub(0.5).mul(ee2).mul(uFW).mul(0.3), ee2.mul(h2.sub(0.7)).mul(uFW).mul(0.25), ee2.mul(h2.mul(4).add(1.5)).mul(uFW).negate());
-  const exitA = float(1).sub(smoothstep(0.65, 1.0, ee));
-  // tiny per-dot breathing so it never looks frozen
-  const shimmer = sin(uTime.mul(1.3).add(h.mul(40))).mul(cell.mul(0.04));
-
-  const pos = base.add(vec3(push, lift.add(shimmer))).add(exitOff);
-  const mat = new SpriteNodeMaterial({ transparent: true, depthWrite: false, depthTest: false, blending: AdditiveBlending });
-  mat.positionNode = pos;
-  mat.scaleNode = vec2(cell.mul(2.3).mul(float(1).add(fall.mul(0.9))).mul(float(1).sub(ee.mul(0.4))));
-
-  const scramble = max(max(revealScr, idleScr), smoothstep(0.15, 0.4, fall));
-  // ink cells (dark features + contours) are dense glyphs; a sparse subset of bright cells too (ASCII sparkle)
-  const isInk = ink.greaterThan(0.35);
-  const isGlyph = select(isInk.or(h.lessThan(0.08).and(inten.greaterThan(0.35))), float(1), float(0));
-  // ink: darker → denser glyph (+ * # % @); bright sparkle cells use the luma ramp
-  const ramp = select(isInk, floor(clamp(ink, 0, 0.999).mul(5)).add(5), floor(clamp(inten, 0, 0.999).mul(9)).add(1));
-  const tick = floor(uTime.mul(16));
-  const rnd = floor(hash(fi.add(tick.mul(13.7))).mul(22)).add(10);
-  const glyph = select(scramble.greaterThan(0.5), rnd, ramp);
-  const showGlyph = isGlyph.greaterThan(0.5).or(scramble.greaterThan(0.5).and(inten.greaterThan(0.12)));
-  const vGlyph = varying(select(showGlyph, glyph, float(-1)), 'vGlyph');
-  const glyphLevel = select(isInk, mix(0.30, 0.46, ink), inten);   // ink glyphs: steady mid brightness
-  const vInt = varying(select(isGlyph.greaterThan(0.5), glyphLevel, inten).mul(on).mul(exitA).mul(float(1).add(scan)).mul(float(1).add(fall.mul(0.6))), 'vInt');
-
-  // ------------------------------------------------------------------ fragment: LED dot or dot-font glyph, soft glow
-  mat.colorNode = Fn(() => {
-    const q = uv().mul(2).sub(1);
-    const d = length(q);
-    const I = vInt;
-    // LED: core radius follows intensity (halftone), plus a soft CRT halo
-    const r = mix(0.05, 0.38, clamp(I, 0, 1));
-    const core = float(1).sub(smoothstep(r.mul(0.65), r, d));
-    const halo = exp(d.mul(d).mul(-9.0)).mul(0.22);
-    const led = core.add(halo).mul(I.pow(1.25)).mul(1.4);
-    // glyph: atlas sampled in a ~1.2-cell box at the sprite centre
-    const g = max(vGlyph, 0);
-    const gx = g.mod(GLYPH_COLS), gy = floor(g.div(GLYPH_COLS));
-    const lu = uv().sub(0.5).mul(2.3 / 1.2).add(0.5);
-    const inBox = select(lu.x.greaterThan(0).and(lu.x.lessThan(1)).and(lu.y.greaterThan(0)).and(lu.y.lessThan(1)), float(1), float(0));
-    const auv = vec2(gx.add(lu.x).div(GLYPH_COLS), gy.add(float(1).sub(lu.y)).div(GLYPH_ROWS));
-    const ga = texture(glyphTex, auv).a.mul(inBox);
-    const gly = ga.mul(I.mul(1.45)).add(halo.mul(I).mul(0.4));
-    const a = select(vGlyph.lessThan(0), led, gly);
-    return vec4(vec3(ICE.r, ICE.g, ICE.b).mul(a), a);
+  // ------------------------------------------------------------------ sky dome
+  const skyMat = new MeshBasicNodeMaterial({ side: BackSide, depthWrite: false });
+  skyMat.colorNode = Fn(() => {
+    const dir = positionLocal.normalize();
+    const g = smoothstep(-0.02, 0.55, dir.y);
+    let c: any = mix(uHorizon, uZenith, g);
+    // soft cloud bank near the horizon (like the photo), slowly drifting
+    const n = mx_noise_float(vec3(dir.x.mul(3.2).add(uTime.mul(0.004)), dir.y.mul(7.0), dir.z.mul(3.2))).mul(0.5).add(0.5);
+    const band = smoothstep(0.0, 0.08, dir.y).mul(float(1).sub(smoothstep(0.12, 0.35, dir.y)));
+    c = mix(c, vec3(0.92, 0.94, 0.97), smoothstep(0.45, 0.85, n).mul(band).mul(0.85));
+    c = mix(c, uHorizon.mul(1.05), float(1).sub(smoothstep(-0.12, 0.0, dir.y)));
+    return vec4(c, 1);
   })();
-  mat.opacityNode = float(1);
+  const sky = new Mesh(new SphereGeometry(1500, 48, 24), skyMat);
+  sky.renderOrder = -10;
+  sky.frustumCulled = false;
+  world.add(sky);
 
-  const dots = new Sprite(mat);
-  dots.count = C * C;
-  dots.frustumCulled = false;
-  dots.renderOrder = 2;
-  group.add(dots);
-
-  // ------------------------------------------------------------------ faint grid behind (every 8 dots)
-  const gridMat = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false, depthTest: false, blending: AdditiveBlending });
-  gridMat.colorNode = Fn(() => {
-    const p = positionGeometry.xy.mul(3).mul(C / 8);   // plane is scaled ×3·FW; cells of 8 dots
-    const f = fract(p);
-    const w = fwidth(p);
-    const dd = min(f, float(1).sub(f)).div(max(w, vec2(1e-5)));
-    const line = float(1).sub(smoothstep(0.3, 1.0, min(dd.x, dd.y)));
-    const fade = float(1).sub(uExit).mul(smoothstep(0.0, 0.6, uReveal));
-    return vec4(vec3(ICE.r, ICE.g, ICE.b).mul(line.mul(0.022).mul(fade)), 1);
+  // ------------------------------------------------------------------ ground (aligned to the photo's slope)
+  const groundMat = new MeshBasicNodeMaterial();
+  const gDist = length(positionGeometry.xy);
+  groundMat.positionNode = vec3(positionGeometry.xy,
+    mx_noise_float(vec3(positionGeometry.xy.mul(0.025), 0.0)).mul(2.2).mul(smoothstep(14.0, 80.0, gDist)));
+  groundMat.colorNode = Fn(() => {
+    const p = positionWorld;
+    const grain = mx_noise_float(vec3(p.xz.mul(1.7), 0.5)).mul(0.5).add(0.5);
+    const big = mx_noise_float(vec3(p.xz.mul(0.08), 1.0)).mul(0.5).add(0.5);
+    let c: any = uSnow.mul(mix(0.84, 1.05, big)).mul(mix(0.9, 1.06, grain));
+    // trodden snow like the photo: blue-shadowed dimples at two scales + fine sparkle
+    const dimple = mx_noise_float(vec3(p.xz.mul(0.9), 2.0)).mul(0.5).add(0.5);
+    const ripple = mx_noise_float(vec3(p.x.mul(0.35), p.z.mul(1.2), 3.0)).mul(0.5).add(0.5);
+    const shade = smoothstep(0.5, 0.85, dimple).mul(0.55).add(smoothstep(0.6, 0.9, ripple).mul(0.35));
+    c = mix(c, c.mul(vec3(0.62, 0.72, 0.92)), clamp(shade, 0, 0.8));
+    const sparkle = smoothstep(0.92, 0.99, mx_noise_float(vec3(p.xz.mul(14.0), 4.0)).mul(0.5).add(0.5));
+    c = c.add(sparkle.mul(0.25));
+    const d = length(p.sub(cameraPosition));
+    c = mix(c, uHorizon.mul(1.02), smoothstep(40.0, 420.0, d));
+    return vec4(c, 1);
   })();
-  const grid = new Mesh(new PlaneGeometry(1, 1), gridMat);
-  grid.frustumCulled = false;
-  grid.renderOrder = 0;
-  group.add(grid);
+  const ground = new Mesh(new PlaneGeometry(1600, 1600, 160, 160), groundMat);
+  ground.frustumCulled = false;
+  world.add(ground);
 
-  // ------------------------------------------------------------------ assets
+  // ------------------------------------------------------------------ pines (instanced) + mountains
+  const pineMat = new MeshBasicNodeMaterial();
+  pineMat.colorNode = Fn(() => {
+    const up = normalLocal.y;
+    const h = hash(float(instanceIndex));
+    let c: any = mix(vec3(0.018, 0.034, 0.028), vec3(0.03, 0.05, 0.04), h);
+    c = mix(c, uSnow.mul(0.9), smoothstep(0.3, 0.7, up).mul(mix(0.2, 0.5, h)));     // a little snow on the boughs
+    const d = length(positionWorld.sub(cameraPosition));
+    c = mix(c, uHorizon.mul(0.8), smoothstep(40.0, 320.0, d).mul(0.6));
+    return vec4(c, 1);
+  })();
+  const PINES = ctx.isPhone ? 260 : 520;
+  const pines = new InstancedMesh(pineGeometry(), pineMat, PINES);
+  pines.count = 0;
+  pines.frustumCulled = false;
+  world.add(pines);
+
+  const ridgeMat = new MeshBasicNodeMaterial();
+  ridgeMat.colorNode = Fn(() => {
+    const t = uv().y;
+    let c: any = mix(vec3(0.40, 0.47, 0.58), vec3(0.88, 0.91, 0.95), smoothstep(0.35, 0.95, t));
+    c = mix(c, uHorizon, 0.45);
+    return vec4(c, 1);
+  })();
+  const ridge = new Mesh(new BufferGeometry(), ridgeMat);
+  ridge.frustumCulled = false;
+  ridge.visible = false;
+  world.add(ridge);
+
+  // ------------------------------------------------------------------ splat (photo, hero)
+  const splat: SplatHandle = createSplat({ renderer: ctx.renderer, url: BASE + 'ski.splat', isPhone: ctx.isPhone });
+  splat.object.renderOrder = 10;
+  world.add(splat.object);
+
+  // ------------------------------------------------------------------ falling snow + spray
+  const SNOW = ctx.isPhone ? 700 : 1600;
+  const flakeMat = new SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: AdditiveBlending });
+  const fi = float(instanceIndex);
+  const h1 = hash(fi), h2 = hash(fi.add(3.1)), h3 = hash(fi.add(7.7)), h4 = hash(fi.add(11.3));
+  const BOX = new Vector3(22, 12, 26);
+  const fall = uTime.mul(mix(0.35, 0.9, h4));
+  const rel = vec3(
+    fract(h1.add(uTime.mul(0.012))).sub(0.5).mul(BOX.x).add(sin(uTime.mul(0.6).add(h2.mul(30))).mul(0.25)),
+    fract(h2.sub(fall.div(BOX.y))).sub(0.5).mul(BOX.y),
+    h3.sub(0.5).mul(BOX.z));
+  flakeMat.positionNode = uSnowBox.add(rel);
+  flakeMat.scaleNode = vec2(mix(0.018, 0.05, h4.mul(h4)));
+  flakeMat.colorNode = Fn(() => {
+    const d = length(uv().sub(0.5)).mul(2);
+    const a = float(1).sub(smoothstep(0.2, 1.0, d)).mul(0.75);
+    return vec4(vec3(0.95, 0.97, 1.0).mul(a), a);
+  })();
+  const flakes = new Sprite(flakeMat);
+  flakes.count = SNOW;
+  flakes.frustumCulled = false;
+  flakes.renderOrder = 20;
+  world.add(flakes);
+
+  const SPRAY = 260;
+  const sprayMat = new SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: AdditiveBlending });
+  const LIFE = 1.3;
+  const age = fract(uTime.div(LIFE).add(h1));
+  const side = select(h2.greaterThan(0.5), float(0.32), float(-0.22));
+  const v0 = vec3(h3.sub(0.5).mul(1.1), mix(0.7, 1.6, h4), h1.sub(0.5).mul(0.8));
+  const tt = age.mul(LIFE);
+  sprayMat.positionNode = uFeet.add(vec3(side, 0.02, h2.sub(0.5).mul(0.3))).add(v0.mul(tt)).add(vec3(0, tt.mul(tt).mul(-2.2), 0));
+  sprayMat.scaleNode = vec2(mix(0.015, 0.035, h3).mul(float(1).add(age)));
+  sprayMat.colorNode = Fn(() => {
+    const d = length(uv().sub(0.5)).mul(2);
+    const a = float(1).sub(smoothstep(0.1, 1.0, d)).mul(float(1).sub(age)).mul(uSpray).mul(0.8);
+    return vec4(vec3(1.0).mul(a), a);
+  })();
+  const spray = new Sprite(sprayMat);
+  spray.count = SPRAY;
+  spray.frustumCulled = false;
+  spray.renderOrder = 21;
+  world.add(spray);
+
+  // ------------------------------------------------------------------ text-legibility vignette (screen space)
+  const vigMat = new MeshBasicNodeMaterial({ transparent: true, depthTest: false, depthWrite: false });
+  vigMat.colorNode = vec4(0, 0, 0, 1);
+  vigMat.opacityNode = Fn(() => {
+    const p = screenUV.sub(0.5);
+    const sides = smoothstep(0.18, 0.5, abs(p.x)).mul(0.5);
+    const top = smoothstep(0.25, 0.5, p.y).mul(0.35);
+    return clamp(sides.add(top).add(0.14), 0, 0.8);
+  })();
+  const vignette = new QuadMesh(vigMat);
+
+  // ------------------------------------------------------------------ assets + world layout
+  let meta: SkiMeta | null = null;
+  const pivot = new Vector3(0, 0, -2.5);
+  const feet = new Vector3(0, -1, -2.5);
+  let skierH = 2;
+  const groundY = (x: number, z: number) => (meta ? meta.ground[0] * x + meta.ground[1] * z + meta.ground[2] : -1);
   const ready = (async () => {
-    const [di, gi] = await Promise.all([loadImage(BASE + `dots-${src}.png`), loadImage(BASE + 'glyphs.png')]);
-    dataTex.image = di; dataTex.needsUpdate = true;
-    glyphTex.image = gi; glyphTex.needsUpdate = true;
+    meta = (await fetch(BASE + 'ski.json').then((r) => r.json())) as SkiMeta;
+    const [a, b, c] = meta.ground;
+    pivot.fromArray(meta.skier.centre);
+    feet.fromArray(meta.skier.feet);
+    skierH = meta.skier.head[1] - meta.skier.feet[1];
+    uFeet.value.copy(feet);
+    uZenith.value.copy(srgb(meta.sky_zenith, 0.72));
+    uHorizon.value.copy(srgb(meta.sky_horizon, 0.86));
+    uSnow.value.copy(srgb(meta.snow, 0.98));
+    background.copy(uHorizon.value).multiplyScalar(0.5);
+    // ground plane: normal (−a, 1, −b), through (0, c, 0), a few cm below the splat's snow
+    const nrm = new Vector3(-a, 1, -b).normalize();
+    ground.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), nrm);
+    ground.position.set(0, c - 0.22, 0);
+    // pines: clustered bands beyond the capture, never inside the photo frustum (it has its own treeline)
+    const tanH = Math.tan(((meta.hfov / 2 + 4) * Math.PI) / 180);
+    const m4 = new Matrix4(), q = new Quaternion(), s3 = new Vector3(), p3 = new Vector3();
+    const up = new Vector3(0, 1, 0);
+    let k = 0, guard = 0;
+    const rnd = (i: number) => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+    while (k < PINES && guard++ < PINES * 40) {
+      const r1 = rnd(guard), r2 = rnd(guard + 0.5), r3 = rnd(guard + 0.25), r4 = rnd(guard + 0.75);
+      const z = -14 - Math.pow(r1, 0.8) * 190;
+      const x = (r2 - 0.5) * 2 * (40 + (-z) * 1.1);
+      const clump = Math.sin(x * 0.11) * Math.sin(z * 0.09 + 1.3) + Math.sin(x * 0.031 + z * 0.02) * 0.8;
+      if (clump < 0.1 + r4 * 0.4) continue;
+      if (Math.abs(x) < (-z) * tanH + 4) continue;                     // never inside the photo's frustum (it has its own treeline)
+      if (z > -50 || (Math.abs(x) < 45 && z > -95)) continue;          // keep the near field / glide path clear
+      const hgt = 5 + r3 * 7 + (-z) * 0.02;
+      p3.set(x, groundY(x, z) - 0.3, z);
+      q.setFromAxisAngle(up, r4 * 6.28);
+      s3.set(hgt * (0.85 + r1 * 0.3), hgt, hgt * (0.85 + r2 * 0.3));
+      pines.setMatrixAt(k++, m4.compose(p3, q, s3));
+    }
+    pines.count = k;
+    pines.instanceMatrix.needsUpdate = true;
+    // mountain ridge: a jagged strip at ~520 m spanning ±110° around −Z
+    const SEG = 220, RR = 520;
+    const pos: number[] = [], uvs: number[] = [], idx: number[] = [];
+    for (let i = 0; i <= SEG; i++) {
+      const th = ((i / SEG) * 2 - 1) * (110 * Math.PI) / 180;
+      const x = Math.sin(th) * RR, z = -Math.cos(th) * RR;
+      const n = Math.sin(i * 0.21) * 0.5 + Math.sin(i * 0.067 + 1.7) * 0.8 + Math.sin(i * 0.53) * 0.18;
+      const top = 45 + n * 32 + Math.abs(Math.sin(i * 0.031)) * 40;
+      const base = groundY(x * 0.25, z * 0.25) - 30;
+      pos.push(x, base, z, x, base + top + 30, z);
+      uvs.push(i / SEG, 0, i / SEG, 1);
+      if (i < SEG) { const j = i * 2; idx.push(j, j + 1, j + 2, j + 1, j + 3, j + 2); }
+    }
+    const rg = ridge.geometry;
+    rg.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+    rg.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2));
+    rg.setIndex(idx);
+    ridge.visible = true;
+    await splat.ready;
   })();
 
-  // ------------------------------------------------------------------ lens + state
-  const lensCam = new PerspectiveCamera(LENS_FOV, 1, 0.05, 500);
-  const fwd = new Vector3(), gpos = new Vector3(), ro = new Vector3(), rp = new Vector3();
-  const inv = new Matrix4();
-  function updateLens(c: PerspectiveCamera) {
-    c.getWorldDirection(fwd);
-    group.getWorldPosition(gpos);
-    const D = Math.max(0.1, gpos.sub(c.position).dot(fwd));
-    const k = Math.tan((c.fov * Math.PI) / 360) / Math.tan((LENS_FOV * Math.PI) / 360);
-    lensCam.position.copy(c.position).addScaledVector(fwd, -D * (k - 1));
-    lensCam.quaternion.copy(c.quaternion);
-    lensCam.aspect = c.aspect;
-    lensCam.far = D * k + 100;
-    lensCam.updateProjectionMatrix();
-    lensCam.updateMatrixWorld();
-    // frame width: ~fill the height, never much wider than the view (phones)
-    const visH = 2 * D * Math.tan((c.fov * Math.PI) / 360);
-    const visW = visH * c.aspect;
-    uFW.value = Math.min(visH * 0.62, visW * 0.95);
-    group.scale.x = WIDEN;
-    grid.scale.set(uFW.value * 3, uFW.value * 3, 1);
-    grid.position.z = -uFW.value * 0.15;
-  }
-
-  const debug: { reveal?: number; exit?: number; cursor?: [number, number] } = {};
-  let t = 0, revealClock = -1, hit = false, wasHit = false, waveClock = -1;
-  const cursor = new Vector2(99, 99), prev = new Vector2(99, 99), vel = new Vector2(), tmp = new Vector2();
-
-  function locate(f: PortalFrame) {
-    ro.setFromMatrixPosition(lensCam.matrixWorld);
-    rp.set(f.pointer.x, f.pointer.y, 0.5).applyMatrix4(lensCam.projectionMatrixInverse).applyMatrix4(lensCam.matrixWorld);
-    inv.copy(group.matrixWorld).invert();
-    ro.applyMatrix4(inv); rp.applyMatrix4(inv).sub(ro);
-    if (Math.abs(rp.z) < 1e-6) return false;
-    const s = -ro.z / rp.z;
-    cursor.set(ro.x + rp.x * s, ro.y + rp.y * s);
-    const half = uFW.value / 2;
-    return Math.abs(cursor.x) < half && Math.abs(cursor.y) < half;
+  // ------------------------------------------------------------------ camera path
+  const debug: { glide?: number; exit?: number; px?: number; py?: number } = {};
+  let t = 0, revealClock = -1;
+  const camPos = new Vector3(), look = new Vector3(), tmp = new Vector3(), past = new Vector3();
+  function poseCamera(f: PortalFrame, exit: number) {
+    // rest distance so the skier fills ~40% of the screen height
+    const vfov = ctx.isPhone || f.camera.aspect < 1 ? 68 : 46;
+    // ~0.34 here → ~40% on screen after the post's centre magnification (fish-eye + camcorder zoom ≈ 1.2×)
+    const frac = ctx.isPhone || f.camera.aspect < 1 ? 0.25 : 0.34;   // phones: stronger fish-eye magnification
+    const rest = skierH / (2 * frac * Math.tan((vfov * Math.PI) / 360));
+    const g = debug.glide ?? (revealClock < 0 ? 0 : clamp01(revealClock / 7));
+    const e = inOutCubic(g);
+    const px = debug.px ?? f.parallax.x, py = debug.py ?? f.parallax.y;
+    // orbit (yaw around the skier): start −8° further back and a little higher → rest +3°, idle drift ±2.5°,
+    // pointer ±6°. The splat is a 2.5D capture: stay near the photo's eye line so it never shows its seams.
+    const drift = Math.sin((t * 2 * Math.PI) / 16) * 2.5;
+    const yaw = ((-8 + 11 * e + drift * e + px * 6) * Math.PI) / 180;
+    const R = rest * (1.6 - 0.6 * e);
+    const lift = 0.55 * (1 - e) + 0.1 + py * 0.3 + Math.sin((t * 2 * Math.PI) / 11) * 0.05;
+    camPos.set(pivot.x + Math.sin(yaw) * R, pivot.y + lift + 0.2, pivot.z + Math.cos(yaw) * R);
+    look.copy(pivot).add(tmp.set(0, 0.45 - 0.15 * (1 - e), 0));
+    // exit: ski past him downhill (to his right, low), looking far down the slope
+    if (exit > 0) {
+      const x = inOutCubic(exit);
+      past.set(pivot.x + 1.1, feet.y + 0.9, pivot.z - 9);
+      camPos.lerp(past, x);
+      look.lerp(tmp.set(pivot.x + 2, feet.y + 0.6, pivot.z - 40), Math.min(1, x * 1.3));
+    }
+    cam.position.copy(camPos);
+    cam.lookAt(look);
+    cam.fov = vfov + exit * 14;
+    cam.aspect = f.camera.aspect;
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld();
   }
 
   function update(f: PortalFrame) {
@@ -231,46 +314,39 @@ export function createIntroPortal(_ctx: PortalContext): Portal {
     t += dt;
     uTime.value = t;
     const exit = debug.exit ?? clamp01(1 - f.focus);
-    uExit.value = exit;
     if (f.gateOpen && revealClock < 0) revealClock = 0;
     else if (revealClock >= 0) revealClock += dt;
-    uReveal.value = debug.reveal ?? (revealClock < 0 ? 0 : clamp01(revealClock / REVEAL_S) * 1.15);
-    // placement + slow drift / parallax (small rotations: the lens keeps it undistorted)
-    group.position.set(0, 0, 0.406 - FRAME_DIST);
-    group.rotation.y = Math.sin((t * 2 * Math.PI) / 12) * 0.045 + f.parallax.x * 0.07 * (1 - exit);
-    group.rotation.x = Math.sin((t * 2 * Math.PI) / 9) * 0.025 - f.parallax.y * 0.045 * (1 - exit);
-    group.updateMatrixWorld();
-    updateLens(f.camera);
-    // pointer
-    const interactive = f.pointer.inside && exit < 0.3 && uReveal.value > 0.6;
-    hit = interactive ? locate(f) : false;
-    if (debug.cursor) { cursor.set(debug.cursor[0] * uFW.value * 0.5, debug.cursor[1] * uFW.value * 0.5); hit = true; }
-    if (hit) {
-      if (prev.x > 90) prev.copy(cursor);
-      tmp.copy(cursor).sub(prev).divideScalar(Math.max(dt, 1e-3));
-      if (tmp.length() > 60) tmp.set(0, 0);
-      prev.copy(cursor);
-      vel.lerp(tmp, 1 - Math.exp(-30 * dt));
-    } else prev.set(99, 99);
-    vel.multiplyScalar(Math.exp(-6 * dt));
-    uVel.value.copy(vel);
-    uCursor.value.copy(cursor);
-    uHover.value += ((hit ? 1 : 0) - uHover.value) * (1 - Math.exp(-(hit ? 12 : 4) * dt)); // spring-ish settle
-    if (hit && !wasHit) { waveClock = 0; uWave.value.copy(cursor); } else if (waveClock >= 0) waveClock += dt;
-    wasHit = hit;
-    uWaveP.value = waveClock < 0 ? 1 : outQuad(clamp01(waveClock / 1.4));
+    poseCamera(f, exit);
+    uSnowBox.value.copy(cam.position).lerp(pivot, 0.55);
+    uSpray.value = 0.35 + 0.65 * Math.max(0, Math.sin(t * 0.9)) ** 3;
+    splat.update(dt, cam, { x: 0, y: 0, inside: false });
   }
 
-  function render(renderer: WebGPURenderer, _camera: PerspectiveCamera, rt: RenderTarget) {
+  function render(renderer: WebGPURenderer, camera: PerspectiveCamera, rt: RenderTarget) {
+    // honour the overscan the compositor/app put on the stage camera (its fov is the 110° base widened for the
+    // fish-eye): widen our own camera by the same factor, so the post's fish-eye maps it back to the intended framing
+    const ov = Math.max(1, Math.tan((camera.fov * Math.PI) / 360) / Math.tan((110 * Math.PI) / 360));
+    const fov0 = cam.fov, asp0 = cam.aspect;
+    cam.fov = (2 * Math.atan(Math.tan((fov0 * Math.PI) / 360) * ov) * 180) / Math.PI;
+    cam.aspect = camera.aspect;
+    cam.updateProjectionMatrix();
     renderer.setRenderTarget(rt);
     renderer.clear();
-    renderer.render(scene, lensCam);
+    renderer.render(scene, cam);
+    cam.fov = fov0; cam.aspect = asp0; cam.updateProjectionMatrix();
+    const ac = renderer.autoClear;
+    renderer.autoClear = false;
+    vignette.render(renderer);
+    renderer.autoClear = ac;
   }
 
   const portal: Portal & { debug: typeof debug } = {
     debug, scene, background, ready, update, render,
     dispose() {
-      dataTex.dispose(); glyphTex.dispose(); mat.dispose(); gridMat.dispose(); grid.geometry.dispose();
+      splat.dispose();
+      for (const o of [sky, ground, ridge]) o.geometry.dispose();
+      pines.geometry.dispose();
+      skyMat.dispose(); groundMat.dispose(); pineMat.dispose(); ridgeMat.dispose(); flakeMat.dispose(); sprayMat.dispose(); vigMat.dispose();
     },
   };
   return portal;

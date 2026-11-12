@@ -19,6 +19,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('frames'); ap.add_argument('idx', type=int); ap.add_argument('out')
 ap.add_argument('--mode', choices=['face', 'scene'], default='face')
 ap.add_argument('--cols', type=int, default=128)
+ap.add_argument('--body-y', dest='body_y', type=float, default=0.78, help='crop-relative row where clothing starts (face mode)')
 ap.add_argument('--floor', type=float, default=0.12, help='minimum intensity inside the subject (dark hair still lit)')
 a = ap.parse_args()
 
@@ -62,6 +63,9 @@ down = lambda x: cv2.resize(x, (a.cols, a.cols), interpolation=cv2.INTER_AREA)
 # draws ink cells as dense dot-font glyphs (ASCII-art logic) so dark features read as texture, never as holes.
 dark = np.clip((0.42 - sharp) / 0.30, 0, 1) * m4
 ink = np.maximum(dark, 0.75 * edge * m4)
+if a.mode == 'face':   # dark clothing below the chin: calmer ink so the jacket doesn't compete with the face
+    rows = (np.arange(W)[:, None] / W)
+    ink = ink * (1 - 0.6 * np.clip((rows - a.body_y) / 0.06, 0, 1))
 out = np.dstack([down(inten), down(d4), down(ink), down(m4)])
 Image.fromarray((out.clip(0, 1) * 255).round().astype(np.uint8), 'RGBA').save(a.out)
 # preview (scratch): intensity as halftone-ish

@@ -18,7 +18,7 @@ import cv2
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from infer import person_mask, rel_depth
+from infer import person_mask, person_mask_mp, rel_depth
 
 ap = argparse.ArgumentParser()
 ap.add_argument('photo'); ap.add_argument('out')
@@ -32,6 +32,8 @@ ap.add_argument('--nod', type=float, default=1.0)
 ap.add_argument('--neck', nargs=2, type=float, default=[0.80, 0.92], help='head→body blend band (crop-relative y)')
 ap.add_argument('--preview', action='store_true')
 ap.add_argument('--hair-flood', dest='hair_flood', type=int, default=0, help='px band for the dark-hair matte growth (0 = off)')
+ap.add_argument('--hair-luma', dest='hair_luma', type=float, default=0.32, help='max luma of hair pixels for the flood')
+ap.add_argument('--hair-open', dest='hair_open', type=int, default=1, help='opening kernel (px) to cut thin branches off the hair flood')
 ap.add_argument('--save-mask', dest='save_mask', default='', help='write the final (cropped) matte preview here')
 ap.add_argument('--line-px', dest='line_px', type=int, default=9, help='top/black-hat kernel (supersampled px)')
 ap.add_argument('--prior', type=float, default=0.0, help='0..1 blend toward dome prior + model detail')
@@ -45,7 +47,7 @@ _im = ImageOps.exif_transpose(Image.open(a.photo)).convert('RGB')     # phone ph
 if a.scale != 1:
     _im = _im.resize((round(_im.width * a.scale), round(_im.height * a.scale)), Image.LANCZOS)
 rgb = np.array(_im)
-mask = person_mask(rgb, a.seg)
+mask = person_mask_mp(rgb, a.seg) if a.seg.endswith('.tflite') else person_mask(rgb, a.seg)
 if a.hair_flood > 0:
     # hair matte: the segmenter trims curl tips against a bright sky. Add dark pixels (hair-coloured) that connect to
     # the person within a band around the upper silhouette, then close the matte.
@@ -55,7 +57,9 @@ if a.hair_flood > 0:
     upper = np.zeros_like(band); ys_ = np.nonzero(core)[0]
     if len(ys_):
         top = ys_.min(); upper[: int(top + (ys_.max() - top) * 0.45)] = True
-    dark = (g < 0.32) & band & upper
+    dark = (g < a.hair_luma) & band & upper
+    # sever thin dark structures (bare branches, wires) before connecting: curls are chunky, twigs are 1–2 px
+    dark = cv2.morphologyEx(dark.astype(np.uint8), cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (a.hair_open, a.hair_open))) > 0
     cand = (dark | (core > 0)).astype(np.uint8)
     nl, lab = cv2.connectedComponents(cand)
     keep = np.unique(lab[core > 0]); keep = keep[keep > 0]

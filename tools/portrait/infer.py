@@ -31,3 +31,15 @@ def rel_depth(rgb, model_path, size=518):
     out = s.run(None, {s.get_inputs()[0].name: _prep(rgb, (tw, th))})[0]
     out = np.squeeze(out).astype(np.float32)
     return cv2.resize(out, (w, h), interpolation=cv2.INTER_CUBIC)
+
+def person_mask_mp(rgb, model_path):
+    """MediaPipe selfie multiclass segmenter (local .tflite): person = 1 − background confidence.
+    Much more robust than u2net against busy backgrounds (bare branches, trees); hair is its own class."""
+    import mediapipe as mp
+    from mediapipe.tasks import python as mpt
+    from mediapipe.tasks.python import vision
+    seg = vision.ImageSegmenter.create_from_options(vision.ImageSegmenterOptions(
+        base_options=mpt.BaseOptions(model_asset_path=model_path), output_confidence_masks=True))
+    r = seg.segment(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(rgb)))
+    bg = np.squeeze(r.confidence_masks[0].numpy_view()).astype(np.float32)
+    return 1.0 - bg
