@@ -54,8 +54,8 @@ export function createTerminal() {
   const mat = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
   const t = texture(tex, uv().mul(vec2(1, 4)).add(vec2(0, uScroll)));
   mat.colorNode = t.rgb;
-  mat.opacityNode = t.a.mul(uOpacity).mul(float(0.16));
-  const mesh = new Mesh(new PlaneGeometry(15, 15 * (H / W) * 4), mat);
+  mat.opacityNode = t.a.mul(uOpacity).mul(float(0.42));
+  const mesh = new Mesh(new PlaneGeometry(20, 20 * (H / W) * 4), mat);
   mesh.renderOrder = -10;
   let op = 0;
   return {

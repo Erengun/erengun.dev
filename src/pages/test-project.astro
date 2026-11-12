@@ -17,6 +17,7 @@ import { PROJECTS } from '../lib/content';
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
     <title>test: project portal</title>
+    <link rel="icon" href="data:," />
     <style>
       html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
       #c { position: fixed; inset: 0; touch-action: none; }
@@ -37,7 +38,7 @@ import { PROJECTS } from '../lib/content';
         MeshBasicNodeMaterial, Group, Matrix4, Timer,
       } from 'three/webgpu';
       import { texture, screenUV, mix, color } from 'three/tsl';
-      import { createProjectPortal } from '../scene/portals/project.wip';
+      import { createProjectPortal } from '../scene/portals/project';
       import { PROJECTS } from '../lib/content';
       import { PORTAL_W, PORTAL_H, type PortalFrame } from '../scene/types';
       import { $route } from '../lib/stores';

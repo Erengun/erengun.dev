@@ -25,13 +25,13 @@ const FOLLOW = 20;
 const LOCK_PX = 6;
 const ADVANCE_V = 0.0015; // |velocity px/ms| / slidePx
 
-type RoomCfg = { url: string; darkness: number; saturation: number; tint: string };
+type RoomCfg = { url: string; darkness: number; saturation: number; tint: string; exposure: number; contrast: number };
 // per project: 0 star sky, 1..3 rooms
 const ROOMS: (RoomCfg | null)[] = [
   null,
-  { url: '/models/gallery-tile.glb', darkness: 0.5, saturation: 0, tint: '#ffffff' },
-  { url: '/models/studio-corridor.glb', darkness: 0.55, saturation: 1, tint: '#ffffff' },
-  { url: '/models/gallery-tile.glb', darkness: 0.6, saturation: 0.6, tint: '#d4c8ff' },
+  { url: '/models/gallery-tile.glb', darkness: 0.45, saturation: 0, tint: '#ffffff', exposure: 0.75, contrast: 3.2 },
+  { url: '/models/studio-corridor.glb', darkness: 0.3, saturation: 1, tint: '#e8efff', exposure: 1, contrast: 1.7 },
+  { url: '/models/gallery-tile.glb', darkness: 0.55, saturation: 0.6, tint: '#d4c8ff', exposure: 0.7, contrast: 3 },
 ];
 const BACKGROUNDS = ['#010209', '#000000', '#000000', '#000000'];
 
@@ -60,7 +60,7 @@ function loadRoom(url: string): Promise<BufferGeometry> {
 }
 
 // ------------------------------------------------------------------ star sky (spec §6.2)
-function starSkyMaterial(uTime: ReturnType<typeof uniform>) {
+function starSkyMaterial(uTime: any) {
   const m = new MeshBasicNodeMaterial({ side: BackSide, depthWrite: false });
   m.fog = false;
   m.colorNode = Fn(() => {
@@ -79,7 +79,8 @@ function starSkyMaterial(uTime: ReturnType<typeof uniform>) {
     const hs = h(3);
     const present = hs.lessThan(0.32);
     const size = mix(0.02, 0.065, pow(float(1).sub(hs.div(0.32)).max(0), 4));
-    const aa = fwidth(dist).max(1e-4);
+    // pixel footprint from the continuous grid coordinate (fwidth(dist) jumps at cell borders → streaks)
+    const aa = length(fwidth(g)).mul(0.6).max(1e-4);
     const star = float(1).sub(smoothstep(size.sub(aa), size.add(aa), dist)).mul(select(present, float(1), float(0)));
     const h5 = h(5), h6 = h(6);
     const tw = sin(uTime.mul(mix(0.5, 1.2, h5)).add(h6.mul(40))).mul(0.35).add(0.65);
@@ -114,10 +115,10 @@ export function createProjectPortal(ctx: PortalContext, project: Project, index:
   const placeholder = new DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   placeholder.needsUpdate = true;
   const uAtlas = texture(placeholder);
-  const rect = instancedBufferAttribute(rectAttr);
+  const rect = instancedBufferAttribute(rectAttr, 'vec4') as any;
   const dimArray = new Float32Array(m);
   const dimAttr = new InstancedBufferAttribute(dimArray, 1);
-  const dim = instancedBufferAttribute(dimAttr);
+  const dim = instancedBufferAttribute(dimAttr, 'float') as any;
   stripMat.colorNode = uAtlas.sample(uv().mul(rect.zw).add(rect.xy)).rgb.mul(dim);
   const strip = new InstancedMesh(new PlaneGeometry(SW, SH), stripMat, m);
   strip.frustumCulled = false;
@@ -158,7 +159,8 @@ export function createProjectPortal(ctx: PortalContext, project: Project, index:
     const L = size.z * k;
     const mat = new MeshBasicNodeMaterial({ side: DoubleSide });
     const uDark = uniform(cfg.darkness), uSat = uniform(cfg.saturation);
-    const base = vertexColor(0).rgb.mul(color(cfg.tint));
+    // baked vertex light, with a contrast curve so the rooms read moody rather than flat grey
+    const base = pow(vertexColor(0).rgb, vec3(cfg.contrast)).mul(cfg.exposure).mul(color(cfg.tint));
     const l = luminance(base);
     const c = base.mul(float(1).sub(uDark.mul(0.6))).mul(float(1).sub(smoothstep(0.2, 1, l).mul(0.6)));
     mat.colorNode = mix(vec3(luminance(c)), c, uSat);
@@ -266,21 +268,21 @@ export function createProjectPortal(ctx: PortalContext, project: Project, index:
     const e = smooth(o);
     const cam = f.camera;
     const D = Math.max(cam.position.z, 0.05); // camera distance to the portal plane
-    const depth = o * 1 + 0.02; // strip depth behind the plane (content pushed back by openness)
+    const depth = o * 1 + 0.02 * e; // strip depth behind the plane (content pushed back by openness)
     const t = Math.tan((cam.fov * Math.PI) / 360);
     // apparent (plane-space) scale of one slide: cover-fit the window on the carousel …
-    const s0 = Math.max(PORTAL_W / SW, PORTAL_H / SH) * 1.015;
+    const s0 = Math.max(PORTAL_W / SW, PORTAL_H / SH) * 1.02;
     // … and fill the view when inside: contain-fit into the visible view, then shrink so the neighbours
-    // and the room show around it (desktop .7, phone .92 of the fit).
+    // and the room show around it (desktop .6, phone .92 of the fit; the app's CRT bulge + tape zoom magnify ~15%).
     const visW = 2 * D * t * cam.aspect, visH = 2 * D * t;
     const fit = Math.min(visW / SW, visH / SH);
-    const s1 = fit * (f.isPhone ? 0.92 : 0.7);
+    const s1 = fit * (f.isPhone ? 0.92 : 0.6);
     const sp = s0 + (s1 - s0) * e;
     const ws = (sp * (D + depth)) / D; // world scale at the strip depth
     const pitch = (SW + GAP) * ws;
     slidePx = (pitch / ((D + depth) * 2 * t * cam.aspect)) * (ctx.renderer.domElement.clientWidth || innerWidth);
     // lift the strip a little while inside so the project panel (top 71.5%) sits under the slide
-    strip.position.set(0, (f.isPhone ? 0 : 0.07) * visH * e * ((D + depth) / D), -0.02);
+    strip.position.set(0, (f.isPhone ? 0 : 0.09) * visH * e * ((D + depth) / D), -0.02 * e); // rests on the window plane while on the carousel
     for (let j = 0; j < m; j++) {
       const kx = mod(j - offset + m / 2, m) - m / 2;
       const x = kx * pitch;

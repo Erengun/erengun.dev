@@ -3,10 +3,11 @@ Pack the rendered portrait frames into runtime atlases (run with `python3 -I pac
 
 out/color.webp     colour frames (lossy), COLS x ROWS grid of N x N cells
 out/data.webp      lossless: R = depth (near = 1), G = min depth of the 8 neighbours + self, B = 0
-out/quadtree.webp  lossless: per-frame quadtree leaf level (0..MAXD) * 60 on a Q x Q grid (Q = ROOTS * 2^MAXD)
+out/quadtree.webp  lossless: per-frame quadtree leaf level (0..MAXD) * 60 on a QW x QH grid (Q* = ROOTS_* * 2^MAXD)
 out/meta.json      layout + quadtree params
 
-Quadtree: ROOTS x ROOTS root cells over the frame; a node splits while the depth range or luma range inside it is
+Quadtree: ROOTS_X x ROOTS_Y (16 x 9, as if the source were a 16:9 video: on the square voxel plane the root
+cells come out tall, like the reference's) root cells over the frame; a node splits while the depth range or luma range inside it is
 above a threshold (the face/silhouette refine, flat background stays coarse).
 """
 import sys, os, json, glob
@@ -21,17 +22,17 @@ F = len(colors)
 N = Image.open(colors[0]).size[0]
 COLS = 8
 ROWS = (F + COLS - 1) // COLS
-ROOTS, MAXD = 9, 4
-Q = ROOTS * 2 ** MAXD  # 144
+ROOTS_X, ROOTS_Y, MAXD = 16, 9, 4
+QW, QH = ROOTS_X * 2 ** MAXD, ROOTS_Y * 2 ** MAXD  # 256 x 144
 LEVEL_SCALE = 60
-D_SPLIT, L_SPLIT = 0.045, 0.22
+D_SPLIT, L_SPLIT = 0.02, 0.12
 
 col_atlas = Image.new('RGB', (COLS * N, ROWS * N))
 dat_atlas = np.zeros((ROWS * N, COLS * N, 3), np.uint8)
-qt_atlas = np.zeros((ROWS * Q, COLS * Q), np.uint8)
+qt_atlas = np.zeros((ROWS * QH, COLS * QW), np.uint8)
 
 def quadtree(depth, luma):
-    lv = np.zeros((Q, Q), np.uint8)
+    lv = np.zeros((QH, QW), np.uint8)
     def rec(x, y, s, level):
         if level >= MAXD:
             lv[y:y + s, x:x + s] = level
@@ -44,9 +45,9 @@ def quadtree(depth, luma):
                 rec(x + ox * h, y + oy * h, h, level + 1)
         else:
             lv[y:y + s, x:x + s] = level
-    S = Q // ROOTS
-    for j in range(ROOTS):
-        for i in range(ROOTS):
+    S = 2 ** MAXD
+    for j in range(ROOTS_Y):
+        for i in range(ROOTS_X):
             rec(i * S, j * S, S, 0)
     return lv
 
@@ -62,14 +63,14 @@ for k, (cp, dp) in enumerate(zip(colors, depths)):
     nmin = np.min([pad[1 + oy:1 + oy + N, 1 + ox:1 + ox + N] for oy in (-1, 0, 1) for ox in (-1, 0, 1)], axis=0)
     dat_atlas[cy * N:(cy + 1) * N, cx * N:(cx + 1) * N, 0] = np.round(d * 255)
     dat_atlas[cy * N:(cy + 1) * N, cx * N:(cx + 1) * N, 1] = np.round(nmin * 255)
-    # quadtree on a Q x Q resample (nearest for depth, bilinear for luma)
-    dq = np.array(Image.fromarray((d * 255).astype(np.uint8)).resize((Q, Q), Image.NEAREST)).astype(float) / 255
-    lq = np.array(c.convert('L').resize((Q, Q), Image.BILINEAR)).astype(float) / 255
-    qt_atlas[cy * Q:(cy + 1) * Q, cx * Q:(cx + 1) * Q] = quadtree(dq, lq) * LEVEL_SCALE
+    # quadtree on a QW x QH resample (nearest for depth, bilinear for luma)
+    dq = np.array(Image.fromarray((d * 255).astype(np.uint8)).resize((QW, QH), Image.NEAREST)).astype(float) / 255
+    lq = np.array(c.convert('L').resize((QW, QH), Image.BILINEAR)).astype(float) / 255
+    qt_atlas[cy * QH:(cy + 1) * QH, cx * QW:(cx + 1) * QW] = quadtree(dq, lq) * LEVEL_SCALE
 
 col_atlas.save(os.path.join(out, 'color.webp'), 'WEBP', quality=88, method=6)
 Image.fromarray(dat_atlas).save(os.path.join(out, 'data.webp'), 'WEBP', lossless=True, method=6)
 Image.fromarray(qt_atlas).convert('RGB').save(os.path.join(out, 'quadtree.webp'), 'WEBP', lossless=True, method=6)
-meta = dict(frames=F, size=N, cols=COLS, rows=ROWS, fps=30, quadtree=dict(roots=ROOTS, maxDepth=MAXD, size=Q, levelScale=LEVEL_SCALE))
+meta = dict(frames=F, size=N, cols=COLS, rows=ROWS, fps=30, quadtree=dict(rootsX=ROOTS_X, rootsY=ROOTS_Y, maxDepth=MAXD, w=QW, h=QH, levelScale=LEVEL_SCALE))
 json.dump(meta, open(os.path.join(out, 'meta.json'), 'w'))
 print(meta, {f: os.path.getsize(os.path.join(out, f)) for f in os.listdir(out)})

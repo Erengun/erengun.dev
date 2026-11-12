@@ -22,7 +22,7 @@ os.makedirs(WORK, exist_ok=True)
 EYE = 1.45
 HERO_FOV_Y = 62.0  # degrees, hero render (with margin below)
 HERO_MARGIN = 1.18
-HERO_PITCH = 6.0   # degrees up
+HERO_PITCH = 9.0   # degrees up
 ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else ['build']
 STAGE = ARGS[0]
 rng = random.Random(11)
@@ -243,15 +243,16 @@ LANTERNS = []  # (center, radius, height, rgb glow)
 def lantern(c, r, h, kind):
     me = bpy.data.meshes.new('Lantern')
     bm = bmesh.new()
+    bm.loops.layers.uv.new('UVMap')
     bmesh.ops.create_uvsphere(bm, u_segments=24, v_segments=14, radius=1.0, calc_uvs=True)
     bm.to_mesh(me)
     bm.free()
     if kind == 'red':
-        m = mat_img('lantern_red', 'lantern_red', emit=2.4, rough=0.7)
-        glow = (1.0, 0.28, 0.1)
+        m = mat_img('lantern_red', 'lantern_red', emit=4.0, rough=0.7)
+        glow = (1.0, 0.16, 0.05)
     else:
-        m = mat_img('lantern_white', 'lantern_white', emit=1.6, rough=0.7, tint=(1, .85, .7))
-        glow = (1.0, 0.7, 0.45)
+        m = mat_img('lantern_white', 'lantern_white', emit=2.2, rough=0.7, tint=(1, .62, .38))
+        glow = (1.0, 0.45, 0.22)
     me.materials.append(m)
     ob = link(bpy.data.objects.new('Lantern', me))
     ob.location = c
@@ -260,7 +261,7 @@ def lantern(c, r, h, kind):
     dark = mat_flat('lantern_cap', (25, 18, 12), 0.5)
     cyl('LanternCap', (c[0], c[1], c[2] + h / 2 - 0.03), (c[0], c[1], c[2] + h / 2 + 0.03), r * 0.55, dark)
     cyl('LanternCap', (c[0], c[1], c[2] - h / 2 - 0.03), (c[0], c[1], c[2] - h / 2 + 0.03), r * 0.55, dark)
-    point_light('LanternLight', c, glow, 18 if kind == 'red' else 9, r * 0.6)
+    point_light('LanternLight', c, glow, 30 if kind == 'red' else 10, r * 0.6)
     LANTERNS.append((tuple(c), r, h, glow, kind))
 
 
@@ -274,7 +275,7 @@ def build():
     W = 1.35  # half width at the ground-floor facades
     Y0, Y1 = -6.0, 36.0
 
-    floor = mat_rough('floor', (38, 34, 32), (70, 62, 55), 3.0, (0.18, 0.75), bump=1)
+    floor = mat_rough('floor', (22, 19, 18), (48, 42, 38), 3.0, (0.15, 0.7), bump=1)
     plaster = mat_rough('plaster', (150, 135, 115), (205, 190, 165), 4.0, (0.7, 0.95))
     plaster2 = mat_rough('plaster2', (120, 105, 95), (170, 150, 130), 7.0, (0.7, 0.95))
     wood = mat_rough('wood', (70, 38, 20), (125, 75, 40), 12.0, (0.5, 0.8))
@@ -293,9 +294,9 @@ def build():
     bottle2 = mat_flat('bottle2', (120, 60, 20), 0.15, 0.0)
     interior = mat_rough('interior', (150, 110, 70), (200, 160, 110), 5.0, (0.6, 0.9))
     collage = mat_img('collage', 'collage_a', rough=0.8)
-    bulb = mat_emit('bulb', (255, 210, 150), 25.0)
+    bulb = mat_emit('bulb', (255, 190, 120), 20.0)
     neon_red = mat_emit('neon_red', (255, 40, 30), 14.0)
-    glow_end = mat_emit('end_glow', (255, 140, 60), 2.2)
+    glow_end = mat_emit('end_glow', (255, 90, 30), 0.8)
 
     # floor + gutter
     quad('Floor', [(-2.2, Y0, 0), (2.2, Y0, 0), (2.2, Y1, 0), (-2.2, Y1, 0)], floor)
@@ -306,7 +307,7 @@ def build():
 
     # end of the alley: a lit cross street
     quad('EndGlow', [(-2.2, Y1, 0), (2.2, Y1, 0), (2.2, Y1, 7), (-2.2, Y1, 7)], glow_end)
-    area_light('EndLight', (0, Y1 - 0.5, 3.0), (math.radians(90), 0, math.radians(180)), 4.0, (1.0, 0.45, 0.18), 900, size_y=6)
+    area_light('EndLight', (0, Y1 - 0.5, 3.0), (math.radians(90), 0, math.radians(180)), 4.0, (1.0, 0.25, 0.08), 400, size_y=6)
     # behind the hero: closed end wall
     quad('BackWall', [(2.2, Y0, 0), (-2.2, Y0, 0), (-2.2, Y0, 7), (2.2, Y0, 7)], plaster2)
 
@@ -356,14 +357,14 @@ def build():
                         cyl('Bottle', (side * (W + d - 0.15), by, sh + 0.015), (side * (W + d - 0.15), by, sh + 0.015 + rng.uniform(.18, .3)),
                             0.035, bottle if rng.random() < .5 else bottle2, 8)
                 face('Menu', (xb - side * 0.01, yc, 2.05), (-side, 0, 0), y1 - y - 0.4, 0.5, mat_img('menu_a', 'menu_a', 0.3, 0.7))
-                area_light('ShopLight', (side * (W + d / 2), yc, 2.3), (0, 0, 0), 0.8, (1.0, 0.55, 0.25), 70, size_y=(y1 - y) * 0.7)
+                area_light('ShopLight', (side * (W + d / 2), yc, 2.3), (0, 0, 0), 0.8, (1.0, 0.22, 0.07), 45, size_y=(y1 - y) * 0.7)
                 cyl('Bulb', (side * (W + 0.6), yc, 2.2), (side * (W + 0.6), yc, 2.28), 0.05, bulb, 8)
                 # noren across the entrance top
                 n = rng.choice(['noren_a', 'noren_b'])
                 face('Noren', (side * (W - 0.02), yc, 2.0), (-side, 0, 0), 1.5, 0.6, mat_img(n, n, 0.15, 0.9))
             else:  # wooden lattice facade with lit paper windows
                 quad('WoodWall', [(x, y, 0), (x, y1, 0), (x, y1, 2.45), (x, y, 2.45)][::(1 if side == 1 else -1)], wood)
-                paper = mat_flat('paper', (240, 220, 180), 0.9, 0, 1.4, (255, 190, 120))
+                paper = mat_flat('paper', (150, 100, 70), 0.9, 0, 0.18, (255, 90, 40))
                 wy0, wy1 = y + 0.3, y1 - 0.3
                 xs = side * (W - 0.01)
                 c4 = [(xs, wy0, 0.9), (xs, wy1, 0.9), (xs, wy1, 2.0), (xs, wy0, 2.0)]
@@ -392,7 +393,7 @@ def build():
                 face('Board', (bx, yc, (bz0 + bz1) / 2), (-side, 0, 0), bw, bz1 - bz0, mat_img('board_a', 'board_a', 0.25, 0.6))
                 box('BoardBack', (bx + side * 0.03, yc, (bz0 + bz1) / 2), (0.05, bw, bz1 - bz0), wood_dark)
             # warm downlight under the eave
-            point_light('EaveLight', (side * (W - 0.35), yc, ez - 0.25), (1.0, 0.42, 0.16), 28, 0.15)
+            point_light('EaveLight', (side * (W - 0.35), yc, ez - 0.25), (1.0, 0.09, 0.03), 26, 0.15)
             if rng.random() < 0.5:
                 cyl('Bulb', (side * (W - 0.4), yc + 0.3, ez - 0.2), (side * (W - 0.4), yc + 0.3, ez - 0.12), 0.05, bulb, 8)
 
@@ -406,7 +407,7 @@ def build():
             for wy in np.arange(y + 0.5, y1 - 0.8, 1.3):
                 wz = rng.uniform(3.6, 4.3)
                 lit = rng.random() < 0.35
-                wm = mat_flat('win_lit', (230, 170, 110), 0.3, 0, 1.2, (255, 160, 80)) if lit else mat_flat('win_dark', (12, 10, 10), 0.15)
+                wm = mat_flat('win_lit', (200, 120, 80), 0.3, 0, 0.5, (255, 110, 50)) if lit else mat_flat('win_dark', (12, 10, 10), 0.15)
                 xs = side * (uw - 0.01)
                 cw = [(xs, wy, wz), (xs, wy + 0.7, wz), (xs, wy + 0.7, wz + 0.9), (xs, wy, wz + 0.9)]
                 quad('Window', cw if side == 1 else cw[::-1], wm)
@@ -457,15 +458,24 @@ def build():
         cyl('BannerRope', (-W, yy, 3.02), (W, yy, 3.02), 0.01, black, 5)
 
     # ---- lanterns: strings under the eaves on both sides + hero cluster upper right
-    for (x, y, z, r, h, k) in [(0.82, 2.2, 2.25, 0.27, 0.72, 'red'), (1.02, 1.35, 2.45, 0.18, 0.42, 'white'),
-                               (1.18, 0.75, 2.55, 0.17, 0.4, 'white'), (0.95, 3.3, 2.3, 0.18, 0.4, 'white'),
-                               (1.25, 0.15, 2.6, 0.16, 0.38, 'white')]:
+    for (x, y, z, r, h, k) in [(0.72, 2.9, 2.3, 0.3, 0.8, 'red'), (0.92, 2.45, 2.42, 0.15, 0.36, 'red'),
+                               (1.02, 2.1, 2.55, 0.15, 0.38, 'white'), (1.12, 1.8, 2.68, 0.15, 0.38, 'white'),
+                               (1.22, 1.5, 2.8, 0.14, 0.36, 'white'), (0.85, 3.9, 2.2, 0.16, 0.4, 'white')]:
         lantern((x, y, z), r, h, k)
     for side in (-1, 1):
         for yy in np.arange(5.0 if side == 1 else 3.0, Y1 - 2, rng.uniform(2.2, 3.0)):
             k = 'red' if rng.random() < 0.6 else 'white'
             r = 0.2 if k == 'red' else 0.15
             lantern((side * rng.uniform(0.8, 0.95), yy, rng.uniform(2.25, 2.45)), r, r * 2.5, k)
+
+    # ---- big tilted signboard upper-left near the hero, and a red shelf on the right
+    bn = Vector((1, -0.35, -0.25)).normalized()
+    bb = face('BigBoard', (-1.08, 1.9, 2.55), (1, -0.35, 0), 2.2, 0.95, mat_img('board_big', 'board_a', 0.0, 0.6))
+    box('ShelfR', (1.15, 3.2, 1.25), (0.4, 1.6, 0.05), awning_red)
+    box('ShelfR', (1.15, 3.2, 1.75), (0.4, 1.6, 0.05), awning_red)
+    face('PosterR', (1.33, 4.6, 1.6), (-1, 0, 0), 0.6, 0.85, mat_img('poster_a_r', 'poster_a', 0.0, 0.6))
+    face('PosterL', (-1.33, 1.2, 1.2), (1, 0, 0), 0.7, 1.0, mat_img('poster_b_l', 'poster_b', 0.0, 0.6))
+    face('MenuR', (1.33, 6.2, 2.0), (-1, 0, 0), 1.6, 0.6, mat_img('menu_r', 'menu_a', 0.2, 0.6))
 
     # ---- props near the hero view
     sn = Vector((0.6, -1, 0)).normalized()
@@ -488,8 +498,12 @@ def build():
         cyl('Person', (px, py, 0), (px, py, 1.45), 0.18, black, 10)
         cyl('Head', (px, py, 1.45), (px, py, 1.7), 0.11, black, 10)
     # red fill from above (alley glow) + world
-    area_light('RedFill', (0, 15, 6.2), (0, 0, 0), 2.0, (1.0, 0.12, 0.05), 900, size_y=40)
-    area_light('NearFill', (0, 1.5, 3.2), (0, 0, 0), 1.4, (1.0, 0.3, 0.12), 60, size_y=3)
+    area_light('RedFill', (0, 15, 6.2), (0, 0, 0), 2.0, (1.0, 0.06, 0.02), 380, size_y=40)
+    area_light('NearFill', (0, 1.5, 3.4), (0, 0, 0), 1.4, (1.0, 0.08, 0.03), 35, size_y=3)
+    # warm bare bulbs near the hero (bright spots like the reference)
+    for (bx, by, bz) in [(0.55, 6.5, 2.35), (-0.6, 9.0, 2.4)]:
+        cyl('Bulb', (bx, by, bz), (bx, by, bz + 0.09), 0.055, bulb, 8)
+        point_light('BulbLight', (bx, by, bz - 0.05), (1.0, 0.55, 0.25), 25, 0.05)
     world = bpy.data.worlds.new('World')
     world.use_nodes = True
     bg = world.node_tree.nodes['Background']
@@ -522,7 +536,7 @@ def setup_render():
     sc.cycles.sample_clamp_indirect = 8.0
     sc.view_settings.view_transform = 'Standard'
     sc.view_settings.look = 'None'
-    sc.view_settings.exposure = 0.0
+    sc.view_settings.exposure = -1.0
     sc.render.film_transparent = False
 
 
@@ -545,10 +559,13 @@ def views():
     hero_fov = 2 * math.degrees(math.atan(math.tan(math.radians(HERO_FOV_Y / 2)) * HERO_MARGIN))
     v = [('hero', (0, 0, EYE), (math.radians(90 + HERO_PITCH), 0, 0), hero_fov, 1800, 1125, 2)]
     faces = {'f': (90, 0, 0), 'b': (90, 0, 180), 'l': (90, 0, 90), 'r': (90, 0, -90), 'u': (180, 0, 0), 'd': (0, 0, 0)}
-    for i, (x, y, z) in enumerate([(0, -1.2, EYE), (0, 1.5, EYE), (0, 4.0, EYE), (0, 7.0, 1.8), (0, 11.0, 1.8), (0, 16.0, 1.8),
-                                   (0, 22.0, 1.8), (0, 29.0, 1.8), (0, 1.0, 2.3), (0, 3.0, 0.6)]):
+    for i, (x, y, z) in enumerate([(0, -1.2, EYE), (0, 3.0, EYE), (0, 7.5, 1.8), (0, 13.0, 1.8), (0, 20.0, 1.8),
+                                   (0, 28.0, 1.8), (0, 1.0, 2.4)]):
         for f, e in faces.items():
-            v.append((f'c{i}{f}', (x, y, z), tuple(math.radians(a) for a in e), 90.0, 640, 640, 1))
+            if f == 'b' and i > 0:
+                continue
+            res = 640 if i == 0 else 512
+            v.append((f'c{i}{f}', (x, y, z), tuple(math.radians(a) for a in e), 90.0, res, res, 1))
     return v
 
 
@@ -585,14 +602,18 @@ def render_views(preview=False):
         pos_path = os.path.join(WORK, f'{name}_pos.exr')
         if preview or not os.path.exists(col_path):
             sc.view_layers[0].material_override = None
-            sc.cycles.samples = 64 if preview else (160 if pri == 2 else 64)
+            sc.cycles.samples = 64 if preview else (160 if pri == 2 else 40)
             sc.cycles.use_denoising = True
             sc.cycles.filter_width = 1.5
             sc.render.image_settings.file_format = 'PNG'
+            sc.render.image_settings.color_depth = '8'
             sc.render.filepath = col_path
             bpy.ops.render.render(write_still=True)
         if not preview and not os.path.exists(pos_path):
             sc.view_layers[0].material_override = pm
+            for L in sc.objects:
+                if L.type == 'LIGHT':
+                    L.visible_camera = False
             sc.cycles.samples = 1
             sc.cycles.use_denoising = False
             sc.cycles.filter_width = 0.01
@@ -600,9 +621,13 @@ def render_views(preview=False):
             sc.render.image_settings.color_depth = '32'
             sc.render.filepath = pos_path
             bpy.ops.render.render(write_still=True)
+            sc.render.image_settings.file_format = 'PNG'
             sc.render.image_settings.color_depth = '8'
+            for L in sc.objects:
+                if L.type == 'LIGHT':
+                    L.visible_camera = True
             sc.view_layers[0].material_override = None
-        print('rendered', name)
+        print('rendered', name, flush=True)
 
 
 # ------------------------------------------------------------------------------------------------ splats

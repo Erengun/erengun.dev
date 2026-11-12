@@ -35,6 +35,7 @@ export interface SplatHandle {
   ready: Promise<void>;
   update(dt: number, camera: PerspectiveCamera, pointer: SplatPointer): void;
   setOpacity(v: number): void;
+  dispose(): void;
   /** number of splats drawn */
   readonly count: number;
 }
@@ -169,6 +170,7 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
   mesh.name = 'GaussianSplat';
 
   let count = 0;
+  const textures: DataTexture[] = [];
   let orderAttr: InstancedBufferAttribute | null = null;
   let worker: Worker | null = null;
   let inFlight = false, dirty = true, sortId = 0, spare: Float32Array | null = null;
@@ -285,6 +287,7 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
     geo.setAttribute('order', orderAttr);
     geo.instanceCount = count;
     buildMaterial(d);
+    textures.push(d.centre, d.covA, d.covB, d.colour);
     (mesh.userData as any).bounds = d.bounds;
 
     const blobUrl = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
@@ -354,6 +357,13 @@ export function createSplat({ renderer: _renderer, url, isPhone }: { renderer: W
       opacity = v;
       uOpacity.value = v;
       mesh.visible = v > 0.001 && count > 0;
+    },
+    dispose() {
+      worker?.terminate();
+      worker = null;
+      geo.dispose();
+      mat.dispose();
+      for (const t of textures) t.dispose();
     },
     get count() { return count; },
     get lastSortMs() { return lastSortMs; },

@@ -13,7 +13,7 @@
 import {
   Scene, Color, Mesh, PerspectiveCamera, RenderTarget, HalfFloatType, DataTexture, RGBAFormat, FloatType,
   NearestFilter, InstancedBufferAttribute, BufferGeometry, BufferAttribute, MeshBasicNodeMaterial, QuadMesh,
-  Matrix4, Vector2, Vector3, Vector4, Quaternion, FrontSide, BackSide, BoxGeometry, AnimationMixer, SphereGeometry, Group,
+  Matrix3, Matrix4, Vector2, Vector3, Vector4, Quaternion, FrontSide, BackSide, BoxGeometry, AnimationMixer, SphereGeometry, Group,
   PlaneGeometry, type Object3D, type SkinnedMesh, type WebGPURenderer, type Texture,
 } from 'three/webgpu';
 import {
@@ -37,6 +37,8 @@ const outCubic = (x: number) => 1 - Math.pow(1 - x, 3);
 
 // ------------------------------------------------------------------ corridor constants
 const PAIR_STEP = 0.56;
+/** spec says the portal camera opens to 40°; the reference frames read wider because of the fish-eye overscan */
+const OPEN_FOV = 50;
 const BAKE_FPS = 60;
 const PAIR_DELAY = 0.125;
 const CORRIDOR_BG = new Color(0.002, 0.002, 0.003);
@@ -118,8 +120,8 @@ export function createLastPortal(ctx: PortalContext): Portal {
       const n = g.attributes.position.count;
       const pos = g.attributes.position.clone();
       const nor = g.attributes.normal.clone();
-      if (mat) { pos.applyMatrix4(mat); nor.applyNormalMatrix(new Matrix4().copy(mat) as any); }
-      const col = new Float32Array(n * 4);
+      if (mat) { pos.applyMatrix4(mat); nor.applyNormalMatrix(new Matrix3().getNormalMatrix(mat)); }
+      const col: N = new Float32Array(n * 4);
       const ca = g.attributes.color;
       const bone = new Float32Array(n);
       for (let i = 0; i < n; i++) {
@@ -141,27 +143,27 @@ export function createLastPortal(ctx: PortalContext): Portal {
     geo.computeBoundingSphere();
 
     // ---- material (rigid skinning from the baked texture, per-pair time offset, custom lighting)
-    const pair = instancedBufferAttribute(pairAttr, 'float');
-    const aBone = attribute('aBone', 'float');
-    const aCol = attribute('color', 'vec4');
+    const pair: N = instancedBufferAttribute(pairAttr, 'float');
+    const aBone: N = attribute('aBone', 'float');
+    const aCol: N = attribute('color', 'vec4');
     const makeMat = (mirror: number) => {
-      const row = int(floor(fract(uTime.sub(pair.mul(PAIR_DELAY)).div(duration)).mul(frames)));
-      const col = int(aBone.mul(4));
-      const c0 = textureLoad(boneTex, ivec2(col, row));
-      const c1 = textureLoad(boneTex, ivec2(col.add(1), row));
-      const c2 = textureLoad(boneTex, ivec2(col.add(2), row));
-      const c3 = textureLoad(boneTex, ivec2(col.add(3), row));
+      const row: N = int(floor(fract(uTime.sub(pair.mul(PAIR_DELAY)).div(duration)).mul(frames)));
+      const col: N = int(aBone.mul(4));
+      const c0: N = textureLoad(boneTex, ivec2(col, row));
+      const c1: N = textureLoad(boneTex, ivec2(col.add(1), row));
+      const c2: N = textureLoad(boneTex, ivec2(col.add(2), row));
+      const c3: N = textureLoad(boneTex, ivec2(col.add(3), row));
       const pg = positionGeometry, ng = normalGeometry;
       const p = c0.xyz.mul(pg.x).add(c1.xyz.mul(pg.y)).add(c2.xyz.mul(pg.z)).add(c3.xyz);
       const pw = vec3(p.x.mul(mirror), p.y, p.z.sub(pair.mul(PAIR_STEP)));
       const nn = c0.xyz.mul(ng.x).add(c1.xyz.mul(ng.y)).add(c2.xyz.mul(ng.z));
       const nw = vec3(nn.x.mul(mirror), nn.y, nn.z);
-      const vW = varying(pw, 'vCorW');
-      const vN = varying(nw, 'vCorN');
-      const vC = varying(aCol, 'vCorC');
+      const vW: N = varying(pw, 'vCorW');
+      const vN: N = varying(nw, 'vCorN');
+      const vC: N = varying(aCol, 'vCorC');
       // LED pulse once per loop (spec: exp(-max(0, t - 73/24 + 51/24)/.6))
-      const loopT = fract(uTime.sub(pair.mul(PAIR_DELAY)).div(duration)).mul(duration);
-      const vLed = varying(exp(max(loopT.sub(51 / 24), 0).negate().div(0.6)).mul(step(51 / 24, loopT)), 'vLed');
+      const loopT: N = fract(uTime.sub(pair.mul(PAIR_DELAY)).div(duration)).mul(duration);
+      const vLed: N = varying(exp(max(loopT.sub(51 / 24), 0).negate().div(0.6)).mul(step(51 / 24, loopT)), 'vLed');
       const mat = new MeshBasicNodeMaterial();
       mat.side = mirror > 0 ? FrontSide : BackSide;
       mat.toneMapped = false;
@@ -177,25 +179,13 @@ export function createLastPortal(ctx: PortalContext): Portal {
       corridorScene.add(mesh);
       corridorMeshes.push(mesh);
     }
-    // overhead strip-light fixtures (emissive bars) so the lights read as sources
-    const stripMat = new MeshBasicNodeMaterial();
-    stripMat.colorNode = vec4(vec3(0.82, 0.9, 1).mul(3), 1);
-    stripMat.toneMapped = false;
-    for (const x of [-0.75, 0.75]) {
-      const bar = new Mesh(new BoxGeometry(0.05, 0.02, 60), stripMat);
-      bar.position.set(x, 2.2, -20);
-      bar.frustumCulled = false;
-      corridorScene.add(bar);
-      corridorStrips.push(bar);
-    }
   }
-  const corridorStrips: Mesh[] = [];
 
   function corridorShade(vW: N, vN: N, vC: N, vLed: N) {
     return Fn(() => {
       const P = vW;
-      const Nn = normalize(vN);
-      const V = normalize(cameraPosition.sub(P));
+      const Nn: N = normalize(vN);
+      const V: N = normalize(cameraPosition.sub(P));
       const alb = vC.rgb;
       const cls = vC.a;
       const shin = select(cls.greaterThan(0.8), float(40), select(cls.greaterThan(0.45), float(140), float(8)));
@@ -211,7 +201,7 @@ export function createLastPortal(ctx: PortalContext): Portal {
         const zc = clamp(P.z, zb, za);
         const L = normalize(vec3(D.x, D.y, zc.sub(P.z)));
         diff = diff.add(max(dot(Nn, L), 0).mul(cover).div(d));
-        const R = reflect(V.negate(), Nn);
+        const R: N = reflect(V.negate() as N, Nn as N);
         const rr = max(dot(R.xy, R.xy), 1e-4);
         const s = max(dot(D, R.xy).div(rr), 0);
         const zs = clamp(P.z.add(R.z.mul(s)), zb, za);
@@ -223,8 +213,8 @@ export function createLastPortal(ctx: PortalContext): Portal {
       const lightCol = vec3(0.82, 0.9, 1).mul(2.1);
       // cheap occlusion: benches/floor under the arm rows and the gap behind them sit in shadow
       const ax = abs(P.x);
-      const occl = mix(float(1), float(0.4), smoothstep(0.24, 0.42, ax).mul(float(1).sub(smoothstep(0.3, 0.62, P.y))));
-      const amb = mix(vec3(0.008, 0.008, 0.01), vec3(0.05, 0.056, 0.07), Nn.y.mul(0.5).add(0.5)).mul(0.6);
+      const occl = mix(float(1), float(0.55), smoothstep(0.3, 0.5, ax).mul(float(1).sub(smoothstep(0.3, 0.62, P.y))));
+      const amb = mix(vec3(0.01, 0.01, 0.012), vec3(0.06, 0.066, 0.08), Nn.y.mul(0.5).add(0.5)).mul(0.8);
       let c: N = alb.mul(lightCol.mul(diff).mul(occl).add(amb));
       c = c.add(lightCol.mul(spec).mul(ks).mul(occl));
       // emissive LED (class 0)
@@ -248,15 +238,17 @@ export function createLastPortal(ctx: PortalContext): Portal {
 
   /** corridor camera path (corridor progress c in 0..1): slides down the placement's "up" axis while
    *  dollying forward; spec placement eye [0,.7,.17], forward [0,-.45,-1.5] at c ≈ .35 */
-  const CORR_EYE = new Vector3(0, 0.7, 0.17);
+  const CORR_EYE = new Vector3(0, 0.78, 0.17);
   const CORR_FWD = new Vector3(0, -0.45, -1.5).normalize();
   const CORR_UP = new Vector3(0, 1.5, -0.45).normalize();
   const corridorPose = new Matrix4();
   function corridorPath(c: number) {
-    const s = (0.35 - c) * 1.0;
+    // high above the arms before the portal opens, down to the placement at c ≈ .35, then lower still
+    const s = c < 0.35 ? Math.pow((0.35 - c) / 0.35, 1.4) * 1.7 : (0.35 - c) * 1.0;
     const eye = CORR_EYE.clone().addScaledVector(CORR_UP, s).add(new Vector3(0, 0, -c * 2.4));
     eye.y = Math.max(eye.y, 0.4);
-    const pitch = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -smoothN(0.3, 0.8, c) * 0.12);
+    const look = -0.16 + (c < 0.35 ? -Math.pow((0.35 - c) / 0.35, 1.4) * 0.35 : -smoothN(0.35, 0.75, c) * 0.22);
+    const pitch = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), look);
     const q = new Quaternion().setFromUnitVectors(new Vector3(0, 0, -1), CORR_FWD).multiply(pitch);
     corridorPose.compose(eye, q, new Vector3(1, 1, 1));
     return eye.z;
@@ -269,7 +261,7 @@ export function createLastPortal(ctx: PortalContext): Portal {
   const uTwist = uniform(0);
   const uNight = uniform(0);
   const uCityCam = uniform(new Vector3());
-  const uSun = uniform(new Color(0.8, 0.9, 1).multiplyScalar(1.2));
+  const uSun = uniform(new Color(0.8, 0.9, 1).multiplyScalar(1.4));
   const uAmb = uniform(new Color(0.3, 0.64, 1).multiplyScalar(0.88));
   const uHaze = uniform(new Color(0.32, 0.62, 1).multiplyScalar(1.6));
   const uFogNear = uniform(ctx.isPhone ? 150 : 45);
@@ -309,8 +301,8 @@ export function createLastPortal(ctx: PortalContext): Portal {
 
   function buildCity() {
     const geo = buildBlockGeometry();
-    const A = instancedBufferAttribute(iA, 'vec4');
-    const Bn = instancedBufferAttribute(iB, 'vec4');
+    const A: N = instancedBufferAttribute(iA, 'vec4');
+    const Bn: N = instancedBufferAttribute(iB, 'vec4');
     const pg = positionGeometry, ng = normalGeometry;
     // instance transform: roll about local x, scale, mirror for the left street side, translate
     const rollv = (v: N) => vec3(v.x, v.y.mul(Bn.x).sub(v.z.mul(Bn.y)), v.y.mul(Bn.y).add(v.z.mul(Bn.x)));
@@ -322,16 +314,16 @@ export function createLastPortal(ctx: PortalContext): Portal {
     const k = along.mul(uTwist);
     const ang = k.mul(-3.14);
     const ca = cos(ang), sa = sin(ang);
-    const ex = p0.x.mul(float(1).sub(k.mul(0.35)));
+    const ex = p0.x.mul(float(1).sub(k.mul(0.5)));
     const ey = p0.y.sub(uCityCam.y);
     const pw = vec3(ex.mul(ca).sub(ey.mul(sa)), ex.mul(sa).add(ey.mul(ca)).add(uCityCam.y), p0.z);
     const nw = vec3(n0.x.mul(ca).sub(n0.y.mul(sa)), n0.x.mul(sa).add(n0.y.mul(ca)), n0.z);
-    const vW = varying(pw, 'vCityW');
-    const vN = varying(nw, 'vCityN');
-    const vL = varying(pg, 'vCityL');
-    const vLN = varying(ng, 'vCityLN');
-    const vSeed = varying(A.w, 'vCitySeed');
-    const vDepth = varying(abs(p0.x).sub(STREET_X), 'vCityDepth');
+    const vW: N = varying(pw, 'vCityW');
+    const vN: N = varying(nw, 'vCityN');
+    const vL: N = varying(pg, 'vCityL');
+    const vLN: N = varying(ng, 'vCityLN');
+    const vSeed: N = varying(A.w, 'vCitySeed');
+    const vDepth: N = varying(abs(p0.x).sub(STREET_X), 'vCityDepth');
 
     const hash2 = (v: N) => fract(sin(dot(v, vec2(12.9898, 78.233))).mul(43758.5453));
     const shade = Fn(() => {
@@ -341,7 +333,7 @@ export function createLastPortal(ctx: PortalContext): Portal {
       // brick-ish banding on the facades
       const band = smoothstep(0.0, 0.08, fract(vL.y.mul(2.2))).mul(0.12).add(0.88);
       const grain = hash2(floor(vL.yz.mul(vec2(2.2, 1.1))).add(vSeed)).mul(0.12).add(0.9);
-      const alb = vec3(0.2, 0.22, 0.24).mul(band).mul(grain);
+      const alb = vec3(0.13, 0.2, 0.3).mul(band).mul(grain);
       const ao = mix(float(0.12), float(1), float(1).sub(smoothstep(9, 15, vDepth)))
         .mul(Nn.dot(vec3(0, 0, 1)).abs().mul(-0.25).add(1));
       // windows on the street-facing faces (local -x)
@@ -351,18 +343,18 @@ export function createLastPortal(ctx: PortalContext): Portal {
       const pane = fract(fc.mul(vec2(2, 3)).sub(vec2(0.1, 0.25 * 3 - 0.75)));
       const mull = step(0.1, pane.x).mul(step(pane.y, 0.92)).mul(0.6).add(0.4);
       // windows only on a band of the facade (like a window strip in a texture atlas)
-      const band2 = step(-5.6, vL.z).mul(step(vL.z, 2.2)).mul(step(-5.5, vL.y)).mul(step(vL.y, 5.4));
+      const band2 = step(0.45, hash2(vec2(vSeed, 9.7))).mul(step(-5.6, vL.z)).mul(step(vL.z, 2.2)).mul(step(-5.5, vL.y)).mul(step(vL.y, 5.4));
       const inWin = step(0.12, fc.x).mul(step(fc.x, 0.88)).mul(step(0.18, fc.y)).mul(step(fc.y, 0.8)).mul(facade).mul(band2);
       const cid = floor(cell).add(vSeed.mul(17.0));
       const h1 = hash2(cid), h2 = hash2(cid.add(31.7)), h3 = hash2(cid.add(7.1));
       const lit = inWin.mul(step(h1, 0.4)).mul(step(h2, uNight));
       const bright = mix(float(0.35), float(1), h3).mul(mull);
-      let c: N = alb.mul(vec3(uAmb).add(vec3(uSun).mul(ndl))).mul(ao);
-      c = c.mul(mix(float(1), float(0.6), inWin)).mul(hash2(vec2(vSeed, 3.1)).mul(0.35).add(0.8));
+      let c: N = alb.mul(vec3(uAmb as N).add(vec3(uSun as N).mul(ndl))).mul(ao);
+      c = c.mul(mix(float(1), float(0.75), inWin)).mul(hash2(vec2(vSeed, 3.1)).mul(0.35).add(0.8));
       c = c.add(vec3(0.8714, 0.8632, 0.855).mul(lit).mul(bright).mul(2.6));
       const dist = length(cameraPosition.sub(vW));
       const fog = smoothstep(uFogNear, 340, dist);
-      c = mix(c, vec3(uHaze), fog);
+      c = mix(c, vec3(uHaze as N), fog);
       return vec4(c, 1);
     });
     const mat = new MeshBasicNodeMaterial();
@@ -416,7 +408,6 @@ export function createLastPortal(ctx: PortalContext): Portal {
   const Y_AXIS = new Vector3(0, 1, 0), Z_AXIS = new Vector3(0, 0, 1), X_AXIS = new Vector3(1, 0, 0);
   const CAM_END_Z = -CITY_DIST - DOLLY;
   // the portal quad hangs on the right-hand wall (facing the street), a little ahead of the dolly's end
-  quadCenter.set(STREET_X - 3, 1, CAM_END_Z - 7);
   const lookM = new Matrix4();
   const qBase = new Quaternion(), qLook = new Quaternion(), qRoll = new Quaternion();
   function cityPath(x: number) {
@@ -436,10 +427,18 @@ export function createLastPortal(ctx: PortalContext): Portal {
     cityPose.compose(eye, qBase, ONE);
     return z;
   }
-  const QUAD_W = 34, QUAD_H = 25.5;
-  // on the right wall (facing the street, -x), slightly rotated in its plane
-  const quadRot = new Quaternion().setFromAxisAngle(Y_AXIS, -Math.PI / 2 + 0.1)
-    .multiply(new Quaternion().setFromAxisAngle(Z_AXIS, 0.3));
+  const QUAD_W = 42, QUAD_H = 31.5;
+  // hung in front of the right-hand wall just short of where the camera is at travel ~.95, turned to face the
+  // approaching camera (as seen at travel .8) and tilted in-plane
+  const quadRot = new Quaternion();
+  {
+    quadCenter.set(STREET_X - 6, 1, -CITY_DIST * 2 * (0.95 ** 3 - 0.95 ** 4 / 2) - DOLLY * 0.9 - 8);
+    cityPath(0.8);
+    const eye = new Vector3().setFromMatrixPosition(cityPose);
+    // Matrix4.lookAt(eye, target) points the object's +z from target to eye: the quad's front faces the camera
+    quadRot.setFromRotationMatrix(new Matrix4().lookAt(eye, quadCenter, Y_AXIS))
+      .multiply(new Quaternion().setFromAxisAngle(Z_AXIS, -0.35));
+  }
 
   // =========================================================== splat stage
   const splatScene = new Scene();
@@ -452,7 +451,7 @@ export function createLastPortal(ctx: PortalContext): Portal {
   function buildPlaceholderSplat() {
     // red-lit alley: two walls of boxes, hanging lanterns, a hazy floor
     const wallMat = new MeshBasicNodeMaterial();
-    const vW = varying(vec3(0), 'vSplW');
+    const vW: N = varying(vec3(0), 'vSplW');
     wallMat.toneMapped = false;
     const box = new BoxGeometry(1, 1, 1);
     const lanternMat = new MeshBasicNodeMaterial({ color: new Color(4, 0.6, 0.15) });
@@ -523,15 +522,15 @@ export function createLastPortal(ctx: PortalContext): Portal {
     // wipe: stage 1 comes down from the top of the screen
     const s01 = step(p.y, uBlend);
     const sel2 = max(inQuad, step(2, uBlend));
-    const c0 = texture(rts[0].texture, p).rgb;
-    const c1 = texture(rts[1].texture, p).rgb;
-    const c2 = texture(rts[2].texture, p).rgb;
+    const c0: N = texture(rts[0].texture, p).rgb;
+    const c1: N = texture(rts[1].texture, p).rgb;
+    const c2: N = texture(rts[2].texture, p).rgb;
     const grade = (c: N, tint: number[], pw: number, sat: number) =>
       saturation(pow(max(c.mul(vec3(tint[0], tint[1], tint[2])).div(0.18), 0), vec3(pw)).mul(0.18), sat);
     const g0 = agxToneMapping(grade(c0, [0.93, 1, 1.08], 0.9, 1.05), float(1));
     const g1 = agxToneMapping(grade(c1, [1, 1, 1], 1.2, 1), float(1));
     const g2 = c2;
-    let c: N = mix(g0, g1, s01);
+    let c: N = mix(g0 as N, g1 as N, s01);
     c = mix(c, g2, sel2);
     const vig = float(1).sub(smoothstep(0.25, 0.95, length(p.sub(0.5))).mul(0.8));
     return vec4(c.mul(vig), 1);
@@ -600,14 +599,13 @@ export function createLastPortal(ctx: PortalContext): Portal {
     parallaxS.x = f.parallax.x; parallaxS.y = f.parallax.y;
     content.set(-parallaxS.x * 0.15 * d, parallaxS.y * 0.15 * 0.5 * d, -f.openness);
 
-    const fov = lerp(60.655, 40, f.openness);
+    const fov = lerp(60.655, OPEN_FOV, f.openness);
     // corridor
     state.renderCorridor = state.blend < 1;
     if (state.renderCorridor) {
       const camZ = corridorPath(corridor);
       uCamZ.value = camZ;
       updateCorridorInstances(camZ);
-      for (const s of corridorStrips) s.position.z = camZ - 20;
       poseCamera(corridorCam, corridorPose, f, 1, fov);
     }
     // city
@@ -618,10 +616,10 @@ export function createLastPortal(ctx: PortalContext): Portal {
       uTwist.value = (1 - Math.cos(Math.PI * invLerp(0.24, 1, x))) / 2;
       const night = smoothN(0.2, 0.68, x);
       uNight.value = smoothN(0.25, 0.75, x);
-      skyColor.setRGB(lerp(0.45, 0.0052, night), lerp(0.96, 0.0044, night), lerp(1.5, 0.0044, night));
-      (uHaze.value as Color).setRGB(0.32 * 1.6, 0.62 * 1.6, 1.6).multiplyScalar(1 - night);
-      (uSun.value as Color).setRGB(lerp(0.8, 0.5, night), lerp(0.9, 0.6, night), 1).multiplyScalar(lerp(1.2, 0.5, night));
-      (uAmb.value as Color).setRGB(0.3, 0.64, 1).multiplyScalar(lerp(0.55, 0.2, night));
+      skyColor.setRGB(lerp(0.45, 0.006, night), lerp(0.96, 0.013, night), lerp(1.5, 0.03, night));
+      (uHaze.value as Color).setRGB(lerp(0.512, 0.006, night), lerp(0.992, 0.013, night), lerp(1.6, 0.03, night));
+      (uSun.value as Color).setRGB(lerp(0.8, 0.5, night), lerp(0.9, 0.6, night), 1).multiplyScalar(lerp(1.4, 0.5, night));
+      (uAmb.value as Color).setRGB(0.3, 0.64, 1).multiplyScalar(lerp(0.34, 0.13, night));
       updateCityInstances(camZ);
       poseCamera(cityCam, cityPose, f, 18, fov);
       (uCityCam.value as Vector3).copy(cityCam.position);
@@ -720,7 +718,7 @@ export function createLastPortal(ctx: PortalContext): Portal {
     render,
     dispose() {
       for (const t of rts) t.dispose();
-      quad.material.dispose();
+      (quad.material as MeshBasicNodeMaterial).dispose();
     },
   };
 }

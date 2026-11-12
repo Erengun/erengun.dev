@@ -34,8 +34,8 @@ const EXTENT = 13.7;           // grid units across the frame
 const CELL = EXTENT / (N - 1); // voxel pitch
 const CUTOFF = 0.35;
 const OPACITY = 0.66;
-const GROUP_SCALE = 0.44;      // grid units → portal units (tuned for the FOV-110 inner camera)
-const FRAME_DIST = 1.95;       // distance camera → frame baseline when fully open
+const GROUP_SCALE = 0.35;      // grid units → portal units (tuned for the FOV-110 inner camera)
+const FRAME_DIST = 2.2;        // distance camera → frame baseline when fully open
 const CAM_OPEN = 0.406;        // inner camera distance to the portal plane when open (coverDepth·0.8)
 const GROUP_Y = -0.12;
 const TEAL = new Color().setRGB(121 / 255, 199 / 255, 199 / 255); // sRGB → linear handled by Color
@@ -52,7 +52,7 @@ const inOutQuart = (t: number) => (t < 0.5 ? 8 * t ** 4 : 1 - (-2 * t + 2) ** 4 
 const outQuad = (t: number) => 1 - (1 - t) * (1 - t);
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
-type Meta = { frames: number; size: number; cols: number; rows: number; fps: number; quadtree: { roots: number; maxDepth: number; size: number; levelScale: number } };
+type Meta = { frames: number; size: number; cols: number; rows: number; fps: number; quadtree: { rootsX: number; rootsY: number; maxDepth: number; w: number; h: number; levelScale: number } };
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
@@ -91,7 +91,6 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const uHover = uniform(0);
   const uWave = uniform(new Vector2(0, 0));
   const uWaveP = uniform(1);
-  const uTime = uniform(0);
 
   // ------------------------------------------------------------------ voxel material
   const NN = N * N;
@@ -126,7 +125,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const rnd = hash(k.toFloat().add(layer.toFloat().mul(7.31)));
   const toC = cxy.sub(uCursor);
   const dist = length(toC);
-  const fall = smoothstep(1.1, 0.0, dist).mul(uHover);
+  const fall = float(1).sub(smoothstep(0.0, 1.1, dist.mul(rnd.mul(0.7).add(0.65)))).mul(uHover); // = smoothstep(1.1, 0, ·); WGSL rejects reversed edges
   const speed = length(uVel);
   const speedN = clamp(speed.div(6.0), 0, 1);
   const radial = toC.div(max(dist, 1e-4));
@@ -135,7 +134,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const pushZ = fall.mul(float(0.1).add(speedN.mul(1.1)));
   const toW = cxy.sub(uWave);
   const wd = length(toW);
-  const ring = smoothstep(2.3, 0.0, abs(wd.sub(uWaveP.mul(18)))).mul(float(1).sub(uWaveP));
+  const ring = float(1).sub(smoothstep(0.0, 2.3, abs(wd.sub(uWaveP.mul(18))))).mul(float(1).sub(uWaveP));
   const waveXY = toW.div(max(wd, 1e-4)).mul(ring.mul(0.35));
   const jitter = rnd.mul(0.8).add(0.6);
   const offXY = pushXY.add(waveXY).mul(jitter);
@@ -174,8 +173,8 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   // fragment: rounded voxel + fake bevel normal + 3 lambert lights (view space)
   voxel.colorNode = Fn(() => {
     const q = uv().mul(2).sub(1);
-    const bev = sign(q).mul(smoothstep(0.42, 1.0, abs(q))).mul(1.15);
-    let g = vGrad;
+    const bev: any = sign(q).mul(smoothstep(0.42, 1.0, abs(q))).mul(1.15);
+    let g: any = vGrad;
     const gl = length(g);
     g = g.mul(min(gl, 0.176).div(max(gl, 1e-5)));
     const n = normalize(vec3(bev.add(g), 1));
@@ -203,7 +202,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   group.add(voxels);
 
   // ------------------------------------------------------------------ quadtree grid plane
-  const meta0: Meta = { frames: 54, size: N, cols: 8, rows: 7, fps: 30, quadtree: { roots: 9, maxDepth: 4, size: 144, levelScale: 60 } };
+  const meta0: Meta = { frames: 54, size: N, cols: 8, rows: 7, fps: 30, quadtree: { rootsX: 16, rootsY: 9, maxDepth: 4, w: 256, h: 144, levelScale: 60 } }; // must match pack.py
   const QT = meta0.quadtree;
   const GRID_SPAN = EXTENT * 3.2;
   const gridGeo = new PlaneGeometry(GRID_SPAN, GRID_SPAN, 220, 220);
@@ -218,12 +217,12 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const vUvF = varying(uvF, 'vUvF');
   const vGd = varying(gd, 'vGd');
   gridMat.colorNode = Fn(() => {
-    const q = vUvF.mul(QT.roots);
-    const qi = ivec2(clamp(vUvF.x.mul(QT.size), 0, QT.size - 1).toInt(), clamp(float(1).sub(vUvF.y).mul(QT.size), 0, QT.size - 1).toInt()).add(ivec2(uQtOff));
+    const q = vUvF.mul(vec2(QT.rootsX, QT.rootsY)); // 16×9 roots → tall cells on the square plane (as in the reference)
+    const qi = ivec2(clamp(vUvF.x.mul(QT.w), 0, QT.w - 1).toInt(), clamp(float(1).sub(vUvF.y).mul(QT.h), 0, QT.h - 1).toInt()).add(ivec2(uQtOff));
     const inF = vUvF.x.greaterThanEqual(0).and(vUvF.x.lessThanEqual(1)).and(vUvF.y.greaterThanEqual(0)).and(vUvF.y.lessThanEqual(1));
     const lvRaw = floor(load(qtTex, qi).r.mul(255 / QT.levelScale).add(0.5));
     const lv0 = select(inF, lvRaw, float(0));
-    const fw = max(fwidth(q).x, fwidth(q).y);
+    const fw = max(fwidth(q).x, fwidth(q).y); // root px along the short side
     const cap = floor(log2(float(1).div(max(fw, 1e-6)).div(4)));
     const lv = clamp(min(lv0, cap), 0, QT.maxDepth);
     const s = exp2(lv);
@@ -231,8 +230,8 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     const f = fract(gq);
     const w = fwidth(q).mul(s);
     const dd = min(f, float(1).sub(f)).div(max(w, vec2(1e-6)));
-    const line = float(1).sub(smoothstep(0.5, 1.1, min(dd.x, dd.y)));
-    const gridCol = mix(vec3(TEAL.r, TEAL.g, TEAL.b), vec3(GRID_END.r, GRID_END.g, GRID_END.b), uReveal);
+    const line = float(1).sub(smoothstep(0.35, 0.85, min(dd.x, dd.y)));
+    const gridCol = mix(vec3(TEAL.r, TEAL.g, TEAL.b).mul(0.6), vec3(GRID_END.r, GRID_END.g, GRID_END.b), uReveal); // ×.6: reference lines read ~105/255 after its VHS pass
     const band = float(1).sub(smoothstep(0.0, 0.06, abs(vGd.sub(uThreshold)))).mul(select(vGd.greaterThan(CUTOFF), float(1), float(0)));
     const c = gridCol.add(vec3(TEAL.r, TEAL.g, TEAL.b).mul(band.mul(1.2)));
     return vec4(c.mul(line).mul(uGridMix), 1);
@@ -292,7 +291,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     const teal = vec3(TEAL.r, TEAL.g, TEAL.b);
     const d = length(screenUV.sub(0.5)).div(Math.SQRT1_2);
     const vig = float(1).sub(smoothstep(0.6, 0.95, d).mul(0.8));
-    const outc = col.add(teal.mul(edge.mul(1.6))).mul(vig).add(glow.mul(0.27));
+    const outc = col.add(teal.mul(edge.mul(0.7))).mul(vig).add(glow.mul(0.27));
     return vec4(outc, 1);
   })();
   const downQuad = new QuadMesh(downMat);
@@ -324,12 +323,12 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   // ------------------------------------------------------------------ state
   let frameIdx = 0;
   let playT = 0;
-  let revealStart = -1;
+  let revealClock = -1; // seconds since the gate opened, accumulated from clamped dt (a compile stall can't skip the reveal)
   let revealT = 0;
   let gridT = 0;
   let hit = false;
   let wasHit = false;
-  let waveStart = -1;
+  let waveClock = -1;
   const cursor = new Vector2(999, 999);
   const prevCursor = new Vector2(999, 999);
   const vel = new Vector2();
@@ -337,7 +336,8 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   const inv = new Matrix4();
   const ro = new Vector3();
   const rp = new Vector3();
-  const overrides = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
+  /** test-page overrides (src/pages/test-intro.astro); unused by the app */
+  const debug: { threshold?: number; grid?: number; frame?: number; state?: { th: number; revealSince: number } } = {};
 
   function depthAt(gx: number, gy: number): number {
     if (!cpuDepth) return 0;
@@ -381,29 +381,29 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     group.rotation.x = -f.parallax.y * 0.04 * f.focus;
     if (!active) return;
     const dt = Math.min(f.dt, 0.1);
-    uTime.value = f.time;
 
     // playback: 30 fps ping-pong
     playT += dt;
     const F = meta.frames;
     const step = Math.floor(playT * meta.fps) % (2 * (F - 1));
     frameIdx = step < F ? step : 2 * (F - 1) - step;
-    if (overrides.has('frame')) frameIdx = Math.min(F - 1, +overrides.get('frame')!);
+    if (debug.frame !== undefined) frameIdx = Math.min(F - 1, debug.frame);
     uFrameOff.value.set((frameIdx % meta.cols) * N, Math.floor(frameIdx / meta.cols) * N);
-    const Q = meta.quadtree.size;
-    uQtOff.value.set((frameIdx % meta.cols) * Q, Math.floor(frameIdx / meta.cols) * Q);
+    uQtOff.value.set((frameIdx % meta.cols) * QT.w, Math.floor(frameIdx / meta.cols) * QT.h);
 
     // reveal: threshold 1 → .2 over 3 s inOutQuart, grid mix 0 → 1 over 1.5 s outQuad
-    if (f.gateOpen && revealStart < 0) revealStart = f.time;
-    if (revealStart >= 0) {
-      revealT = clamp01((f.time - revealStart) / 3);
-      gridT = clamp01((f.time - revealStart) / 1.5);
+    if (f.gateOpen && revealClock < 0) revealClock = 0;
+    else if (revealClock >= 0) revealClock += dt;
+    if (revealClock >= 0) {
+      revealT = clamp01(revealClock / 3);
+      gridT = clamp01(revealClock / 1.5);
     }
     let th = 1 - 0.8 * inOutQuart(revealT);
-    if (overrides.has('threshold')) th = +overrides.get('threshold')!;
+    if (debug.threshold !== undefined) th = debug.threshold;
     uThreshold.value = th;
+    debug.state = { th, revealSince: revealClock };
     uReveal.value = (1 - th) / 0.8;
-    uGridMix.value = overrides.has('grid') ? +overrides.get('grid')! : outQuad(gridT);
+    uGridMix.value = debug.grid ?? outQuad(gridT);
 
     // pointer
     group.updateMatrixWorld();
@@ -422,9 +422,9 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     uVel.value.copy(vel);
     uCursor.value.copy(cursor);
     uHover.value += ((hit ? 1 : 0) - uHover.value) * (1 - Math.exp(-10 * dt));
-    if (hit && !wasHit) { waveStart = f.time; uWave.value.copy(cursor); }
+    if (hit && !wasHit) { waveClock = 0; uWave.value.copy(cursor); } else if (waveClock >= 0) waveClock += dt;
     wasHit = hit;
-    uWaveP.value = waveStart < 0 ? 1 : outQuad(clamp01((f.time - waveStart) / 1.5));
+    uWaveP.value = waveClock < 0 ? 1 : outQuad(clamp01(waveClock / 1.5));
   }
 
   function render(renderer: WebGPURenderer, camera: PerspectiveCamera, rt: RenderTarget) {
@@ -449,7 +449,8 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     compQuad.render(renderer);
   }
 
-  return {
+  const portal: Portal & { debug: typeof debug } = {
+    debug,
     scene,
     background,
     ready,
@@ -462,4 +463,5 @@ export function createIntroPortal(ctx: PortalContext): Portal {
       downMat.dispose(); hBlur.dispose(); vBlur.dispose(); compMat.dispose();
     },
   };
+  return portal;
 }

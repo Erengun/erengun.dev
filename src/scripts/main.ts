@@ -161,7 +161,8 @@ function updateLast(vp: number) {
     }
   });
   // talk reveal is scrubbed by the splat stage reveal
-  const talkP = clamp((t - 0.86) / 0.1);
+  // reference: hidden at vp14 (t≈.655), fully shown by vp15 (t≈.74)
+  const talkP = clamp((t - 0.665) / 0.07);
   overlays.talkOpacity = talkP;
   talkTl.seek(talkP * talkTl.duration);
   if (overlays.lastParallax) talkParallax.style.transform = overlays.lastParallax;

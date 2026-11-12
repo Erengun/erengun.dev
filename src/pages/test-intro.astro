@@ -15,6 +15,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
     <title>test: intro portal</title>
+    <link rel="icon" href="data:," />
     <style>
       html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
       #app, canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
@@ -27,7 +28,7 @@
     <script>
       import { WebGPURenderer, PerspectiveCamera, RenderTarget, HalfFloatType, QuadMesh, MeshBasicNodeMaterial, Vector2 } from 'three/webgpu';
       import { texture, screenUV } from 'three/tsl';
-      import { createIntroPortal } from '../scene/portals/intro.wip';
+      import { createIntroPortal } from '../scene/portals/intro';
       import { PORTAL_H, PORTAL_W, type PortalFrame } from '../scene/types';
 
       const q = new URLSearchParams(location.search);
@@ -40,6 +41,9 @@
       const isWebGL = !!(renderer.backend as any).isWebGLBackend;
       const quality = (q.get('quality') as 'high' | 'medium') ?? (isWebGL ? 'medium' : 'high');
       const portal = createIntroPortal({ renderer, isPhone: false, quality });
+      if (q.has('threshold')) portal.debug.threshold = +q.get('threshold')!;
+      if (q.has('grid')) portal.debug.grid = +q.get('grid')!;
+      if (q.has('frame')) portal.debug.frame = +q.get('frame')!;
 
       // inner camera = the app's camera expressed in the portal plane's frame (FOV 110, see app.ts)
       const FOV = 110;

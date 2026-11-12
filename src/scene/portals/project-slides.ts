@@ -365,7 +365,11 @@ const riverpod: Draw[] = [
 // ------------------------------------------------------------------ project 1: LegalLens
 const legallens: Draw[] = [
   (c, p) => {
-    c.fillStyle = '#e4e4e1';
+    // mid-grey studio backdrop so the cover separates from the white carousel
+    const bg = c.createRadialGradient(620, 260, 40, 560, 300, 720);
+    bg.addColorStop(0, '#c4c4c1');
+    bg.addColorStop(1, '#8e8e8b');
+    c.fillStyle = bg;
     c.fillRect(0, 0, SLIDE_W, SLIDE_H);
     nav(c, 'LEGALLENS', ['How it works', 'Pricing', 'Extension', 'Sign in'], '#141414', 38, `400 16px ${COND}`);
     // big lens over a policy document
@@ -406,10 +410,10 @@ const legallens: Draw[] = [
     text(c, 'READ LESS.', 56, 196, `400 104px ${COND}`, '#141414', 'left', -1);
     text(c, 'KNOW MORE.', 56, 298, `400 104px ${COND}`, '#141414', 'left', -1);
     noShadow(c);
-    para(c, 'Privacy policies, summarised by AI in seconds. Know what you agree to.', 60, 352, 330, 15, 20, '#3a3a3a', 500);
+    para(c, 'Privacy policies, summarised by AI in seconds. Know what you agree to.', 60, 352, 330, 15, 20, '#1e1e1e', 500);
     fillRR(c, 60, 395, 160, 40, 20, '#141414');
     text(c, 'TRY IT FREE  →', 140, 420, `700 12px ${SANS}`, '#fff', 'center', 1);
-    text(c, 'Works with 40,000+ sites', 60, 470, `500 12px ${SANS}`, '#6a6a6a');
+    text(c, 'Works with 40,000+ sites', 60, 470, `500 12px ${SANS}`, '#2e2e2e');
   },
   (c, p) => {
     c.fillStyle = '#101010';

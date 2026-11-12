@@ -21,9 +21,12 @@ scene.frame_start = 0
 scene.frame_end = 72
 
 
+OFFX = 0.0  # x shift applied to the arm row (pedestal, arm, bones)
+
+
 def B(x, y, z):
     """three.js (y-up) -> blender (z-up); the glTF exporter converts back."""
-    return Vector((x, -z, y))
+    return Vector((x + OFFX, -z, y))
 
 
 def finish(obj, color, bevel=0.0, segs=3, smooth=True):
@@ -94,12 +97,12 @@ def cable(pts, r, color):
 # ------------------------------------------------------------------ palette (linear)
 WHITE = (0.80, 0.82, 0.85, 1.0)
 GREY = (0.35, 0.36, 0.38, 1.0)
-DARK = (0.030, 0.032, 0.036, 0.3)
-DARK2 = (0.055, 0.058, 0.064, 0.3)
-BLACK = (0.012, 0.012, 0.014, 0.6)
-METAL = (0.55, 0.57, 0.60, 0.6)
-GREEN = (0.020, 0.30, 0.09, 0.6)
-PADG = (0.05, 0.45, 0.20, 0.05)  # static emissive
+DARK = (0.006, 0.0065, 0.007, 0.3)
+DARK2 = (0.01, 0.0105, 0.012, 0.3)
+BLACK = (0.006, 0.006, 0.007, 0.6)
+METAL = (0.6, 0.62, 0.65, 0.6)
+GREEN = (0.012, 0.16, 0.045, 0.6)
+PADG = (0.015, 0.2, 0.04, 0.05)  # static emissive
 RED = (0.65, 0.04, 0.02, 1.0)
 BLUE = (0.03, 0.22, 0.80, 1.0)
 YELLOW = (0.80, 0.55, 0.04, 1.0)
@@ -115,12 +118,12 @@ static.append(box((-0.006, 0.03, 0), (0.012, 0.02, L), BLACK))
 static.append(box((-0.175, 0.04, 0), (0.026, 0.035, L), METAL, 0.004))  # rail
 static.append(box((-0.215, 0.03, 0), (0.012, 0.012, L), DARK2))
 for z in (-0.14, 0.14):
-    static.append(box((-0.08, 0.028, z), (0.075, 0.01, 0.055), (0.5, 0.52, 0.5, 0.6), 0.002))
+    static.append(box((-0.08, 0.028, z), (0.075, 0.01, 0.055), (0.25, 0.26, 0.25, 0.6), 0.002))
     static.append(box((-0.08, 0.034, z), (0.05, 0.004, 0.034), PADG))
     static.append(box((-0.08, 0.0365, z), (0.022, 0.002, 0.014), (0.02, 0.03, 0.02, 0.6)))
 # bench
 static.append(box((-0.52, 0.08, 0), (0.56, 0.16, L), DARK2, 0.006))
-static.append(box((-0.52, 0.163, 0), (0.54, 0.006, L * 0.98), (0.07, 0.072, 0.08, 0.6)))
+static.append(box((-0.52, 0.163, 0), (0.54, 0.006, L * 0.98), (0.014, 0.015, 0.017, 0.3)))
 for x in (-0.31, -0.69):
     for z in (-0.15, 0.13):
         static.append(cyl((x, 0.21, z), 0.03, 0.09, 'y', BLACK, 0.008))
@@ -128,20 +131,21 @@ for x in (-0.31, -0.69):
 for z in (-0.02, 0.24):
     static.append(cyl((-0.5, 0.18, z), 0.022, 0.04, 'y', BLACK, 0.006))
 # PCB on a stand
-static.append(box((-0.5, 0.2, -0.13), (0.05, 0.06, 0.05), BLACK, 0.004))
-static.append(box((-0.5, 0.235, -0.13), (0.16, 0.009, 0.12), GREEN, 0.002, rx=0.12))
-static.append(box((-0.53, 0.244, -0.12), (0.035, 0.008, 0.03), BLACK, rx=0.12))
-static.append(box((-0.47, 0.244, -0.15), (0.025, 0.008, 0.02), BLACK, rx=0.12))
-static.append(box((-0.45, 0.246, -0.1), (0.03, 0.014, 0.025), (0.75, 0.75, 0.72, 1.0), rx=0.12))
-static.append(box((-0.56, 0.243, -0.165), (0.02, 0.006, 0.02), (0.6, 0.45, 0.1, 0.6), rx=0.12))
-# pedestal + controller
+static.append(box((-0.4, 0.2, -0.13), (0.05, 0.06, 0.05), BLACK, 0.004))
+static.append(box((-0.4, 0.235, -0.13), (0.19, 0.009, 0.15), GREEN, 0.002, rx=0.12))
+static.append(box((-0.43, 0.244, -0.12), (0.035, 0.008, 0.03), BLACK, rx=0.12))
+static.append(box((-0.37, 0.244, -0.15), (0.025, 0.008, 0.02), BLACK, rx=0.12))
+static.append(box((-0.34, 0.246, -0.08), (0.03, 0.014, 0.025), (0.75, 0.75, 0.72, 1.0), rx=0.12))
+static.append(box((-0.46, 0.243, -0.18), (0.02, 0.006, 0.02), (0.6, 0.45, 0.1, 0.6), rx=0.12))
+# pedestal + controller (arm row sits a bit further out)
+OFFX = -0.12
 static.append(box((-0.95, 0.25, 0), (0.2, 0.5, 0.2), BLACK, 0.01))
 static.append(box((-0.95, 0.5, 0), (0.24, 0.02, 0.24), DARK2, 0.004))
 static.append(box((-0.83, 0.33, 0.17), (0.07, 0.24, 0.1), (0.09, 0.09, 0.1, 0.6), 0.006))
 static.append(box((-0.794, 0.38, 0.17), (0.004, 0.05, 0.06), (0.8, 0.8, 0.78, 1.0)))
 static.append(box((-0.793, 0.34, 0.17), (0.004, 0.012, 0.06), ORANGE))
 # back wall
-static.append(box((-1.35, 0.8, 0), (0.1, 1.6, L), DARK))
+static.append(box((-1.35, 0.15, 0), (0.1, 0.3, L), DARK))
 # floor cables running along the corridor
 for i, col in enumerate((RED, YELLOW, ORANGE, BLUE)):
     static.append(cyl((-0.76 - i * 0.018, 0.175, 0), 0.0065, L, 'z', col, verts=8))
@@ -174,7 +178,7 @@ for i, (col, zz) in enumerate(((RED, 0.135), (BLUE, 0.148), (YELLOW, 0.161))):
             continue
         z = zs * zz
         x0, x1 = -0.84 + i * 0.03, -0.6 + i * 0.025
-        sag = 0.42 - i * 0.05
+        sag = 0.3 - i * 0.05
         parts['Shoulder'].append(cable([(x0, 0.77, z), (x0 + 0.03, 0.62, z * 1.05), ((x0 + x1) / 2, sag, z * 1.12),
                                         (x1 - 0.02, 0.62, z * 1.05), (x1, 0.8, z)], 0.0085, col))
         parts['Shoulder'].append(cyl((x0, 0.775, z), 0.016, 0.03, 'y', BLACK, 0.004, 12))
