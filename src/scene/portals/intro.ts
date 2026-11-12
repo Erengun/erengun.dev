@@ -30,6 +30,7 @@ const ICE = new Color('#cde7e9');   // warm off-white / ice LED colour (linear v
 const FRAME_DIST = 2.2;             // camera → dot plane (portal units, inner-camera space)
 const RELIEF = 0.22;                // depth relief as a fraction of the frame width (small: stays frontal)
 const LENS_FOV = 28;                // dolly lens
+const WIDEN = 1.12;                 // horizontal stretch of the portrait (user: "make face wider")
 const REVEAL_S = 1.6;
 const GLYPH_COLS = 8, GLYPH_ROWS = 4;
 
@@ -203,7 +204,8 @@ export function createIntroPortal(_ctx: PortalContext): Portal {
     // frame width: ~fill the height, never much wider than the view (phones)
     const visH = 2 * D * Math.tan((c.fov * Math.PI) / 360);
     const visW = visH * c.aspect;
-    uFW.value = Math.min(visH * 0.7, visW * 1.05);
+    uFW.value = Math.min(visH * 0.62, visW * 0.95);
+    group.scale.x = WIDEN;
     grid.scale.set(uFW.value * 3, uFW.value * 3, 1);
     grid.position.z = -uFW.value * 0.15;
   }
