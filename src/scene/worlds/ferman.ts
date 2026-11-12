@@ -1,28 +1,32 @@
 /**
- * Ferman world (project #1): a giant imperial edict scroll unfurls in a dim vaulted hall. The featured screenshot
- * is set into the scroll as a gilded, illuminated panel; a cartouche above it reads the rollout state, with the
- * wax seal stamped beside it. Glowing "patch" sparks leave the cartouche and arc to the devices in the two niche
- * cabinets flanking the scroll (and to the rows on the floor tiers), whose screens fill as the staged rollout
- * advances with scroll: beta 10% (t≈.29) → stable 50% (t≈.49) → stable 100% (t≈.69).
+ * Ferman world (project #1): self-hosted live updates / code push. A giant imperial edict scroll hangs in a dim
+ * vaulted hall; the edict is the signed patch. Its gilded panel shows the featured screenshot, the cartouche reads the
+ * rollout, and the edict's text is the release terminal (ferman patch → rollout → promote, typed as you scroll).
+ * The hero of the hold is the PATCH BENCH in front of the right-hand cabinet (see createBench):
+ *   base build (app-release.apk, Setup.exe, Runner.ipa, libapp.so as grids of byte blocks) → the changed blocks of the
+ *   APK are cut out as a diff → stamped with the ferman's seal (= Ed25519 signature) → the packet flies to devices,
+ *   which verify the seal (✓), hot-swap the changed blocks in place and relaunch on "v2.3.0+41 → patch 3";
+ *   rollout 10 % beta → 50 % → promote stable 100 %, then one device reverts ("rollback → base").
+ * Everything on the bench is a pure function of the scroll progress t (scrubbable; see PT) plus idle motion.
  *
  * Timeline (local t):  0 → .22 arrive (fly up the aisle while the scroll unrolls)
- *                     .22 → .82 hold (panel framed for legibility, slow drift, rollout waves)
+ *                     .22 → .82 hold (diff .19–.27 · beta .27 · 50 % .42 · stable .57 · rollback .71)
  *                     .82 → 1   depart (crane up past the emblem into the vault glow)
  *
- * Draws (19): bays (instanced) · end wall + cabinets · tiers · paper · panel · rollers ×2 · seal · devices ×3 (instanced)
- *               · screens (instanced) · sparks · light shafts · dust · halo.
- * Geometry: public/worlds/ferman/ferman.glb (tools/blender/worlds/ferman/build.py). Paper, emblem, screen labels
- * and the readout are drawn into canvases at runtime (original artwork; the emblem is an abstract composition).
+ * Draws (24): bays (instanced) · end wall + cabinets · tiers · paper · panel · terminal · rollers ×2 · seal
+ *   · devices ×3 (instanced) · screens (instanced) · sparks · light shafts · dust · halo · bench boxes · bench labels.
+ * Geometry: public/worlds/ferman/ferman.glb (tools/blender/worlds/ferman/build.py). Paper, emblem, screen labels,
+ * bench atlas, terminal and readout are drawn into canvases at runtime (original artwork).
  */
 import {
   Scene, Color, PerspectiveCamera, Mesh, InstancedMesh, PlaneGeometry, BufferGeometry, InstancedBufferAttribute,
   MeshBasicNodeMaterial, CanvasTexture, TextureLoader, SRGBColorSpace, NoColorSpace, DoubleSide, AdditiveBlending,
-  Matrix4, Vector3, Quaternion, Euler, Object3D, type Texture,
+  Matrix4, Vector3, Quaternion, Euler, Object3D, BoxGeometry, type Texture,
 } from 'three/webgpu';
 import {
   Fn, vec2, vec3, vec4, float, uniform, attribute, varying, texture, instancedBufferAttribute, positionGeometry,
   positionWorld, normalWorld, cameraPosition, uv, mix, smoothstep, clamp, max, min, pow, exp, length, normalize, dot,
-  sin, cos, fract, abs, reflect, cross, select, frontFacing, step,
+  sin, cos, fract, abs, reflect, cross, select, frontFacing, step, instancedDynamicBufferAttribute, normalGeometry,
 } from 'three/tsl';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { Stage, StageFrame, ProjectWorldContext, SlideImage } from '../journey/types';
@@ -37,7 +41,8 @@ const RB = 0.17;         // radius of the outer turn of the bottom roll
 const SC = 3.95;         // image centre, distance down the paper
 const FB = 0.1;          // frame border
 const TABH = 0.36, TABW = 1.7;
-const IMG_MAX_W = 2.9, IMG_MAX_H = 2.25;
+const IMG_MAX_W = 2.62, IMG_MAX_H = 1.6;
+const TERM_GAP = 0.06, TERM_H = 0.42, TERM_W = 2.62; // in-world terminal under the panel (paper metres)
 const BAYS = 9;
 const FOV = 45;
 // device cabinets flanking the scroll (match build.py)
@@ -63,8 +68,6 @@ const outCubic = (x: number) => 1 - Math.pow(1 - x, 3);
 const hash = (n: number) => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
 const v3 = (c: Color | Vector3) => (c instanceof Color ? vec3(c.r, c.g, c.b) : vec3(c.x, c.y, c.z));
 
-/** rollout fraction for local t: beta 10% → stable 50% → stable 100% */
-export const rolloutAt = (t: number) => 0.1 * sstep(0.23, 0.29, t) + 0.4 * sstep(0.42, 0.49, t) + 0.5 * sstep(0.62, 0.69, t);
 
 export function createWorld(ctx: ProjectWorldContext): Stage {
   const high = ctx.quality === 'high';
@@ -331,6 +334,41 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     scene.add(mesh);
   }
 
+  // ---------------------------------------------------------------- terminal set into the edict under the panel
+  const term = makeTerminal();
+  const termTex = new CanvasTexture(term.canvas);
+  termTex.colorSpace = SRGBColorSpace;
+  termTex.anisotropy = 8;
+  {
+    const geo = new PlaneGeometry(1, 1, 10, 4);
+    const mat = new MeshBasicNodeMaterial({ side: DoubleSide });
+    const q: N = uv();
+    const s0 = float(SC + FB + TERM_GAP).add(uHp.mul(0.5));
+    const ss = s0.add(float(1).sub(q.y).mul(TERM_H));
+    const uu = q.x.sub(0.5).mul(TERM_W / PW).add(0.5);
+    const fr = paperFrame(uu, ss, 0.01, 0.02);
+    mat.positionNode = fr.p.add(fr.n.mul(0.01));
+    const vS: N = varying(ss, 'vFerTermS');
+    mat.opacityNode = step(vS, uL.sub(0.02));
+    mat.alphaTest = 0.5;
+    mat.colorNode = Fn(() => {
+      const c = texture(termTex, uv()).rgb;
+      return vec4(c.mul(c.mul(0.25).add(0.95)), 1);
+    })();
+    mat.toneMapped = false;
+    mat.fog = false;
+    const mesh = new Mesh(geo, mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 2;
+    scene.add(mesh);
+  }
+
+  // ---------------------------------------------------------------- the patch bench (hero of the hold)
+  const bench = createBench(high);
+  scene.add(bench.group);
+  bench.group.updateMatrixWorld(true);
+  const benchCorner = (x: number, y: number) => new Vector3(x, y, 0).applyMatrix4(bench.group.matrixWorld);
+
   // ---------------------------------------------------------------- halo behind the scroll + light shafts
   {
     const geo = new PlaneGeometry(9, 12);
@@ -549,7 +587,8 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     const Bv = new InstancedBufferAttribute(new Float32Array(n * 4), 4); // origin x offset, seed, lift, intensity
     for (let i = 0; i < n; i++) {
       const j = i % ND, d = devices[j], sp = screenPos[j];
-      A.setXYZW(i, sp.x, sp.y, sp.z, d.thr);
+      // devices on the right stand behind the patch bench: their arcs would cut across it, so they get none
+      A.setXYZW(i, sp.x, sp.y, sp.z, sp.x > 1.5 ? 9 : d.thr);
       const second = i >= ND;
       const dist = sp.distanceTo(new Vector3(0, YTOP - SC + 1.2, 0));
       Bv.setXYZW(i, (hash(i + 0.5) - 0.5) * 1.4, second ? (d.seed + 0.5) % 1 : d.seed, (0.25 + hash(i + 2) * 0.35) * dist, second ? 0.6 : 1);
@@ -722,18 +761,41 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
 
   // ---------------------------------------------------------------- camera
   const tmp = new Vector3(), tmp2 = new Vector3(), look = new Vector3();
+  // hold framing: the edict panel (+ terminal) on the left, the patch bench on the right; everything above the DOM
+  // panel (bottom 28 %) and right of the left nav (≈ 18 %)
+  const benchR = benchCorner(B_W + 0.03, 0), benchT = benchCorner(B_W, B_H + 0.03);
   const holdPose = (out: { pos: Vector3; look: Vector3 }, aspect: number, u: number) => {
     const Wq = Math.max((uWp.value as number) + 2 * FB, TABW);
-    const yc = YTOP - SC;
-    const yTop = yc + (uHp.value as number) / 2 + FB + TABH, yBot = yc - (uHp.value as number) / 2 - FB;
-    // panel spans 12% → 59% of the screen height, and at most ~70% of its width
-    let Hv = (yTop - yBot) / 0.53;
-    Hv = Math.max(Hv, Wq / (0.7 * aspect));
-    const cy = yTop + 0.11 * Hv - Hv / 2;
-    const d = Hv / 2 / Math.tan((FOV * Math.PI) / 360);
-    const x = lerp(0.42, -0.42, u);
-    out.pos.set(x, cy + 0.32, d - 0.25 * u);
-    out.look.set(x * 0.25, cy, 0);
+    const hp = uHp.value as number;
+    const xL = -Wq / 2;
+    const yTop = Math.max(YTOP - (SC - hp / 2 - FB - TABH), benchT.y);
+    const yBot = Math.min(YTOP - (SC + hp / 2 + FB + TERM_GAP + TERM_H), B_POS.y);
+    // margins chosen for the site's fish-eye post + header/nav (measured on the main page, not the test page)
+    const L = 0.285, R = 0.87, T = 0.165, B = 0.66;
+    const tanH = Math.tan((FOV * Math.PI) / 360);
+    if (aspect < 1.1) {
+      // portrait: panel + bench side by side would be tiny, so frame the patch bench (the hero) on its own;
+      // the screenshots are still on the scroll to its left and in the DOM thumbnails
+      const bx0 = benchCorner(0, 0).x - 0.05, bx1 = benchR.x + 0.05;
+      const Hb = Math.max((benchT.y - B_POS.y + 0.1) / (0.62 - 0.12), (bx1 - bx0) / (0.94 * aspect));
+      const db = Hb / 2 / tanH + 0.4;
+      const cxb = (bx0 + bx1) / 2 + 0.1, cyb = benchT.y + 0.165 * Hb - Hb / 2;
+      out.pos.set(cxb + lerp(0.04, -0.04, u) - 0.25, cyb + 0.05, db + 0.6);
+      out.look.set(cxb - 0.05, cyb, 0.5);
+      return;
+    }
+    let Hv = (yTop - yBot) / (B - T), cx = 0, d = 6;
+    for (let it = 0; it < 3; it++) {
+      // the bench's right end stands closer to the camera: widen it by its perspective gain
+      const xR = cx + (benchR.x - cx) * d / Math.max(0.5, d - benchR.z);
+      Hv = Math.max((yTop - yBot) / (B - T), (xR - xL) / ((R - L) * aspect));
+      d = Hv / 2 / tanH;
+      cx = xL + (0.5 - L) * Hv * aspect;
+    }
+    const cy = yTop + T * Hv - Hv / 2;
+    const x = cx + lerp(0.08, -0.08, u);
+    out.pos.set(x, cy + 0.1, d - 0.12 * u);
+    out.look.set(x - 0.06, cy, 0);
   };
   const H0 = { pos: new Vector3(), look: new Vector3() };
   const P0 = { pos: new Vector3(0, 1.7, 23), look: new Vector3(0, 5.6, 0) };
@@ -748,6 +810,9 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     uShow.value = sstep(0.05, 0.25, t) * (1 - sstep(0.93, 1.02, t) * 0.5);
     readout.set(uRollout.value as number);
     if (readout.dirty) { readoutTex.needsUpdate = true; readout.dirty = false; }
+    term.set(t, f.time);
+    if (term.dirty) { termTex.needsUpdate = true; term.dirty = false; }
+    bench.update(t, f.time);
 
     // slide crossfade (≤ 600 ms)
     requestSlide(f.slide);
@@ -786,8 +851,10 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     }
     // parallax + idle drift
     const px = f.parallax?.x ?? 0, py = f.parallax?.y ?? 0;
-    pos.x += px * 0.35 + Math.sin(f.time * 0.13) * 0.07;
-    pos.y += py * 0.2 + Math.sin(f.time * 0.17 + 1) * 0.05;
+    // the hold framing is tight (nav left, header top, DOM panel bottom): damp the parallax there
+    const pk = 1 - 0.6 * sstep(0.16, 0.24, t) * (1 - sstep(0.8, 0.88, t));
+    pos.x += px * 0.35 * pk + Math.sin(f.time * 0.13) * 0.05;
+    pos.y += py * 0.2 * pk + Math.sin(f.time * 0.17 + 1) * 0.04;
     look.x += px * 0.08;
     look.y += py * 0.05;
     camera.position.copy(pos);
@@ -993,7 +1060,7 @@ function drawAtlas() {
   g.textAlign = 'center'; g.textBaseline = 'middle';
   const cells: [string, string][] = [
     ['ANDROID', '600 52px Menlo, Consolas, monospace'], ['WINDOWS', '600 52px Menlo, Consolas, monospace'], ['iOS', '600 60px Menlo, Consolas, monospace'], ['', ''],
-    ['v1.8.2', '700 74px Menlo, Consolas, monospace'], ['v1.9.0', '700 74px Menlo, Consolas, monospace'], ['BETA', '700 64px Menlo, Consolas, monospace'], ['STABLE', '700 60px Menlo, Consolas, monospace'],
+    ['2.3.0+41', '700 58px Menlo, Consolas, monospace'], ['patch 3', '700 66px Menlo, Consolas, monospace'], ['BETA', '700 64px Menlo, Consolas, monospace'], ['STABLE', '700 60px Menlo, Consolas, monospace'],
   ];
   cells.forEach(([txt, font], i) => {
     if (!txt) return;
@@ -1019,7 +1086,7 @@ function makeReadout() {
     bg.addColorStop(0, '#16213d'); bg.addColorStop(1, '#0a0f1a');
     g.fillStyle = bg; g.fillRect(0, 0, W, H);
     g.textBaseline = 'middle';
-    const chan = r <= 0.105 ? 'BETA' : 'STABLE';
+    const chan = r <= 0.505 ? 'BETA' : 'STABLE'; // `ferman rollout 3 50` stays beta; only `promote` makes it stable
     g.fillStyle = '#c9a25a'; g.font = '600 40px Georgia, "Times New Roman", serif';
     g.textAlign = 'left'; g.fillText('ROLLOUT', 120, H / 2 + 2);
     g.textAlign = 'right'; g.fillText(r <= 0.001 ? 'SIGNED' : chan, W - 120, H / 2 + 2);
@@ -1030,6 +1097,472 @@ function makeReadout() {
       g.fillStyle = r >= s - 0.001 ? '#f2c766' : 'rgba(201,162,90,0.3)';
       g.beginPath(); g.arc(W / 2 - 40 + i * 40, H - 26, 7, 0, Math.PI * 2); g.fill();
     });
+  };
+  return state;
+}
+
+// ====================================================================== the patch bench
+// A gilded board in front of the right-hand cabinet that explains what Ferman does, in world space:
+//   base build (shipped binaries as grids of byte blocks) → the changed blocks are cut out as a DIFF → sealed with the
+//   ferman's seal (= Ed25519 signature) → the packet flies to devices → each verifies the seal, hot-swaps the changed
+//   blocks in place and shows "patch 3" after the next launch; rollout 10% beta → 50% → promote stable 100%;
+//   one device reverts ("rollback → base").
+// Everything is driven by the scroll progress t (scrubbable, deterministic stills) plus a little idle motion.
+// Draws: 2 (all boxes in one instanced draw, all labels/sprites in one instanced draw).
+
+/** scroll timeline of the patch story (local t of the world) */
+export const PT = {
+  scan: [0.19, 0.225] as const,   // the changed blocks of the APK light up (diff vs base)
+  cut: [0.222, 0.252] as const,   // they lift out and gather into the packet
+  seal: [0.25, 0.272] as const,  // the seal stamps the packet: "signed diff"
+  // deliveries (flight → verify → hot swap → relaunch) per hero device
+  dev: [[0.27, 0.34], [0.42, 0.49], [0.435, 0.505], [0.57, 0.64]] as [number, number][],
+  rollback: [0.705, 0.775] as const,
+  // bar segment i lights at segAt[i] (10 devices = 10 %)
+  segAt: [0.345, 0.43, 0.455, 0.49, 0.515, 0.575, 0.59, 0.605, 0.62, 0.64],
+};
+/** rollout fraction for local t (matches the bench's 10-device bar: beta 10 % → 50 % → stable 100 %) */
+export const rolloutAt = (t: number) => PT.segAt.reduce((acc, a) => acc + 0.1 * sstep(a - 0.012, a, t), 0);
+
+const COLS = 5, ROWS = 6;
+const DIFF = [6, 7, 12, 18, 19, 23];          // changed blocks (row-major from the top left), same on every device
+const B_W = 2.3, B_H = 2.86;                   // board size (local x 0..B_W, y 0..B_H)
+const B_POS = new Vector3(1.98, 2.96, 0.3), B_YAW = -0.17;
+
+type Cell = { u0: number; v0: number; u1: number; v1: number; asp: number };
+
+function makeAtlas() {
+  const AW = 2048, AH = 1024;
+  const cv = document.createElement('canvas');
+  cv.width = AW; cv.height = AH;
+  const g = cv.getContext('2d')!;
+  g.clearRect(0, 0, AW, AH);
+  const cells: Record<string, Cell> = {};
+  let x = 4, y = 4, rowH = 0;
+  const alloc = (w: number, h: number) => {
+    if (x + w > AW - 4) { x = 4; y += rowH + 6; rowH = 0; }
+    const r = { x, y };
+    x += w + 6; rowH = Math.max(rowH, h);
+    return r;
+  };
+  const put = (key: string, w: number, h: number, r: { x: number; y: number }) => {
+    cells[key] = { u0: r.x / AW, u1: (r.x + w) / AW, v0: 1 - (r.y + h) / AH, v1: 1 - r.y / AH, asp: w / h };
+  };
+  const MONO = 'Menlo, "DejaVu Sans Mono", Consolas, monospace';
+  const text = (key: string, lines: string[], px: number, font = MONO, weight = 600, align: 'left' | 'center' = 'left') => {
+    g.font = `${weight} ${px}px ${font}`;
+    const lh = Math.round(px * 1.18);
+    const w = Math.ceil(Math.max(...lines.map((l) => g.measureText(l).width))) + 12;
+    const h = lh * lines.length + 8;
+    const r = alloc(w, h);
+    g.fillStyle = '#fff';
+    g.textBaseline = 'middle';
+    g.textAlign = align;
+    lines.forEach((l, i) => g.fillText(l, align === 'center' ? r.x + w / 2 : r.x + 6, r.y + 4 + lh * (i + 0.5)));
+    put(key, w, h, r);
+  };
+  text('base build', ['BASE BUILD'], 64, 'Georgia, "Times New Roman", serif', 700);
+  text('release', ['release 2.3.0+41'], 52);
+  text('app-release.apk', ['app-release.apk'], 56);
+  text('Setup.exe', ['Setup.exe'], 56);
+  text('Runner.ipa', ['Runner.ipa'], 56);
+  text('libapp.so', ['libapp.so'], 56);
+  text('signed diff', ['SIGNED DIFF'], 64, 'Georgia, "Times New Roman", serif', 700);
+  text('diffinfo', ['bidiff · 6 blocks · ed25519'], 48, MONO, 600);
+  text('r10', ['rollout 10% · beta'], 60);
+  text('r50', ['rollout 50% · beta'], 60);
+  text('r100', ['promote · stable 100%'], 60);
+  text('verify', ['verify', 'signature ✓'], 50, MONO, 700, 'center');
+  text('applied', ['applied on', 'next launch'], 50, MONO, 700, 'center');
+  text('rollback', ['rollback', '→ base'], 50, MONO, 700, 'center');
+  text('ver', ['v2.3.0+41'], 60, MONO, 700, 'center');
+  text('patch3', ['→ patch 3'], 60, MONO, 700, 'center');
+  text('base', ['→ base'], 60, MONO, 700, 'center');
+  text('android', ['android'], 40, MONO, 500, 'center');
+  // sprites: the seal (gold rim, red wax, gold star), a check badge and a soft glow
+  const sprite = (key: string, s: number, draw: (cx: number, cy: number, R: number) => void) => {
+    const r = alloc(s, s);
+    draw(r.x + s / 2, r.y + s / 2, s / 2);
+    put(key, s, s, r);
+  };
+  sprite('seal', 200, (cx, cy, R) => {
+    const rg = g.createRadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.1, cx, cy, R);
+    rg.addColorStop(0, '#ffe6a0'); rg.addColorStop(0.6, '#d9a53e'); rg.addColorStop(1, '#8a5a14');
+    g.fillStyle = rg; g.beginPath(); g.arc(cx, cy, R - 4, 0, Math.PI * 2); g.fill();
+    const wg = g.createRadialGradient(cx - R * 0.2, cy - R * 0.2, 2, cx, cy, R * 0.72);
+    wg.addColorStop(0, '#d0393a'); wg.addColorStop(1, '#6e0f14');
+    g.fillStyle = wg; g.beginPath(); g.arc(cx, cy, R * 0.72, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#f2c766';
+    g.beginPath();
+    for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2 - Math.PI / 2, rr = i % 2 ? R * 0.22 : R * 0.52; g.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
+    g.closePath(); g.fill();
+    g.fillStyle = '#6e0f14'; g.beginPath(); g.arc(cx, cy, R * 0.12, 0, Math.PI * 2); g.fill();
+  });
+  sprite('check', 140, (cx, cy, R) => {
+    g.fillStyle = '#ffffff'; g.beginPath(); g.arc(cx, cy, R - 4, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = '#000'; g.globalCompositeOperation = 'destination-out'; g.lineWidth = R * 0.24; g.lineCap = 'round'; g.lineJoin = 'round';
+    g.beginPath(); g.moveTo(cx - R * 0.42, cy + R * 0.02); g.lineTo(cx - R * 0.1, cy + R * 0.34); g.lineTo(cx + R * 0.45, cy - R * 0.3); g.stroke();
+    g.globalCompositeOperation = 'source-over';
+  });
+  sprite('glow', 128, (cx, cy, R) => {
+    const rg = g.createRadialGradient(cx, cy, 0, cx, cy, R);
+    rg.addColorStop(0, 'rgba(255,255,255,1)'); rg.addColorStop(0.25, 'rgba(255,255,255,0.45)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = rg; g.fillRect(cx - R, cy - R, 2 * R, 2 * R);
+  });
+  return { canvas: cv, cells };
+}
+
+function createBench(high: boolean) {
+  const group = new Object3D();
+  group.position.copy(B_POS);
+  group.rotation.y = B_YAW;
+
+  // ------------------------------------------------ boxes: one instanced draw
+  const NB = 640;
+  const bA = new InstancedBufferAttribute(new Float32Array(NB * 4), 4); // x y z rotZ
+  const bB = new InstancedBufferAttribute(new Float32Array(NB * 4), 4); // sx sy sz emissive
+  const bC = new InstancedBufferAttribute(new Float32Array(NB * 4), 4); // r g b gloss
+  for (const a of [bA, bB, bC]) a.setUsage(35048 /* DynamicDrawUsage */);
+  {
+    const A: N = instancedDynamicBufferAttribute(bA, 'vec4'), Bq: N = instancedDynamicBufferAttribute(bB, 'vec4'), C: N = instancedDynamicBufferAttribute(bC, 'vec4');
+    const cr = cos(A.w), sr = sin(A.w);
+    const rot = (v: N) => vec3(v.x.mul(cr).sub(v.y.mul(sr)), v.x.mul(sr).add(v.y.mul(cr)), v.z);
+    const geo = new BoxGeometry(1, 1, 1);
+    const mat = new MeshBasicNodeMaterial();
+    mat.positionNode = rot(positionGeometry.mul(Bq.xyz)).add(A.xyz);
+    const vN: N = varying(rot(normalGeometry), 'vFerBenchN');
+    const vC: N = varying(C, 'vFerBenchC');
+    const vE: N = varying(Bq.w, 'vFerBenchE');
+    mat.colorNode = Fn(() => {
+      const n = normalize(vN);
+      const lam = max(dot(n, normalize(vec3(-0.25, 0.55, 0.8))), 0);
+      const rim = pow(float(1).sub(abs(n.z)), 2).mul(0.25);
+      const top = smoothstep(0.5, 0.9, n.y).mul(0.25);
+      let c: N = vC.rgb.mul(float(0.22).add(lam.mul(0.78)).add(rim).add(top.mul(vC.w)));
+      c = c.add(vC.rgb.mul(vE.mul(1.25))).mul(0.72);
+      return vec4(clamp(c.mul(c.mul(2.51).add(0.03)).div(c.mul(c.mul(2.43).add(0.59)).add(0.14)), 0, 1), 1);
+    })();
+    mat.toneMapped = false;
+    mat.fog = false;
+    const mesh = new Mesh(geo, mat);
+    (mesh as any).count = NB;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 3;
+    group.add(mesh);
+  }
+  let nb = 0;
+  const box = (x: number, y: number, z: number, sx: number, sy: number, sz: number, col: Color | [number, number, number], em = 0, rz = 0, gloss = 0) => {
+    if (nb >= NB) return;
+    const c = col instanceof Color ? [col.r, col.g, col.b] : col;
+    bA.setXYZW(nb, x, y, z, rz);
+    bB.setXYZW(nb, sx, sy, sz, em);
+    bC.setXYZW(nb, c[0], c[1], c[2], gloss);
+    nb++;
+  };
+
+  // ------------------------------------------------ labels / sprites: one instanced draw
+  const atlas = makeAtlas();
+  const atlasTex = new CanvasTexture(atlas.canvas);
+  atlasTex.colorSpace = SRGBColorSpace;
+  atlasTex.anisotropy = 8;
+  const NL = 96;
+  const lP = new InstancedBufferAttribute(new Float32Array(NL * 4), 4); // x y z rot
+  const lS = new InstancedBufferAttribute(new Float32Array(NL * 4), 4); // w h ax(anchor -0.5..0.5) additive
+  const lQ = new InstancedBufferAttribute(new Float32Array(NL * 4), 4); // u0 v0 u1 v1
+  const lT = new InstancedBufferAttribute(new Float32Array(NL * 4), 4); // tint rgb, alpha
+  for (const a of [lP, lS, lQ, lT]) a.setUsage(35048);
+  {
+    const P: N = instancedDynamicBufferAttribute(lP, 'vec4'), S: N = instancedDynamicBufferAttribute(lS, 'vec4');
+    const Q: N = instancedDynamicBufferAttribute(lQ, 'vec4'), T: N = instancedDynamicBufferAttribute(lT, 'vec4');
+    const geo = new PlaneGeometry(1, 1);
+    const mat = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
+    const lx = positionGeometry.x.add(S.z).mul(S.x), ly = positionGeometry.y.mul(S.y);
+    const cr = cos(P.w), sr = sin(P.w);
+    mat.positionNode = vec3(lx.mul(cr).sub(ly.mul(sr)), lx.mul(sr).add(ly.mul(cr)), 0).add(P.xyz);
+    const vUV: N = varying(mix(Q.xy, Q.zw, uv()), 'vFerLabUV');
+    const vT: N = varying(T, 'vFerLabT');
+    mat.colorNode = Fn(() => {
+      const tx = texture(atlasTex, vUV);
+      return vec4(tx.rgb.mul(vT.rgb), tx.a.mul(vT.a));
+    })();
+    mat.toneMapped = false;
+    mat.fog = false;
+    const mesh = new Mesh(geo, mat);
+    (mesh as any).count = NL;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 6;
+    group.add(mesh);
+  }
+  let nl = 0;
+  /** label by height h (metres); anchor 'l' left edge at x, 'c' centred */
+  const label = (key: string, x: number, y: number, z: number, h: number, col: [number, number, number], a: number, anchor: 'l' | 'c' | 'r' = 'c', rot = 0) => {
+    const c = atlas.cells[key];
+    if (!c || nl >= NL || a <= 0.003) return;
+    const w = h * c.asp;
+    lP.setXYZW(nl, x, y, z, rot);
+    lS.setXYZW(nl, w, h, anchor === 'l' ? 0.5 : anchor === 'r' ? -0.5 : 0, 0);
+    lQ.setXYZW(nl, c.u0, c.v0, c.u1, c.v1);
+    lT.setXYZW(nl, col[0], col[1], col[2], Math.min(1, a));
+    nl++;
+  };
+
+  // ------------------------------------------------ layout + palette
+  const GOLDc: [number, number, number] = [1.0, 0.66, 0.2];
+  const GOLD_HI: [number, number, number] = [1.0, 0.85, 0.5];
+  const PALEc: [number, number, number] = [0.85, 0.89, 0.95];
+  const DIM: [number, number, number] = [0.55, 0.62, 0.75];
+  const RED: [number, number, number] = [1.0, 0.42, 0.36];
+  const NAVYB: [number, number, number] = [0.018, 0.026, 0.055];
+  const TILE_BG: [number, number, number] = [0.03, 0.045, 0.09];
+  const TILES = ['app-release.apk', 'Setup.exe', 'Runner.ipa', 'libapp.so'];
+  const TP = 0.072, TB = 0.058;                // tile block pitch / size
+  const tileX = (i: number) => 0.3 + 0.565 * i;
+  const TILE_Y0 = 1.99;                        // bottom of the tile grids
+  const slotTile = (ti: number, k: number) => {
+    const c = k % COLS, r = Math.floor(k / COLS);
+    return [tileX(ti) + (c - (COLS - 1) / 2) * TP, TILE_Y0 + (ROWS - 1 - r) * TP + TP / 2] as const;
+  };
+  const byteCol = (seed: number, tint: number): [number, number, number] => {
+    const v = 0.55 + hash(seed) * 0.6;
+    return [0.075 * v + tint * 0.012, 0.11 * v + tint * 0.018, 0.22 * v];
+  };
+  const PK = new Vector3(0.98, 1.67, 0.1);     // packet home
+  const pkSlot = (j: number, s = 0.05) => [PK.x + ((j % 3) - 1) * s, PK.y + (Math.floor(j / 3) === 0 ? s / 2 : -s / 2)] as const;
+  // hero devices
+  const PH_W = 0.46, PH_H = 0.94, PH_Y = 0.07;
+  const phX = (i: number) => 0.27 + 0.56 * i;
+  const DP = 0.064, DB = 0.052;
+  const slotDev = (i: number, k: number) => {
+    const c = k % COLS, r = Math.floor(k / COLS);
+    return [phX(i) + (c - (COLS - 1) / 2) * DP, PH_Y + 0.1 + (ROWS - 1 - r) * DP + DP / 2] as const;
+  };
+  const SCR_TOP = PH_Y + PH_H - 0.05;
+  const BAR_X0 = 1.27, BAR_P = 0.098;
+
+  const arc = (a: Vector3, b: Vector3, k: number, lift: number, out: Vector3) => {
+    const it = 1 - k;
+    const mx = (a.x + b.x) / 2, my = Math.max(a.y, b.y) + lift, mz = (a.z + b.z) / 2 + 0.55;
+    return out.set(it * it * a.x + 2 * it * k * mx + k * k * b.x, it * it * a.y + 2 * it * k * my + k * k * b.y, it * it * a.z + 2 * it * k * mz + k * k * b.z);
+  };
+  const tmpA = new Vector3(), tmpB = new Vector3(), tmpC = new Vector3();
+  const ph = (t: number, a: number, b: number) => clamp01((t - a) / (b - a));
+
+  function update(t: number, time: number) {
+    nb = 0; nl = 0;
+    const show = sstep(0.02, 0.16, t);
+    // ---- board: navy plate, gold rim, two gilt rules between the zones
+    box(B_W / 2, B_H / 2, -0.03, B_W, B_H, 0.04, NAVYB, 0.02);
+    const rimC: [number, number, number] = [0.8, 0.52, 0.18];
+    box(B_W / 2, B_H + 0.015, -0.01, B_W + 0.06, 0.03, 0.06, rimC, 0.06, 0, 1);
+    box(B_W / 2, -0.015, -0.01, B_W + 0.06, 0.03, 0.06, rimC, 0.06, 0, 1);
+    box(-0.015, B_H / 2, -0.01, 0.03, B_H + 0.06, 0.06, rimC, 0.06, 0, 1);
+    box(B_W + 0.015, B_H / 2, -0.01, 0.03, B_H + 0.06, 0.06, rimC, 0.06, 0, 1);
+    box(B_W / 2, 1.43, 0.0, B_W - 0.12, 0.006, 0.01, rimC, 0.25);
+    box(B_W / 2, 1.9, 0.0, B_W - 0.12, 0.006, 0.01, rimC, 0.12);
+
+    // ---- base build: four shipped binaries as byte grids
+    label('base build', 0.07, 2.735, 0.01, 0.115, GOLDc, show, 'l');
+    label('release', B_W - 0.07, 2.735, 0.01, 0.075, DIM, show, 'r');
+    const scan = ph(t, PT.scan[0], PT.scan[1]);
+    const cut = ph(t, PT.cut[0], PT.cut[1]);
+    const seal = ph(t, PT.seal[0], PT.seal[1]);
+    for (let ti = 0; ti < 4; ti++) {
+      const active = ti === 0;
+      const hi = active ? sstep(0, 0.4, scan) : 0;
+      box(tileX(ti), TILE_Y0 + ROWS * TP / 2, 0.0, COLS * TP + 0.05, ROWS * TP + 0.05, 0.02, active ? [0.05 + 0.15 * hi, 0.05 + 0.1 * hi, 0.08] : TILE_BG, 0.02 + hi * 0.15);
+      label(TILES[ti], tileX(ti), 2.51, 0.02, 0.078, active ? (hi > 0.5 ? GOLD_HI : PALEc) : DIM, show);
+      for (let k = 0; k < COLS * ROWS; k++) {
+        const [x, y] = slotTile(ti, k);
+        const changed = active && DIFF.includes(k);
+        const shimmer = 0.5 + 0.5 * Math.sin(time * 1.3 + hash(ti * 40 + k) * 30);
+        let col = byteCol(ti * 40 + k, ti);
+        let em = 0.03 + 0.05 * shimmer * shimmer;
+        if (changed && hi > 0) {
+          const pulse = 0.6 + 0.4 * Math.sin(time * 5 + k);
+          col = [lerp(col[0], GOLDc[0], hi), lerp(col[1], GOLDc[1], hi), lerp(col[2], GOLDc[2], hi)];
+          em = lerp(em, 0.35 + 0.25 * pulse * (1 - cut), hi);
+        }
+        box(x, y, 0.025, TB, TB, 0.03, col, em);
+      }
+      // the iOS / Flutter binaries mark their patchable regions (assets, libapp) with a thin gold underline
+      if (ti >= 2) box(tileX(ti), TILE_Y0 - 0.012, 0.02, COLS * TP, 0.008, 0.01, GOLDc, 0.2);
+    }
+    // ---- cut: copies of the changed blocks lift out of the APK and gather into the packet
+    const packetHome = cut > 0;
+    const bob = Math.sin(time * 1.6) * 0.012;
+    if (packetHome) {
+      DIFF.forEach((k, j) => {
+        const kk = sstep(j * 0.08, 0.55 + j * 0.08, cut);
+        const [sx, sy] = slotTile(0, k);
+        const [px, py] = pkSlot(j);
+        const x = lerp(sx, px, kk), y = lerp(sy, py + bob, kk);
+        const z = 0.04 + Math.sin(kk * Math.PI) * 0.35 + 0.06 * kk;
+        box(x, y, z, TB * lerp(1, 0.82, kk), TB * lerp(1, 0.82, kk), 0.03, GOLDc, 0.4 + 0.3 * (1 - seal), Math.sin(kk * Math.PI) * 0.6);
+      });
+    }
+    // dotted gold trail: APK → packet (the diff was cut from this binary)
+    if (cut > 0) for (let k = 0; k < 6; k++) {
+      const u = (k + 0.5) / 6, a = sstep(u * 0.8, u * 0.8 + 0.2, cut);
+      box(lerp(tileX(0) + 0.05, PK.x - 0.14, u), lerp(TILE_Y0 - 0.04, PK.y + 0.02, u * u), 0.01, 0.018, 0.018, 0.01, GOLDc, 0.35 * a);
+    }
+    // seal stamp → "signed diff"
+    if (seal > 0) {
+      const k = outCubic(seal);
+      const s = lerp(0.55, 0.15, k);
+      const flash = Math.exp(-Math.pow((seal - 0.75) / 0.12, 2));
+      label('glow', PK.x, PK.y + bob, 0.12, 0.5 + flash * 0.5, GOLD_HI, 0.25 + flash * 0.6);
+      label('seal', PK.x + 0.12 * k, PK.y - 0.06 * k + bob, 0.15, s, [1, 1, 1], sstep(0, 0.25, seal), 'c', (1 - k) * 0.8 + Math.sin(time * 0.8) * 0.05);
+      const la = sstep(0.6, 1, seal) * show;
+      label('signed diff', 1.25, 1.74, 0.02, 0.105, GOLDc, la, 'l');
+      label('diffinfo', 1.25, 1.6, 0.02, 0.07, DIM, la, 'l');
+    }
+
+    // ---- rollout header: label + 10-device bar
+    const rKey = t >= PT.dev[3][0] - 0.01 ? 'r100' : t >= PT.dev[1][0] - 0.01 ? 'r50' : 'r10';
+    const rA = sstep(PT.dev[0][0] - 0.02, PT.dev[0][0] + 0.01, t) * show;
+    label(rKey, 0.07, 1.31, 0.02, 0.092, rKey === 'r100' ? GOLD_HI : PALEc, Math.max(rA, 0.25 * show), 'l');
+    const rb = ph(t, PT.rollback[0], PT.rollback[1]);
+    for (let i = 0; i < 10; i++) {
+      const on = sstep(PT.segAt[i] - 0.012, PT.segAt[i], t);
+      const back = i === 9 ? sstep(0.45, 0.7, rb) : 0;
+      const col: [number, number, number] = back > 0 ? [lerp(GOLDc[0], 0.75, back), lerp(GOLDc[1], 0.2, back), lerp(GOLDc[2], 0.18, back)] : on > 0.5 ? GOLDc : [0.1, 0.13, 0.22];
+      box(BAR_X0 + i * BAR_P, 1.31, 0.02, 0.066, 0.11, 0.025, col, on * (0.35 + 0.1 * Math.sin(time * 2 + i)) * (1 - back * 0.5) + back * 0.3);
+    }
+
+    // ---- hero devices (one beta phone, two in the 50 % wave, one in stable that rolls back)
+    for (let i = 0; i < 4; i++) {
+      const [a, b] = PT.dev[i];
+      const p = ph(t, a, b);
+      const isRb = i === 3;
+      const r = isRb ? rb : 0;
+      const x = phX(i);
+      box(x, PH_Y + PH_H / 2, 0.035, PH_W, PH_H, 0.05, [0.05, 0.055, 0.07], 0.0, 0, 1); // body
+      // screen: relaunch blink between the swap and the new version
+      const blink = p > 0.8 && p < 0.92 ? 1 - Math.sin(((p - 0.8) / 0.12) * Math.PI) : 1;
+      const rbBlink = r > 0.25 && r < 0.4 ? 0.3 : 1;
+      const done = sstep(0.9, 0.96, p) * (1 - sstep(0.45, 0.55, r));
+      const sc: [number, number, number] = r > 0.05 && r < 0.45 ? [0.09, 0.025, 0.03] : [0.025, 0.035, 0.07];
+      box(x, PH_Y + PH_H / 2, 0.062, PH_W - 0.05, PH_H - 0.06, 0.006, sc, 0.18 * blink * rbBlink + done * 0.08);
+      // version lines
+      const la = show * blink * rbBlink;
+      label('ver', x, SCR_TOP - 0.065, 0.07, 0.085, PALEc, la * 0.95);
+      if (done > 0) label('patch3', x, SCR_TOP - 0.16, 0.07, 0.08, GOLD_HI, la * done);
+      else if (r > 0.55) label('base', x, SCR_TOP - 0.16, 0.07, 0.08, RED, la * sstep(0.55, 0.7, r));
+      else label('android', x, SCR_TOP - 0.16, 0.07, 0.055, DIM, la * 0.7);
+      // app blocks; changed slots get the patch blocks
+      const swap = ph(p, 0.52, 0.82);
+      for (let k = 0; k < COLS * ROWS; k++) {
+        const [sx, sy] = slotDev(i, k);
+        const j = DIFF.indexOf(k);
+        const baseC = byteCol(100 + i * 40 + k, 0);
+        if (j < 0) { box(sx, sy, 0.07, DB, DB, 0.012, baseC, 0.06 * blink * rbBlink); continue; }
+        const kj = sstep(j * 0.1, 0.5 + j * 0.1, swap);   // this block's swap progress
+        const rj = isRb ? sstep(0.4 + j * 0.05, 0.75 + j * 0.05, r) : 0; // rollback: gold leaves, base returns
+        // old block: pushed out toward the viewer and shrinks away (and the reverse on rollback)
+        const oldK = kj * (1 - rj);
+        if (oldK < 0.999) {
+          const e = oldK;
+          box(sx + e * 0.05, sy + e * 0.08, 0.07 + e * 0.3, DB * (1 - e), DB * (1 - e), 0.012, baseC, 0.06 * blink, e * 2);
+        }
+        if (kj > 0.001 && rj < 0.999) {
+          // new block: arrives from the hovering packet and settles into the slot
+          const hx = x + ((j % 3) - 1) * 0.05, hy = PH_Y + PH_H * 0.48 + (Math.floor(j / 3) === 0 ? 0.025 : -0.025);
+          const e = outCubic(kj);
+          const s = DB * (1 - rj);
+          box(lerp(hx, sx, e) + rj * 0.04, lerp(hy, sy, e) - rj * 0.12, lerp(0.32, 0.075, e) + rj * 0.25, s, s, 0.014, GOLDc,
+            (0.25 + 0.45 * (1 - e) + 0.08 * Math.sin(time * 2 + k)) * blink, (1 - e) * 0.5 - rj * 1.5);
+        }
+      }
+      // packet in flight → hover + verify
+      if (p > 0 && p < 0.6) {
+        const fk = sstep(0, 0.36, p);
+        tmpA.set(PK.x, PK.y + bob, 0.15);
+        tmpB.set(x, PH_Y + PH_H * 0.48, 0.32);
+        arc(tmpA, tmpB, fk, 0.25, tmpC);
+        const gather = p < 0.52 ? 1 : 0;
+        if (gather) for (let j = 0; j < DIFF.length; j++) {
+          box(tmpC.x + ((j % 3) - 1) * 0.05, tmpC.y + (Math.floor(j / 3) === 0 ? 0.025 : -0.025), tmpC.z, 0.046, 0.046, 0.03, GOLDc, 0.55, fk < 1 ? Math.sin(fk * Math.PI) * 0.4 : 0);
+        }
+        label('glow', tmpC.x, tmpC.y, tmpC.z - 0.02, 0.42, GOLD_HI, 0.35 * (1 - sstep(0.5, 0.6, p)));
+        const vk = ph(p, 0.36, 0.5);
+        label('seal', tmpC.x + 0.1, tmpC.y - 0.07, tmpC.z + 0.04, 0.13, [1, 1, 1], 1 - sstep(0.52, 0.6, p), 'c', vk * Math.PI * 2);
+        if (vk > 0) label('check', tmpC.x + 0.1, tmpC.y - 0.07, tmpC.z + 0.05, 0.1, [0.55, 1, 0.6], sstep(0.25, 0.6, vk) * (1 - sstep(0.52, 0.6, p)));
+      }
+      // status above the device
+      const verifyA = sstep(0.36, 0.42, p) * (1 - sstep(0.6, 0.66, p));
+      const appliedA = sstep(0.84, 0.92, p) * (1 - sstep(0.02, 0.15, r)) * (1 - 0.35 * sstep(0.04, 0.08, t - b));
+      const yS = PH_Y + PH_H + 0.115;
+      if (verifyA > 0) label('verify', x, yS, 0.03, 0.155, [0.7, 1, 0.72], verifyA * show);
+      if (appliedA > 0) label('applied', x, yS, 0.03, 0.155, GOLD_HI, appliedA * show);
+      if (r > 0) label('rollback', x, yS, 0.03, 0.155, RED, sstep(0.05, 0.2, r) * show);
+      if (done > 0.5 && p >= 1) label('check', x + PH_W / 2 - 0.06, PH_Y + 0.06, 0.08, 0.07, GOLDc, show);
+    }
+    // packet at home keeps glowing once sealed
+    if (seal >= 1) label('glow', PK.x, PK.y + bob, 0.05, 0.36, GOLD_HI, 0.18 + 0.06 * Math.sin(time * 2.2));
+
+    // flush: unused instances collapse to nothing
+    for (let i = nb; i < NB; i++) bB.setXYZW(i, 0, 0, 0, 0);
+    for (let i = nl; i < NL; i++) lT.setXYZW(i, 0, 0, 0, 0), lS.setXYZW(i, 0, 0, 0, 0);
+    for (const a of [bA, bB, bC, lP, lS, lQ, lT]) a.needsUpdate = true;
+  }
+  return { group, update, high };
+}
+
+/** the in-world terminal on the edict, under the screenshot: the decree's text is the release command */
+const TERM_LINES: { txt: string; at: [number, number]; kind: 'cmd' | 'out' }[] = [
+  { txt: '$ ferman patch --release 2.3.0+41 --platform android \\', at: [0.165, 0.2], kind: 'cmd' },
+  { txt: '      --channel beta --rollout 10', at: [0.2, 0.215], kind: 'cmd' },
+  { txt: '  ✓ signed patch 3 · 6 blocks · beta 10%', at: [0.272, 0.273], kind: 'out' },
+  { txt: '$ ferman rollout 3 50', at: [0.39, 0.41], kind: 'cmd' },
+  { txt: '  ✓ patch 3 → 50%', at: [0.42, 0.421], kind: 'out' },
+  { txt: '$ ferman promote 3 --channel stable', at: [0.54, 0.565], kind: 'cmd' },
+  { txt: '  ✓ patch 3 → stable 100%', at: [0.572, 0.573], kind: 'out' },
+];
+function makeTerminal() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2048; canvas.height = 384;
+  const g = canvas.getContext('2d')!;
+  const state = { canvas, dirty: true, key: '', set: (t: number, time: number) => {} };
+  state.set = (t: number, time: number) => {
+    const shown: { txt: string; kind: string }[] = [];
+    for (const l of TERM_LINES) {
+      const k = clamp01((t - l.at[0]) / (l.at[1] - l.at[0]));
+      if (k <= 0) break;
+      shown.push({ txt: l.txt.slice(0, Math.ceil(l.txt.length * k)), kind: l.kind });
+    }
+    const cursor = Math.floor(time * 1.8) % 2 === 0;
+    const key = shown.map((s) => s.txt).join('|') + (cursor ? '_' : '');
+    if (key === state.key) return;
+    state.key = key;
+    state.dirty = true;
+    const W = canvas.width, H = canvas.height;
+    const bg = g.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#111a33'); bg.addColorStop(1, '#070b16');
+    g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    g.strokeStyle = '#c9902e'; g.lineWidth = 8; g.strokeRect(4, 4, W - 8, H - 8);
+    g.strokeStyle = 'rgba(201,144,46,0.45)'; g.lineWidth = 2; g.strokeRect(18, 18, W - 36, H - 36);
+    // title strip
+    g.fillStyle = 'rgba(232,176,74,0.75)'; g.font = '600 30px Menlo, "DejaVu Sans Mono", monospace'; g.textBaseline = 'middle';
+    g.fillText('release.sh  —  ci', 44, 46);
+    [0, 1, 2].forEach((i) => { g.fillStyle = 'rgba(232,176,74,0.5)'; g.beginPath(); g.arc(W - 60 - i * 34, 48, 9, 0, Math.PI * 2); g.fill(); });
+    const rows = shown.slice(-5);
+    const lh = 52;
+    g.font = '600 44px Menlo, "DejaVu Sans Mono", monospace';
+    rows.forEach((r, i) => {
+      const y = 96 + lh * (i + 0.5);
+      if (r.kind === 'out') { g.fillStyle = '#f2c766'; g.fillText(r.txt, 44, y); return; }
+      const m = r.txt.match(/^(\$ )(ferman)(.*)$/);
+      let x = 44;
+      const seg = (s: string, c: string) => { g.fillStyle = c; g.fillText(s, x, y); x += g.measureText(s).width; };
+      if (m) { seg(m[1], '#7f8db0'); seg(m[2], '#f2c766'); seg(m[3], '#dfe6f2'); } else seg(r.txt, '#dfe6f2');
+    });
+    if (cursor) {
+      const last = rows[rows.length - 1];
+      const i = Math.max(0, rows.length - 1);
+      const x = 44 + (last ? g.measureText(last.txt).width + 8 : 0);
+      const y = 96 + lh * (rows.length ? i + 0.5 : 0.5);
+      g.fillStyle = '#e8b04a'; g.fillRect(x, y - 21, 24, 42);
+    }
   };
   return state;
 }

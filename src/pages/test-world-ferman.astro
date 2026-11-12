@@ -37,7 +37,7 @@
       import type { StageFrame } from '../scene/journey/types';
 
       const mods = import.meta.glob('../scene/worlds/ferman*.ts') as Record<string, () => Promise<any>>;
-      const key = Object.keys(mods).find((k) => k.endsWith('ferman.ts')) ?? Object.keys(mods).find((k) => k.endsWith('ferman.wip.ts'))!;
+      const key = Object.keys(mods).find((k) => k.endsWith('ferman.wip.ts')) ?? Object.keys(mods).find((k) => k.endsWith('ferman.ts'))!;
       const { createWorld } = await mods[key]();
 
       const q = new URLSearchParams(location.search);
