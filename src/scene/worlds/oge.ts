@@ -1,16 +1,21 @@
 /**
- * Öge world: "One Desk", a dark control room of coding-agent monitors.
+ * Öge world: "One Desk", a dark control room of coding-agent monitors, with the Öge pipeline told in-world.
  *
  *   arrive (t 0 → .22)  crane down the aisle between sawtooth desk rows while the monitors wake in a wave
- *                       and the wall display boots
- *   hold   (t .22 → .82) seated at the verification console: the featured real screenshot fills the wall display,
- *                       the receipt printer feeds out the run receipt (.24 → .58), the ACCEPTED stamp drops (.60 → .74)
- *   depart (t .82 → 1)  push into the wall display (portalQuad = its corners)
+ *                       and the wall display boots; the pipeline hologram materialises at the end
+ *   hold   (t .22 → .82) the real screenshot on the wall display (upper right, clear of the nav) and, around it,
+ *                       the Run as a pipeline (all stations always visible, t picks the active one):
+ *                       task chip `oge "fix the payment retry bug"` → 1 agent implements (Codex / Antigravity /
+ *                       Claude Code orbs streaming tokens into their terminals) → 2 independent QA (cool orb, beam
+ *                       scans the diff) → 3 held-out tests fly into the check board → Check #1 fails (AC-2) →
+ *                       4 repair loop arc back to Claude Code → Check #2 passes → 5 the Receipt prints (real
+ *                       accepted-repaired format) → ACCEPTED stamp → 6 "you decide" lights up with /diff /apply /receipt
+ *   depart (t .82 → 1)  the hologram fades, push into the wall display (portalQuad = its corners)
  *
- * Draws (~17): room shell, floor, strips, desks, monitors, screens, chairs, wall frame, wall screen, pedestal,
- * printer, stamp, paper, dust. Every instanced set also carries its mirror image (y → -y) as extra instances,
- * seen through the semi-transparent polished floor. One custom lighting function (wall display area light,
- * monitor-row line lights, ceiling strips, console accent) + exp² fog + in-scatter toward the wall display + AgX.
+ * Draws (~17): room shell, floor, strips, desks, monitors, screens, chairs, wall frame, wall screen, dust, and the
+ * pipeline: links/beam ribbons, panels (one canvas atlas, incl. smoked glass), token glyphs, orbs. Instanced room
+ * sets carry their floor-mirror instances. The pipeline floats ~1.3 m in front of the camera (nothing can cut
+ * through it) and is laid out on a 1440 × 900 sheet squeezed into the post-safe area (see SAFE).
  */
 import {
   Scene, Color, Mesh, InstancedMesh, PerspectiveCamera, BufferGeometry, BufferAttribute, InstancedBufferAttribute,
@@ -21,7 +26,7 @@ import {
 import {
   Fn, vec2, vec3, vec4, float, uniform, attribute, texture, instancedBufferAttribute, positionWorld, normalWorld,
   positionGeometry, cameraPosition, uv, mix, smoothstep, clamp, max, min, pow, exp, length, normalize, dot, sin, cos,
-  floor, fract, step, select, abs, agxToneMapping, varying, sign, If, sqrt,
+  floor, fract, step, select, abs, agxToneMapping, varying, sign, If, sqrt, atan,
 } from 'three/tsl';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { Stage, StageFrame, ProjectWorldContext, SlideImage } from '../journey/types';
@@ -40,15 +45,8 @@ const SW = 3.6, SH = 2.143;                 // wall display screen
 const C = new Vector3(0, 2.18, -12);        // wall display centre
 const WALL_Z = -12.45;
 const FOV = 50;
+const EYE_Y = 1.95;                          // hold eye height: near desk monitors sink under the DOM panel
 const ARRIVE = 0.22, DEPART = 0.82;
-// pedestal deck frame (must match tools/blender/worlds/oge/build.py)
-const TOP_F = 0.98, THETA = 0.5, DZ = 0.3;
-const PED_POS = new Vector3(1.75, 0, -10.1);
-const PED_ROT = -0.6;
-const PAPER_W = 0.11;
-const RECEIPT_L = 0.78;                      // full receipt length (m)
-const PRINT_L = 0.7;                         // printed by the end of the feed
-const STAMP_Z = -0.17;                       // stamp centre on the deck (deck-local z)
 const MON_W = 0.6, MON_H = 0.36;
 
 const sat = (x: number) => Math.min(1, Math.max(0, x));
@@ -111,30 +109,29 @@ const FILES = ['internal/receipt/signer.go', 'cmd/oge/run.go', 'internal/qa/revi
   'internal/agent/codex.go', 'web/src/RunList.tsx', 'internal/loop/repair.go', 'internal/hook/webhook.go'];
 
 type Line = [string, string];
+const AG_CMD = ['claude', 'codex', 'agy'];
 function runLines(rng: () => number, n: number): Line[] {
   const L: Line[] = [];
-  const agent = AGENTS[Math.floor(rng() * 3)];
-  const qa = AGENTS[(AGENTS.indexOf(agent) + 1 + Math.floor(rng() * 2)) % 3];
+  const ai = Math.floor(rng() * 3);
   const task = TASKS[Math.floor(rng() * TASKS.length)];
-  const id = Math.floor(rng() * 0xffff).toString(16).padStart(4, '0');
-  L.push(['o', `$ oge run --agent ${agent}`]);
-  L.push(['c', `  "${task}"`]);
-  L.push(['d', `run  r-${id}  wt/${id}  budget 25m`]);
+  const id = Math.floor(rng() * 0xffffff).toString(16).padStart(6, '0');
+  L.push(['o', `$ oge "${task}"`]);
+  L.push(['c', `    --agent ${AG_CMD[ai]}`]);
+  L.push(['d', `Run 2026111${n % 10}T15${String(n % 60).padStart(2, '0')}-${id}`]);
+  L.push(['d', `implement · ${AGENTS[ai]} · private copy`]);
   for (let k = 0; k < 2 + Math.floor(rng() * 3); k++) {
     const f = FILES[Math.floor(rng() * FILES.length)];
     L.push(['c', `edit ${f}`]);
     L.push(['d', `     +${Math.floor(rng() * 90 + 3)} -${Math.floor(rng() * 30)}`]);
   }
-  L.push(['d', `qa   independent → ${qa}`]);
-  L.push(['c', `qa   go test ./...  ${Math.floor(rng() * 300 + 40)} passed`]);
+  L.push(['d', `QA   fresh agent · +${1 + Math.floor(rng() * 2)} held-out`]);
   const fail = rng() < 0.45;
   if (fail) {
-    L.push(['r', `qa   review: ${1 + Math.floor(rng() * 2)} finding(s)`]);
-    L.push(['o', `loop repair 1/3`]);
-    L.push(['c', `edit ${FILES[Math.floor(rng() * FILES.length)]}`]);
-    L.push(['c', `qa   re-check        ok`]);
-  } else L.push(['c', `qa   review          ok`]);
-  L.push(['o', `✔ ACCEPTED  receipt #${String(n).padStart(4, '0')}`]);
+    L.push(['r', `Check #1 failed: 1 held-out test`]);
+    L.push(['o', `→ sent back · repair 1 of 3`]);
+    L.push(['c', `Check #2 passed`]);
+  } else L.push(['c', `Check #1 passed · ${Math.floor(rng() * 300 + 40)} tests`]);
+  L.push(['o', `✓ Accepted · Receipt written`]);
   L.push(['d', ` `]);
   return L;
 }
@@ -174,55 +171,7 @@ function containDraw(g: CanvasRenderingContext2D, img: CanvasImageSource & { wid
   g.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
 }
 
-// ------------------------------------------------------------------ receipt + ink
-function makeReceipt(stampV: number): HTMLCanvasElement {
-  const W = 352, H = Math.round((W * RECEIPT_L) / PAPER_W);
-  const cv = document.createElement('canvas');
-  cv.width = W; cv.height = H;
-  const g = cv.getContext('2d')!;
-  g.fillStyle = CREAM; g.fillRect(0, 0, W, H);
-  g.fillStyle = '#2a2724'; g.textBaseline = 'top';
-  const mono = (sz: number, b = false) => `${b ? 'bold ' : ''}${sz}px Menlo, ui-monospace, monospace`;
-  // receipt coordinate v (0 = first printed) maps to canvas y = (1 - v)·H (canvas top is printed last, nearest the printer)
-  const gapTop = (1 - stampV) * H - 120, gapBot = (1 - stampV) * H + 120;
-  let y = (1 - PRINT_L / RECEIPT_L) * H + 40;
-  const line = (s: string, sz = 20, b = false, dy = 30) => {
-    if (y + dy > gapTop && y < gapBot) y = gapBot;
-    g.font = mono(sz, b);
-    g.fillText(s, 22, y);
-    y += dy;
-  };
-  const rule = () => { line('- - - - - - - - - - - - -', 18, false, 28); };
-  line('ÖGE', 44, true, 54);
-  line('ONE DESK · RUN RECEIPT', 18, true, 34);
-  rule();
-  line('#0219   2026-11-12 15:42');
-  line('task  fix flaky');
-  line('      TestReceiptSigner');
-  line('agent claude-code');
-  line('qa    codex (independent)');
-  rule();
-  line('tests  go test ./...');
-  line('       212 passed');
-  line('vet    ok');
-  line('review 1 finding');
-  line('repair loop 1/3  fixed');
-  line('recheck          ok');
-  rule();
-  line('diff  +59 -8   2 files');
-  line('time  4m12s   cost $0.41');
-  line('sha   7f3a91c');
-  rule();
-  line('human review: not needed');
-  line('signed ed25519 · 9c1e…');
-  rule();
-  line('thank you for shipping', 18, false, 30);
-  // perforation / tear marks
-  g.fillStyle = '#d6d0c2';
-  for (let x = 0; x < W; x += 16) g.fillRect(x, 4, 8, 3);
-  return cv;
-}
-
+// ------------------------------------------------------------------ stamp ink
 function makeInk(): HTMLCanvasElement {
   const cv = document.createElement('canvas');
   cv.width = 512; cv.height = 320;
@@ -256,11 +205,9 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
   const uScr = uniform(new Color(0.5, 0.48, 0.45));   // wall display light colour (slide average)
   const uScrI = uniform(0);                            // wall display power 0..1
   const uFlash = uniform(0);                           // stamp impact flash
-  const uInk = uniform(0);
   const uMix = uniform(0);
   const uAspA = uniform(1.68), uAspB = uniform(1.68);
   const uPedLight = uniform(new Vector3());
-  const uInkV = uniform(0.5);
   const uDepart = uniform(0);
 
   // ---------------------------------------------------------------- lighting
@@ -379,9 +326,6 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
   let slideAvg: Color[] = [];
   // wall display texture nodes: uv/level are attached inside the material Fn; only .value changes afterwards
   const texA: N = texture(blank), texB: N = texture(blank);
-  const inkTex = new CanvasTexture(makeInk());
-  inkTex.colorSpace = SRGBColorSpace;
-  let receiptTex: CanvasTexture | null = null;
 
   // ---------------------------------------------------------------- room shell (walls + ceiling; mirrored below the floor)
   {
@@ -643,140 +587,739 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     wallMesh = mesh;
   }
 
-  // ---------------------------------------------------------------- pedestal group: printer, paper, stamp
-  const ped = new Group();
-  ped.position.copy(PED_POS);
-  ped.rotation.y = PED_ROT;
-  scene.add(ped);
-  const deck = new Group();
-  deck.position.set(0, TOP_F, DZ);
-  deck.rotation.x = THETA;
-  ped.add(deck);
-  ped.updateMatrixWorld(true);
-  const stampHolder = new Group();
-  stampHolder.position.set(0, 0.32, STAMP_Z);
-  deck.add(stampHolder);
-
-  // paper path (pedestal-local), sampled by arc length
-  const deckM = new Matrix4().compose(new Vector3(0, TOP_F, DZ), new Quaternion().setFromEuler(new Euler(THETA, 0, 0)), s1);
-  const pathPts: Vector3[] = [];
-  const pathNrm: Vector3[] = [];
+  // ================================================================ the Öge pipeline (hold-phase story)
+  // task → agent implements → independent QA → held-out tests + checks → repair loop → receipt → ACCEPTED → you
+  // Every element is placed relative to a reference hold camera (NDC anchor + depth), so the composition stays
+  // screen-stable around the wall display; pointer parallax still separates the layers in depth.
+  // 4 draws: links/beam (additive ribbons), panels (one atlas), tokens (additive glyphs), orbs (additive).
+  const AT = 2048;
+  const atlasCv = document.createElement('canvas');
+  atlasCv.width = AT; atlasCv.height = AT;
+  const ag2 = atlasCv.getContext('2d')!;
+  ag2.clearRect(0, 0, AT, AT);
+  type Rect = { x: number; y: number; w: number; h: number };
+  const rects: Record<string, Rect> = {};
+  // shelf packer for the upper area (y < 1180); terminals + receipt get fixed slots below
+  let shX = 0, shY = 0, shH = 0, xMin = 0;
+  const PAD = 12;
+  const alloc = (id: string, w: number, h: number): Rect => {
+    if (shX + w + PAD > AT) { shX = xMin; shY += shH + PAD; shH = 0; }
+    const r = { x: shX + PAD / 2, y: shY + PAD / 2, w, h };
+    shX += w + PAD; shH = Math.max(shH, h);
+    if (shY + h > 1130) console.error('oge atlas overflow', id);
+    rects[id] = r;
+    return r;
+  };
+  const SANS = (sz: number, wt = 700) => `${wt} ${sz}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const MONO = (sz: number, b = false) => `${b ? 'bold ' : ''}${sz}px Menlo, ui-monospace, monospace`;
+  const OR = '#ff5a1f', CR = '#f4f1ea', GR = '#8d877c', GREEN = '#52d68a', RED = '#ff4d3a', AMB = '#ffb547';
+  /** label: optional orange number, then cream text, on transparent */
+  function label(id: string, num: string, text: string, sz = 44, col = CR, font = SANS) {
+    ag2.font = font(sz);
+    const wn = num ? ag2.measureText(num + '  ').width : 0;
+    const w = Math.ceil(wn + ag2.measureText(text).width + 8);
+    const r = alloc(id, w, Math.round(sz * 1.3));
+    ag2.textBaseline = 'middle';
+    if (num) { ag2.fillStyle = OR; ag2.fillText(num, r.x + 2, r.y + r.h / 2); }
+    ag2.fillStyle = col; ag2.fillText(text, r.x + 2 + wn, r.y + r.h / 2);
+  }
+  const rr = (x: number, y: number, w: number, h: number, rad: number) => {
+    ag2.beginPath(); ag2.roundRect(x, y, w, h, rad);
+  };
+  function panelBg(r: Rect, border = OR, fill = '#0e0c0b', rad = 14, bw = 3) {
+    rr(r.x + bw, r.y + bw, r.w - bw * 2, r.h - bw * 2, rad); ag2.fillStyle = fill; ag2.fill();
+    ag2.lineWidth = bw; ag2.strokeStyle = border; ag2.stroke();
+  }
+  xMin = 620; shX = xMin; // x 0..600 is the check board column (5 versions)
+  // ---- labels
+  label('n1', '1', 'agent implements');
+  label('s1', '', 'on a private copy of your repo', 30, GR);
+  label('nm0', '', 'Codex', 34);
+  label('nm1', '', 'Antigravity', 34);
+  label('nm2', '', 'Claude Code', 34);
+  label('n2', '2', 'independent QA');
+  label('s2', '', 'sees task + diff, not the reasoning', 30, GR);
+  label('n3', '3', 'held-out tests');
+  label('n4', '4', 'repair loop · 1 of 3');
+  label('n5', '5', 'receipt');
+  label('n6', '6', 'you decide');
+  label('s6a', '', 'you · not interrupted', 30, GR);
+  label('s6b', '', 'only at the breakpoint', 30, OR);
+  label('tag', '', 'AI multiplied execution; your attention is the bottleneck now.', 34, GR);
+  // ---- task chip
   {
-    const slot = new Vector3(0, 0.118, -0.5 + 0.085);
-    const land = new Vector3(0, 0.0015, -0.27);
-    // out of the slot: quadratic bezier slot → (forward, slightly up) → land
-    const ctrl = new Vector3(0, 0.135, -0.33);
-    for (let i = 0; i <= 24; i++) {
-      const k = i / 24;
-      const a = slot.clone().multiplyScalar((1 - k) * (1 - k)).add(ctrl.clone().multiplyScalar(2 * k * (1 - k))).add(land.clone().multiplyScalar(k * k));
-      pathPts.push(a.applyMatrix4(deckM));
-    }
-    for (let i = 1; i <= 20; i++) pathPts.push(new Vector3(0, 0.0015, -0.27 + (0.27 * i) / 20).applyMatrix4(deckM));
-    // over the front edge: arc from the deck direction to straight down
-    const edge = new Vector3(0, 0.0015, 0).applyMatrix4(deckM);
-    const R = 0.018;
-    const dirDeck = new Vector3(0, -Math.sin(THETA), Math.cos(THETA));
-    const centre = edge.clone().add(new Vector3(0, -Math.cos(THETA), -Math.sin(THETA)).multiplyScalar(R));
-    const a0 = Math.atan2(edge.y - centre.y, edge.z - centre.z);
-    for (let i = 1; i <= 10; i++) {
-      const a = a0 - ((a0 - 0) * i) / 10;
-      pathPts.push(new Vector3(0, centre.y + Math.sin(a) * R, centre.z + Math.cos(a) * R));
-    }
-    void dirDeck;
-    const hang = pathPts[pathPts.length - 1].clone();
-    for (let i = 1; i <= 40; i++) {
-      const k = i / 40;
-      pathPts.push(new Vector3(0, hang.y - k * 0.75, hang.z + 0.004 + Math.pow(k, 2.2) * 0.05));
+    const r = alloc('chip', 1000, 76);
+    panelBg(r, OR, '#120e0c', 16, 3);
+    ag2.font = MONO(34, true); ag2.textBaseline = 'middle';
+    let x = r.x + 26; const y = r.y + r.h / 2 + 1;
+    for (const [c, s] of [[OR, '$ '], [CR, 'oge '], ['#ffb08a', '"fix the payment retry bug"']]) {
+      ag2.fillStyle = c; ag2.fillText(s, x, y); x += ag2.measureText(s).width;
     }
   }
-  const pathLen: number[] = [0];
-  for (let i = 1; i < pathPts.length; i++) pathLen.push(pathLen[i - 1] + pathPts[i].distanceTo(pathPts[i - 1]));
-  const pathAt = (d: number, out: Vector3) => {
-    const L = pathLen[pathLen.length - 1];
-    if (d >= L) return out.copy(pathPts[pathPts.length - 1]);
-    let i = 1;
-    while (pathLen[i] < d) i++;
-    const k = (d - pathLen[i - 1]) / Math.max(1e-6, pathLen[i] - pathLen[i - 1]);
-    return out.copy(pathPts[i - 1]).lerp(pathPts[i], k);
+  // ---- diff card (the Candidate the implementer hands over)
+  {
+    const r = alloc('diff', 600, 300);
+    panelBg(r, '#5a4a40', '#0d0c0b', 14, 3);
+    ag2.textBaseline = 'top';
+    ag2.font = MONO(24, true); ag2.fillStyle = CR; ag2.fillText('internal/payment/retry.go', r.x + 22, r.y + 18);
+    ag2.font = MONO(22); ag2.fillStyle = GR; ag2.fillText('+12 −3', r.x + 480, r.y + 20);
+    const L: [string, string][] = [
+      [GR, '@@ func (c *Client) Charge('],
+      ['#ff7a66', '-  for i := 0; i < 5; i++ {'],
+      ['#7be0a2', '+  for i := 0; i < maxRetries; i++ {'],
+      ['#7be0a2', '+    if !isTransient(err) {'],
+      ['#7be0a2', '+      break'],
+      ['#7be0a2', '+    }'],
+      ['#7be0a2', '+    time.Sleep(backoff(i))'],
+    ];
+    L.forEach(([c, s], i) => { ag2.fillStyle = c; ag2.fillText(s, r.x + 22, r.y + 64 + i * 32); });
+  }
+  // ---- check board: 5 versions stacked (idle, run #1, failed #1, run #2, passed #2)
+  {
+    const BW = 600, BH = 156;
+    const base = { x: 6, y: 6, w: BW, h: BH };
+    rects.board = { x: base.x, y: base.y, w: BW, h: BH };
+    const versions: { title: string; tc: string; rows: [string, string, string][] }[] = [
+      { title: 'CHECKS · waiting for QA', tc: GR, rows: [['#3a3632', 'go test ./...', '–'], ['#3a3632', 'held-out (2, hidden)', '–'], ['#3a3632', 'go vet ./...', '–']] },
+      { title: 'CHECK #1 · running', tc: AMB, rows: [[AMB, 'go test ./...', 'running'], [AMB, 'held-out (2, hidden)', 'running'], [AMB, 'go vet ./...', 'running']] },
+      { title: 'CHECK #1 · failed', tc: RED, rows: [[GREEN, 'go test ./...', '48 passed'], [RED, 'held-out (2, hidden)', '1 failing · AC-2'], [GREEN, 'go vet ./...', 'ok']] },
+      { title: 'CHECK #2 · running', tc: AMB, rows: [[GREEN, 'go test ./...', '48 passed'], [AMB, 'held-out (2, hidden)', 'running'], [AMB, 'go vet ./...', 'running']] },
+      { title: 'CHECK #2 · passed', tc: GREEN, rows: [[GREEN, 'go test ./...', '49 passed'], [GREEN, 'held-out (2, hidden)', '2 of 2 passing'], [GREEN, 'go vet ./...', 'ok']] },
+    ];
+    versions.forEach((v, k) => {
+      const r = { x: base.x, y: base.y + k * (BH + 4), w: BW, h: BH };
+      panelBg(r, v.tc === GR ? '#4a423c' : v.tc, '#0d0c0b', 14, 3);
+      ag2.textBaseline = 'middle';
+      ag2.font = MONO(24, true); ag2.fillStyle = v.tc; ag2.fillText(v.title, r.x + 22, r.y + 28);
+      v.rows.forEach(([c, name, st], i) => {
+        const y = r.y + 66 + i * 31;
+        ag2.beginPath(); ag2.arc(r.x + 32, y, 9, 0, Math.PI * 2); ag2.fillStyle = c; ag2.fill();
+        ag2.font = MONO(23); ag2.fillStyle = CR; ag2.fillText(name, r.x + 54, y);
+        ag2.fillStyle = c === '#3a3632' ? GR : c; ag2.textAlign = 'right'; ag2.fillText(st, r.x + BW - 22, y); ag2.textAlign = 'left';
+      });
+    });
+  }
+  // ---- held-out test chips (QA-written, hidden from the implementer)
+  const lock = (x: number, y: number, c: string) => {
+    ag2.strokeStyle = c; ag2.lineWidth = 3.5; ag2.beginPath(); ag2.arc(x + 9, y - 3, 6.5, Math.PI, 0); ag2.stroke();
+    ag2.fillStyle = c; ag2.fillRect(x, y - 2, 18, 14);
   };
-  // arc length from the slot to the stamp centre on the deck
-  const stampWorldLocal = new Vector3(0, 0.0015, STAMP_Z).applyMatrix4(deckM);
-  let dStamp = 0;
-  { let best = 1e9; for (let i = 0; i < pathPts.length; i++) { const d = pathPts[i].distanceTo(stampWorldLocal); if (d < best) { best = d; dStamp = pathLen[i]; } } }
-  const inkV = (PRINT_L - dStamp) / RECEIPT_L; // receipt coordinate (0 = top/first printed) under the stamp
-  uInkV.value = inkV;
-  receiptTex = new CanvasTexture(makeReceipt(inkV));
-  receiptTex.colorSpace = SRGBColorSpace;
-  receiptTex.anisotropy = 8;
+  for (const [id, t] of [['held0', 'AC-1 retries at most 3×'], ['held1', 'AC-2 never retry a decline']]) {
+    const r = alloc(id, 420, 56);
+    panelBg(r, '#bfe3ff', '#0c1014', 28, 3);
+    lock(r.x + 22, r.y + 26, '#bfe3ff');
+    ag2.font = MONO(24, true); ag2.fillStyle = '#dff1ff'; ag2.textBaseline = 'middle'; ag2.fillText(t, r.x + 54, r.y + 29);
+  }
+  // ---- printer bar
+  {
+    const r = alloc('bar', 480, 50);
+    rr(r.x + 2, r.y + 2, r.w - 4, r.h - 4, 10); ag2.fillStyle = '#1a1614'; ag2.fill();
+    ag2.strokeStyle = '#3a322c'; ag2.lineWidth = 3; ag2.stroke();
+    ag2.fillStyle = '#050403'; ag2.fillRect(r.x + 30, r.y + 8, r.w - 60, 9);
+    ag2.fillStyle = OR; ag2.fillRect(r.x + 30, r.y + 15, r.w - 60, 3);
+    ag2.font = MONO(18, true); ag2.fillStyle = GR; ag2.textBaseline = 'middle'; ag2.fillText('ÖGE', r.x + 30, r.y + 33);
+    ag2.beginPath(); ag2.arc(r.x + r.w - 40, r.y + 33, 6, 0, Math.PI * 2); ag2.fillStyle = GREEN; ag2.fill();
+  }
+  // ---- command chips
+  for (const [id, t] of [['cmd0', '/diff'], ['cmd1', '/apply'], ['cmd2', '/receipt']]) {
+    const r = alloc(id, 240, 54);
+    panelBg(r, OR, '#160f0b', 12, 3);
+    ag2.font = MONO(28, true); ag2.fillStyle = CR; ag2.textBaseline = 'middle'; ag2.fillText(t, r.x + 22, r.y + 28);
+  }
+  // ---- stamp ink (alpha)
+  {
+    const r = alloc('ink', 512, 320);
+    ag2.drawImage(makeInk(), r.x, r.y);
+  }
+  // ---- token glyphs (16 cells, white on transparent)
+  const TOK = ['retry', 'err', 'nil', 'if', 'func', 'ctx', 'return', '++', '{', '}', ':=', '!=', 'test', 'i<3', 'ok', 'Is('];
+  {
+    // 8 × 2 cells of 74 × 48 under the check-board column
+    const r = { x: 6, y: 5 * 160 + 24, w: 8 * 74, h: 96 };
+    rects.tok = r;
+    ag2.fillStyle = '#fff'; ag2.textAlign = 'center'; ag2.textBaseline = 'middle';
+    ag2.font = MONO(22, true);
+    TOK.forEach((s, i) => ag2.fillText(s, r.x + (i % 8) * 74 + 37, r.y + Math.floor(i / 8) * 48 + 25));
+    ag2.textAlign = 'left';
+  }
+  // ---- agent terminals (30 lines: 20 + the first 10 repeated so the 10-line window scrolls without a seam)
+  const TERM_LINES: Line[][] = [
+    [['o', '› chat 2 · fix flaky TestUpload'], ['d', 'read internal/upload/upload_test.go'], ['c', 'func TestUpload(t *testing.T) {'], ['c', '  srv := httptest.NewServer(h)'], ['d', '› think: race on srv.Close'], ['c', '+ t.Cleanup(srv.Close)'], ['c', '- defer srv.Close()'], ['d', 'go test ./internal/upload -race'], ['c', 'ok  internal/upload 1.92s'], ['o', '› waiting for QA'],
+      ['d', 'read internal/upload/limit.go'], ['c', 'const maxBody = 32 << 20'], ['d', '› think: 413 not 500'], ['c', '+ http.MaxBytesReader(w, r.Body,'], ['c', '+   maxBody)'], ['d', 'edit internal/upload/limit.go'], ['c', '     +9 -2'], ['d', 'go vet ./...'], ['c', 'ok'], ['o', '› handing off candidate']],
+    [['o', '› chat 3 · add rate limit /v1/up'], ['d', 'read cmd/api/routes.go'], ['c', 'r.Post("/v1/upload", up)'], ['d', '› plan: token bucket per key'], ['c', '+ lim := rate.NewLimiter(5, 10)'], ['c', '+ if !lim.Allow() {'], ['c', '+   http.Error(w, "slow", 429)'], ['c', '+ }'], ['d', 'go test ./cmd/api'], ['c', 'ok  cmd/api 0.88s'],
+      ['d', 'read internal/limit/store.go'], ['c', 'type Store struct {'], ['c', '  mu sync.Mutex'], ['d', '› think: evict idle keys'], ['c', '+ go s.sweep(ctx, time.Minute)'], ['d', 'edit internal/limit/store.go'], ['c', '     +31 -4'], ['d', 'go test ./internal/limit'], ['c', 'ok  internal/limit 0.31s'], ['o', '› handing off candidate']],
+    [['o', '› fix the payment retry bug'], ['d', 'read internal/payment/retry.go'], ['c', 'for i := 0; i < 5; i++ {'], ['d', '› think: AC says at most 3'], ['c', '+ const maxRetries = 3'], ['c', '+ if !isTransient(err) {'], ['c', '+   break'], ['c', '+ }'], ['d', 'go test ./internal/payment'], ['c', 'ok  internal/payment 0.41s'],
+      ['r', '← QA: AC-2 failing (decline)'], ['d', '› think: declined ≠ transient'], ['c', '+ if errors.Is(err,'], ['c', '+     ErrDeclined) {'], ['c', '+   return err'], ['c', '+ }'], ['d', 'go test ./internal/payment'], ['c', 'ok  internal/payment 0.44s'], ['o', '› "Done. All tests pass."'], ['d', '› handing off candidate']],
+  ];
+  const TERM_LH = 26;
+  const termRects: Rect[] = [];
+  {
+    const cols: Record<string, string> = { o: '#ff7a3d', c: '#ece6da', d: '#867f74', r: '#ff5a48' };
+    TERM_LINES.forEach((lines, k) => {
+      const r = { x: k * 520, y: AT - 30 * TERM_LH - 8, w: 512, h: 30 * TERM_LH };
+      termRects.push(r);
+      ag2.fillStyle = '#0b0a09'; ag2.fillRect(r.x, r.y, r.w, r.h);
+      ag2.textBaseline = 'middle';
+      for (let i = 0; i < 30; i++) {
+        const [c, s] = lines[i % 20];
+        ag2.fillStyle = cols[c]; ag2.font = MONO(19, c === 'o');
+        ag2.fillText(s, r.x + 14, r.y + i * TERM_LH + TERM_LH / 2);
+      }
+    });
+  }
+  // ---- the Receipt (from the real accepted-repaired Receipt format), printed upward out of the bar
+  const RC_W = 400, RC_H = 780;
+  {
+    const r = { x: 3 * 520 + 8, y: AT - RC_H - 8, w: RC_W, h: RC_H };
+    rects.rcpt = r;
+    ag2.fillStyle = '#f2eee6'; ag2.fillRect(r.x, r.y, r.w, r.h);
+    ag2.fillStyle = '#26221f'; ag2.textBaseline = 'top';
+    let y = r.y + 30;
+    const ln = (s: string, sz = 21, b = false, dy = 29, c = '#26221f') => { ag2.font = MONO(sz, b); ag2.fillStyle = c; ag2.fillText(s, r.x + 20, y); y += dy; };
+    const rule = () => ln('- - - - - - - - - - - - - - -', 18, false, 26, '#8a847a');
+    // short and large enough to read through the post chain; the blank band is where the stamp lands
+    ln('ÖGE RECEIPT', 44, true, 56);
+    ln('Run 20261112T1542', 24, false, 34, '#5d5750');
+    rule();
+    ln('✓ Accepted', 40, true, 54, '#1d6b3c');
+    ln('fix the payment', 30, false, 38);
+    ln('retry bug', 30, false, 44);
+    ln('Check #1 ✗ AC-2', 30, true, 38, '#b8321f');
+    ln('→ sent back,', 28, false, 36);
+    ln('  repaired', 28, false, 44);
+    ln('Check #2 ✓ 2/2', 30, true, 44, '#1d6b3c');
+    y += 150;
+    ln('your attention 0s', 30, true, 44);
+    ln('Not covered:', 26, true, 34, '#5d5750');
+    ln('checks unsandboxed', 26, false, 36, '#5d5750');
+    rule();
+    // perforation at the top edge
+    ag2.fillStyle = '#d6d0c2';
+    for (let x = 0; x < RC_W; x += 16) ag2.fillRect(r.x + x, r.y + 4, 8, 3);
+  }
+  const atlasTex = new CanvasTexture(atlasCv);
+  atlasTex.colorSpace = SRGBColorSpace;
+  atlasTex.anisotropy = 8;
+  const uvRect = (r: Rect): [number, number, number, number] => [r.x / AT, 1 - (r.y + r.h) / AT, (r.x + r.w) / AT, 1 - r.y / AT];
 
-  const SEG = 90;
-  const paperGeo = new BufferGeometry();
-  const paperPos = new Float32Array((SEG + 1) * 2 * 3);
-  const paperUv = new Float32Array((SEG + 1) * 2 * 2);
-  const paperNrm = new Float32Array((SEG + 1) * 2 * 3);
-  const idx: number[] = [];
-  for (let i = 0; i < SEG; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
-  paperGeo.setIndex(idx);
-  paperGeo.setAttribute('position', new BufferAttribute(paperPos, 3));
-  paperGeo.setAttribute('uv', new BufferAttribute(paperUv, 2));
-  paperGeo.setAttribute('normal', new BufferAttribute(paperNrm, 3));
+  // ---------------------------------------------------------------- layout (px at a 1440 × 900 reference frame)
+  type Item = { id: string; atlas?: string; x: number; y: number; w?: number; h: number; mode: number; d?: number; rot?: number };
+  // modes: 0 alpha/colour text · 1 opaque panel · 2 terminal · 3 receipt · 4 board · 5 typed chip · 6 diff (scanned)
+  const ITEMS: Item[] = [
+    // smoked glass behind the pipeline columns (drawn first): calms the desk monitors behind the labels
+    { id: 'smokeL', atlas: 'tok', x: -220, y: -200, w: 860, h: 1020, mode: 7, d: 1.2 },
+    { id: 'smokeR', atlas: 'tok', x: 1170, y: -200, w: 470, h: 1020, mode: 7, d: 1.2 },
+    { id: 'tag', x: 612, y: 504, h: 16, mode: 0 },
+    { id: 'chip', x: 40, y: 34, w: 500, h: 38, mode: 5 },
+    { id: 'n1', x: 40, y: 92, h: 22, mode: 0 },
+    { id: 's1', x: 40, y: 117, h: 14, mode: 0 },
+    { id: 'term0', x: 35, y: 238, w: 150, h: 84, mode: 2 },
+    { id: 'term1', x: 200, y: 238, w: 150, h: 84, mode: 2 },
+    { id: 'term2', x: 370, y: 238, w: 150, h: 84, mode: 2 },
+    { id: 'nm0', x: 110, y: 218, h: 15, mode: 0 },
+    { id: 'nm1', x: 275, y: 218, h: 15, mode: 0 },
+    { id: 'nm2', x: 445, y: 218, h: 15, mode: 0 },
+    { id: 'n2', x: 330, y: 342, h: 22, mode: 0 },
+    { id: 's2', x: 330, y: 367, h: 14, mode: 0 },
+    { id: 'diff', x: 398, y: 392, w: 168, h: 84, mode: 6 },
+    { id: 'n3', x: 140, y: 495, h: 20, mode: 0 },
+    { id: 'n4', x: 345, y: 495, h: 20, mode: 0 },
+    { id: 'board', x: 140, y: 521, w: 400, h: 112, mode: 4 },
+    { id: 'held0', x: 0, y: 0, w: 168, h: 22, mode: 1 },
+    { id: 'held1', x: 0, y: 0, w: 168, h: 22, mode: 1 },
+    { id: 'rcpt', x: 1288, y: 120, w: 136, h: 360, mode: 3 },
+    { id: 'bar', x: 1276, y: 470, w: 160, h: 17, mode: 1 },
+    { id: 'n5', x: 1150, y: 469, h: 20, mode: 0 },
+    { id: 'ink', x: 1292, y: 341, w: 128, h: 80, mode: 0, rot: 0.14 },
+    { id: 'n6', x: 1020, y: 540, h: 21, mode: 0 },
+    { id: 's6a', x: 1020, y: 565, h: 15, mode: 0 },
+    { id: 's6b', x: 1020, y: 565, h: 15, mode: 0 },
+    { id: 'cmd0', x: 1020, y: 590, h: 27, mode: 1 },
+    { id: 'cmd1', x: 1146, y: 590, h: 27, mode: 1 },
+    { id: 'cmd2', x: 1272, y: 590, h: 27, mode: 1 },
+  ];
+  rects.term0 = termRects[0]; rects.term1 = termRects[1]; rects.term2 = termRects[2];
+  const centred = new Set(['nm0', 'nm1', 'nm2']);
+  // centres of orbs (px) and orb sizes
+  const ORBS = [
+    { x: 110, y: 170, s: 112, col: [1.0, 0.86, 0.62], kind: 0 },   // Codex: cream
+    { x: 275, y: 170, s: 112, col: [1.0, 0.62, 0.25], kind: 0 },   // Antigravity: amber
+    { x: 445, y: 168, s: 126, col: [1.0, 0.36, 0.12], kind: 0 },   // Claude Code: orange (this Run)
+    { x: 356, y: 434, s: 100, col: [0.62, 0.86, 1.0], kind: 1 },   // QA: cool, independent
+    { x: 960, y: 590, s: 108, col: [1.0, 0.42, 0.14], kind: 2 },  // you
+  ];
+  const NP = ITEMS.length;
+  const itemIdx: Record<string, number> = {};
+  ITEMS.forEach((it, i) => {
+    itemIdx[it.id] = i;
+    const r = rects[it.atlas ?? it.id];
+    if (!it.w) it.w = (it.h * r.w) / r.h;
+    if (centred.has(it.id)) it.x -= it.w / 2;
+  });
+  // receipt aspect follows the atlas (keep the paper's lines undistorted)
+  { const it = ITEMS[itemIdx.rcpt]; it.h = (it.w! * RC_H) / RC_W; it.y = 470 - it.h; }
+
+  // reference hold camera → world anchors
+  const refCam = new PerspectiveCamera(FOV, 1.6, 0.05, 60);
+  const _v = new Vector3();
+  let pxScale = 1; // shrink sizes when narrower than 16:10
+  /** world point at reference-frame pixel (px, py) and depth D (along the view axis) */
+  // The layout above is authored on a 1440 × 900 sheet; the post chain (and the live site) magnifies the frame
+  // ~1.2× with a barrel crop, so the sheet is squeezed into the post-safe rectangle of the raw frame
+  // (x 153..1291, y 104..626), which also keeps it clear of the header and the "Selected work" nav.
+  const SAFE_LAND = { x0: 35, y0: 34, X0: 153, Y0: 104, sx: 0.825, sy: 0.86, s: 0.83, half: 720 };
+  const SAFE = { ...SAFE_LAND };
+  /** portrait: the whole sheet shrinks into the band under the display (decorative more than legible on phones) */
+  function setSafe(aspect: number) {
+    if (aspect > 1.1) { Object.assign(SAFE, SAFE_LAND); return; }
+    const W = 900 * aspect, k = (0.94 * W) / 1380;
+    Object.assign(SAFE, { x0: 35, y0: 34, X0: 0.1 * W, Y0: 470, sx: k * 0.86, sy: k * 0.86, s: k * 0.86, half: W / 2 });
+  }
+  function anchor(px: number, py: number, D: number, out: Vector3) {
+    const tanV = Math.tan((FOV * Math.PI) / 360), tanH = tanV * refCam.aspect;
+    const rx = SAFE.X0 + (px - SAFE.x0) * SAFE.sx, ry = SAFE.Y0 + (py - SAFE.y0) * SAFE.sy;
+    const nx = rx / SAFE.half - 1, ny = 1 - ry / 450;
+    out.set(nx * tanH * D, ny * tanV * D, -D).applyQuaternion(refCam.quaternion).add(refCam.position);
+    return out;
+  }
+  const worldPerPx = (D: number) => (2 * Math.tan((FOV * Math.PI) / 360) * D) / 900;
+  // the layer floats just in front of the camera so no room geometry can cut through it
+  const D_PANEL = 1.32, D_ORB = 1.28;
+
+  // ---------------------------------------------------------------- panels (one instanced draw)
+  const pR = new InstancedBufferAttribute(new Float32Array(NP * 4), 4);
+  const pP = new InstancedBufferAttribute(new Float32Array(NP * 4), 4);
+  const pT = new InstancedBufferAttribute(new Float32Array(NP * 4), 4);
+  ITEMS.forEach((it, i) => { pR.array.set(uvRect(rects[it.atlas ?? it.id]), i * 4); pP.array[i * 4] = it.mode; });
+  const panelMesh = (() => {
+    const m = new MeshBasicNodeMaterial();
+    m.transparent = true; m.depthWrite = false; m.depthTest = false; m.toneMapped = false; m.fog = false;
+    const vR: N = varying(instancedBufferAttribute(pR, 'vec4'), 'vPanR');
+    const vP: N = varying(instancedBufferAttribute(pP, 'vec4'), 'vPanP');
+    const vT: N = varying(instancedBufferAttribute(pT, 'vec4'), 'vPanT');
+    const BOARD_STRIDE = (156 + 4) / AT;
+    m.colorNode = Fn(() => {
+      const p = uv();
+      const mode = vP.x, alpha = vP.y, p1 = vP.z, p2 = vP.w;
+      const tint = vT.xyz, appear = vT.w;
+      const isTerm = step(1.5, mode).mul(step(mode, 2.5));
+      const isRc = step(2.5, mode).mul(step(mode, 3.5));
+      const isBoard = step(3.5, mode).mul(step(mode, 4.5));
+      const isChip = step(4.5, mode).mul(step(mode, 5.5));
+      const isDiff = step(5.5, mode).mul(step(mode, 6.5));
+      const isSmoke = step(6.5, mode);
+      // content fraction from the top of the atlas rect
+      const fTop0 = float(1).sub(p.y);
+      const fTerm = p1.mul(20).add(fTop0.mul(10)).div(30);
+      const fRc = p1.sub(p.y);                                   // receipt grows upward: header farthest from the slot
+      const fTop = mix(mix(fTop0, fTerm, isTerm), fRc, isRc);
+      const ux = mix(vR.x, vR.z, p.x);
+      const uy = vR.w.sub(fTop.mul(vR.w.sub(vR.y))).sub(isBoard.mul(p1.mul(BOARD_STRIDE)));
+      const tx: N = texture(atlasTex, vec2(ux, uy));
+      let rgb: N = tx.rgb;
+      let a: N = tx.a;
+      // text (mode 0): tinted coverage
+      // terminal: typing on the bottom line + block cursor; dim when the agent idles
+      const lineIdx = fTop0.mul(10);
+      const onLast = step(9, lineIdx);
+      const hideT = onLast.mul(step(p2, p.x)).mul(isTerm);
+      const cur = onLast.mul(step(p2, p.x)).mul(step(p.x, p2.add(0.035))).mul(step(0.5, fract(uTime.mul(2.2)))).mul(isTerm);
+      rgb = mix(rgb, vec3(0.006, 0.005, 0.0045), hideT);
+      const tEdge = max(max(step(p.x, 0.012), step(0.988, p.x)), max(step(p.y, 0.022), step(0.978, p.y))).mul(isTerm);
+      rgb = mix(rgb, vec3(0.42, 0.13, 0.04), tEdge);
+      rgb = rgb.add(vec3(1, 0.36, 0.12).mul(cur.mul(1.4)));
+      // receipt: only the printed part exists; serrated tear edge on top; soft paper shading
+      const serr = abs(fract(p.x.mul(16)).sub(0.5)).mul(0.012);
+      const printed = step(p.y, p1.sub(serr)).mul(step(0.0005, p1));
+      a = mix(a, printed, isRc);
+      rgb = mix(rgb, rgb.mul(float(0.86).add(p.x.mul(0.14))), isRc);
+      // typed chip: reveal left → right with a cursor
+      const inner = step(0.012, p.x).mul(step(p.x, 0.988)).mul(step(0.12, p.y)).mul(step(p.y, 0.88));
+      const hideC = step(p1, p.x).mul(inner).mul(isChip);
+      const curC = step(p1, p.x).mul(step(p.x, p1.add(0.012))).mul(inner).mul(step(0.4, fract(uTime.mul(2)))).mul(isChip).mul(step(p1, 0.999));
+      rgb = mix(rgb, vec3(0.006, 0.0045, 0.004), hideC).add(vec3(1, 0.35, 0.1).mul(curC.mul(1.5)));
+      // diff: QA scan line (p1 = position from top, p2 = strength); scanned rows turn cool
+      const dy = fTop0.sub(p1);
+      const band = exp(abs(dy).mul(-70)).mul(p2);
+      const scanned = step(dy, 0).mul(p2).mul(0.35);
+      rgb = mix(rgb, rgb.add(vec3(0.03, 0.12, 0.2).mul(scanned)).add(vec3(0.35, 0.75, 1.0).mul(band.mul(0.9))), isDiff);
+      // board brightness (blink while running) and panel tint
+      rgb = mix(rgb, rgb.mul(p2), isBoard);
+      rgb = rgb.mul(tint);
+      // hologram materialise: horizontal slices flicker in while appearing
+      const slice = floor(p.y.mul(18)).add(floor(uTime.mul(18)));
+      const hsh = fract(sin(slice.mul(91.7).add(vR.x.mul(311))).mul(43758.5453));
+      const vis = clamp(appear.mul(1.3).sub(hsh.mul(0.3)).sub(0.15).mul(6), 0, 1);
+      const scan = sin(p.y.mul(160)).mul(0.04).add(0.96);
+      // smoked glass: feathered dark pane
+      const fe = smoothstep(0, 0.16, p.x).mul(smoothstep(0, 0.16, float(1).sub(p.x))).mul(smoothstep(0, 0.14, p.y)).mul(smoothstep(0, 0.14, float(1).sub(p.y)));
+      rgb = mix(rgb.mul(scan), vec3(0.0035, 0.003, 0.0027), isSmoke);
+      a = mix(a, fe, isSmoke);
+      return vec4(rgb, a.mul(alpha).mul(mix(vis, float(1), isSmoke)));
+    })();
+    const mesh = new InstancedMesh(new PlaneGeometry(1, 1), m, NP);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 11;
+    pR.needsUpdate = true;
+    scene.add(mesh);
+    return mesh;
+  })();
+
+  // ---------------------------------------------------------------- orbs (agents, QA, you): additive billboards
+  const NO = ORBS.length;
+  const oA = new InstancedBufferAttribute(new Float32Array(NO * 4), 4); // centre xyz, size
+  const oB = new InstancedBufferAttribute(new Float32Array(NO * 4), 4); // colour, activity
+  const oC = new InstancedBufferAttribute(new Float32Array(NO * 4), 4); // kind, seed, flare, -
+  ORBS.forEach((o, i) => { oB.array.set([...o.col, 0], i * 4); oC.array.set([o.kind, i * 0.37, 0, 0], i * 4); });
+  const uRight = uniform(new Vector3(1, 0, 0)), uUp = uniform(new Vector3(0, 1, 0));
   {
     const m = new MeshBasicNodeMaterial();
-    m.toneMapped = false; m.fog = false; m.side = DoubleSide;
+    m.transparent = true; m.depthWrite = false; m.depthTest = false; m.blending = AdditiveBlending; m.toneMapped = false; m.fog = false;
+    const A: N = instancedBufferAttribute(oA, 'vec4');
+    m.positionNode = A.xyz.add(uRight.mul(positionGeometry.x.mul(A.w))).add(uUp.mul(positionGeometry.y.mul(A.w)));
+    const vB: N = varying(instancedBufferAttribute(oB, 'vec4'), 'vOrbB');
+    const vK: N = varying(instancedBufferAttribute(oC, 'vec4'), 'vOrbK');
     m.colorNode = Fn(() => {
-      const P: N = positionWorld;
-      const p = uv(); // x across, y = receipt coordinate (0 top)
-      const rec = texture(receiptTex, vec2(p.x, p.y)).rgb;
-      // ink: stamp face 0.108 × 0.068 m, slightly rotated
-      const lx = p.x.sub(0.5).mul(PAPER_W), ly = p.y.sub(uInkV).mul(RECEIPT_L);
-      const ca = Math.cos(-0.09), sa = Math.sin(-0.09);
-      const rx = lx.mul(ca).sub(ly.mul(sa)), ry = lx.mul(sa).add(ly.mul(ca));
-      const iuv = vec2(rx.div(0.108).add(0.5), ry.div(0.068).add(0.5));
-      const inside = step(0, iuv.x).mul(step(iuv.x, 1)).mul(step(0, iuv.y)).mul(step(iuv.y, 1));
-      const ink = texture(inkTex, iuv).a.mul(inside).mul(uInk);
-      const alb = mix(rec, vec3(0.85, 0.2, 0.05), ink.mul(0.9));
-      let c: N = shade(P, normalWorld, alb, float(0.25));
-      // paper is bright under the console lamp: small self-illumination keeps it readable
-      c = c.add(alb.mul(0.06));
-      return vec4(finish(c, P), 1);
+      const p = uv().sub(0.5).mul(2);
+      const r = length(p);
+      const ang = atan(p.y, p.x);
+      const col = vB.xyz, act = vB.w, kind = vK.x, seed = vK.y, flare = vK.z;
+      const tt = uTime.add(seed.mul(10));
+      const isQA = step(0.5, kind).mul(step(kind, 1.5));
+      const isYou = step(1.5, kind);
+      // plasma core: swirling bands inside a soft sphere
+      const swirl = sin(ang.mul(3).add(r.mul(11)).sub(tt.mul(2.6))).mul(0.5).add(0.5);
+      const swirl2 = sin(ang.mul(-5).add(r.mul(17)).add(tt.mul(1.7))).mul(0.5).add(0.5);
+      const ball = rsmooth(0.42, 0.3, r);
+      const plasma = ball.mul(swirl.mul(swirl2).mul(0.9).add(0.25)).mul(float(1).sub(isYou));
+      const core = exp(r.mul(r).mul(-60)).mul(1.6).mul(float(1).sub(isYou));
+      const halo = exp(r.mul(-4.2)).mul(0.35);
+      // orbiting rings with travelling gaps (the "thinking" ring speeds up with activity)
+      const sp = act.mul(2.4).add(0.3);
+      const ring1 = exp(abs(r.sub(0.56)).mul(-90)).mul(smoothstep(-0.2, 0.6, sin(ang.add(tt.mul(sp)))));
+      const ring2 = exp(abs(r.sub(0.7)).mul(-120)).mul(smoothstep(0.3, 0.9, sin(ang.mul(3).sub(tt.mul(sp.mul(0.7)))))).mul(0.7);
+      // QA: a horizontal scanning eye-line sweeps through the core
+      const eye = exp(abs(p.y.sub(sin(tt.mul(3)).mul(0.28))).mul(-40)).mul(step(r, 0.5)).mul(isQA).mul(act);
+      // you: an abstract person (head + shoulders) inside an attention ring that pulses when lit
+      const head = rsmooth(0.165, 0.135, length(p.sub(vec2(0, 0.14))));
+      const sh = length(vec2(p.x.mul(0.8), p.y.add(0.38)));
+      const body = rsmooth(0.33, 0.3, sh).mul(step(p.y, -0.09)).mul(step(0, p.y.add(0.4)));
+      const person = max(head, body).mul(isYou);
+      const pulse = exp(abs(r.sub(fract(tt.mul(0.7)).mul(0.5).add(0.5))).mul(-40)).mul(float(1).sub(fract(tt.mul(0.7)))).mul(isYou).mul(act);
+      const youRing = exp(abs(r.sub(0.62)).mul(-70)).mul(isYou);
+      const youCol = mix(vec3(0.22, 0.21, 0.2), col, act);
+      let c: N = col.mul(plasma.mul(act.mul(0.9).add(0.25)).add(core.mul(act.mul(0.8).add(0.2))).add(halo.mul(act.mul(1.2).add(0.15))));
+      c = c.add(col.mul(ring1.add(ring2).mul(act.mul(0.8).add(0.12))));
+      c = c.add(vec3(0.8, 0.95, 1).mul(eye.mul(1.2)));
+      c = c.add(youCol.mul(youRing.mul(act.mul(1.4).add(0.35)).add(halo.mul(isYou).mul(act.mul(1.5))).add(pulse.mul(1.2))));
+      c = c.add(mix(vec3(0.16, 0.155, 0.15), vec3(1, 0.93, 0.85), act).mul(person.mul(0.9)));
+      c = c.add(vec3(1, 0.5, 0.3).mul(halo.mul(flare).mul(2.5)));
+      c = c.mul(rsmooth(1, 0.85, r));
+      return vec4(c, 1);
     })();
-    const mesh = new Mesh(paperGeo, m);
+    const mesh = new InstancedMesh(new PlaneGeometry(1, 1), m, NO);
     mesh.frustumCulled = false;
-    ped.add(mesh);
+    mesh.renderOrder = 13;
+    scene.add(mesh);
   }
-  const tmpA = new Vector3(), tmpB = new Vector3(), tmpN = new Vector3();
-  function updatePaper(printed: number, time: number) {
-    // vertex i sits at arc distance d_i = printed · i/SEG from the slot; its receipt coordinate is (printed - d)/RECEIPT_L
-    const half = PAPER_W / 2;
-    for (let i = 0; i <= SEG; i++) {
-      const d = (printed * i) / SEG;
-      pathAt(d, tmpA);
-      pathAt(Math.min(d + 0.01, pathLen[pathLen.length - 1] + 1), tmpB);
-      // hanging part sways a little
-      const hangK = Math.max(0, d - pathLen[54]);
-      tmpA.z += Math.sin(time * 1.3 + d * 6) * 0.012 * hangK;
-      tmpA.x += Math.sin(time * 0.9 + d * 4) * 0.008 * hangK;
-      const t = tmpB.sub(tmpA).normalize();
-      tmpN.set(0, t.z, -t.y).normalize();
-      const v = (printed - d) / RECEIPT_L;
+
+  // ---------------------------------------------------------------- tokens: glyphs streaming agent → terminal, diff → QA
+  const NTA = high ? 34 : 24, NTQ = high ? 30 : 20;
+  const NT = NTA * 3 + NTQ;
+  const tS = new InstancedBufferAttribute(new Float32Array(NT * 4), 4); // start xyz, seed
+  const tE = new InstancedBufferAttribute(new Float32Array(NT * 4), 4); // end xyz, stream index 0..3
+  const tokJ: number[] = [];
+  { const r = mulberry(31); for (let i = 0; i < NT; i++) tokJ.push(r(), r(), r()); }
+  const uAct = [uniform(0), uniform(0), uniform(0), uniform(0)];
+  const uTokSize = uniform(0.02);
+  {
+    const m = new MeshBasicNodeMaterial();
+    m.transparent = true; m.depthWrite = false; m.depthTest = false; m.blending = AdditiveBlending; m.toneMapped = false; m.fog = false;
+    const S: N = instancedBufferAttribute(tS, 'vec4');
+    const E: N = instancedBufferAttribute(tE, 'vec4');
+    const seed = S.w;
+    const prog = fract(uTime.mul(seed.mul(0.35).add(0.45)).add(seed.mul(17.3)));
+    const mid = S.xyz.add(E.xyz).mul(0.5).add(uUp.mul(seed.sub(0.5).mul(0.12))).add(uRight.mul(fract(seed.mul(7.1)).sub(0.5).mul(0.16)));
+    const k = prog;
+    const pos = S.xyz.mul(float(1).sub(k).mul(float(1).sub(k))).add(mid.mul(k.mul(float(1).sub(k)).mul(2))).add(E.xyz.mul(k.mul(k)));
+    const sz = uTokSize.mul(seed.mul(0.5).add(0.75));
+    m.positionNode = pos.add(uRight.mul(positionGeometry.x.mul(sz.mul(2)))).add(uUp.mul(positionGeometry.y.mul(sz)));
+    const vPr: N = varying(prog, 'vTokP');
+    const vSd: N = varying(seed, 'vTokS');
+    const vSt: N = varying(E.w, 'vTokI');
+    const r = rects.tok;
+    const u0 = r.x / AT, vTop = 1 - r.y / AT, du = 74 / AT, dv = 48 / AT;
+    m.colorNode = Fn(() => {
+      const p = uv();
+      const cell = floor(vSd.mul(16));
+      const col8 = cell.mod(8), row8 = floor(cell.div(8));
+      const g = texture(atlasTex, vec2(float(u0).add(col8.add(p.x).mul(du)), float(vTop).sub(row8.add(float(1).sub(p.y)).mul(dv)))).a;
+      const st = vSt;
+      const act = select(st.lessThan(0.5), uAct[0], select(st.lessThan(1.5), uAct[1], select(st.lessThan(2.5), uAct[2], uAct[3])));
+      const col = select(st.lessThan(2.5), mix(vec3(1, 0.62, 0.32), vec3(1, 0.85, 0.65), fract(vSd.mul(5.3))), vec3(0.6, 0.85, 1));
+      const fade = smoothstep(0, 0.15, vPr).mul(rsmooth(1, 0.8, vPr));
+      return vec4(col.mul(g).mul(fade).mul(act).mul(1.3), 1);
+    })();
+    const mesh = new InstancedMesh(new PlaneGeometry(1, 1), m, NT);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 12;
+    scene.add(mesh);
+  }
+
+  // ---------------------------------------------------------------- links, repair arc and the QA beam: camera-facing ribbons
+  const SEGS = 28;
+  // curve ids: 0 task→CC, 1 CC→diff, 2 QA→board, 3 board→printer, 4 printer→you, 5 repair arc board→CC, 6 QA beam
+  const NCURVE = 7;
+  const nV = NCURVE * (SEGS + 1) * 2;
+  const rPos = new Float32Array(nV * 3);
+  const rAux = new Float32Array(nV * 4); // s, across, -, kind
+  const rPar = new Float32Array(nV * 4); // prog, intensity, dir, -
+  const ribGeo = new BufferGeometry();
+  {
+    const idx: number[] = [];
+    for (let c = 0; c < NCURVE; c++) for (let i = 0; i < SEGS; i++) {
+      const a = (c * (SEGS + 1) + i) * 2;
+      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+    ribGeo.setIndex(idx);
+    ribGeo.setAttribute('position', new BufferAttribute(rPos, 3));
+    ribGeo.setAttribute('aux', new BufferAttribute(rAux, 4));
+    ribGeo.setAttribute('par', new BufferAttribute(rPar, 4));
+    const m = new MeshBasicNodeMaterial();
+    m.transparent = true; m.depthWrite = false; m.depthTest = false; m.blending = AdditiveBlending; m.toneMapped = false; m.fog = false; m.side = DoubleSide;
+    const vAux: N = varying(attribute('aux', 'vec4'), 'vRibA');
+    const vPar: N = varying(attribute('par', 'vec4'), 'vRibP');
+    m.colorNode = Fn(() => {
+      const s = vAux.x, across = vAux.y, kind = vAux.w;
+      const prog = vPar.x, inten = vPar.y, dir = vPar.z;
+      const prof = exp(abs(across.sub(0.5)).mul(-9));
+      const isBeam = step(2.5, kind);
+      const isRep = step(0.5, kind).mul(step(kind, 1.5));
+      // forward (dir>0): lit behind the head (s < prog); backward: lit ahead of it (s > prog)
+      const lit = select(dir.greaterThan(0), step(s, prog), step(prog, s));
+      const head = exp(abs(s.sub(prog)).mul(-28)).mul(step(0.001, prog)).mul(step(prog, 0.999));
+      const dash = step(0.55, fract(s.mul(26).sub(uTime.mul(0.8)))).mul(0.13);
+      const base: N = mix(vec3(1, 0.36, 0.12), vec3(1, 0.18, 0.1), isRep);
+      let c: N = base.mul(dash.add(lit.mul(0.55)).add(head.mul(2.4))).mul(prof).mul(inten);
+      // QA beam: fan from the orb (s=0) to the scan line (s=1)
+      const beam = vec3(0.45, 0.8, 1).mul(pow(s, 1.6).mul(0.32).add(exp(s.sub(1).abs().mul(-30)).mul(0.9))).mul(inten);
+      c = mix(c, beam, isBeam);
+      return vec4(c, 1);
+    })();
+    const mesh = new Mesh(ribGeo, m);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 10;
+    scene.add(mesh);
+  }
+  // curve control points in reference px (+ depth); beam is rebuilt from the scan line each frame
+  const CURVES: [number, number][][] = [
+    [[445, 74], [445, 110], [445, 136]],
+    [[452, 324], [462, 360], [478, 392]],
+    [[352, 470], [330, 500], [300, 545]],
+    [[540, 590], [562, 516], [600, 482], [900, 478], [1200, 477], [1276, 476]],
+    [[1300, 490], [1190, 518], [1070, 556], [1008, 582]],
+    [[540, 552], [578, 470], [586, 330], [540, 228], [482, 192]],
+  ];
+  const _rt = new Vector3(), _a = new Vector3(), _b = new Vector3(), _t = new Vector3(), _sd = new Vector3(), _fw = new Vector3();
+  const cr = (p0: number, p1: number, p2: number, p3: number, k: number) =>
+    0.5 * (2 * p1 + (-p0 + p2) * k + (2 * p0 - 5 * p1 + 4 * p2 - p3) * k * k + (-p0 + 3 * p1 - 3 * p2 + p3) * k * k * k);
+  /** sample a Catmull-Rom curve through px points at u∈[0,1] */
+  function curvePx(pts: [number, number][], u: number): [number, number] {
+    const n = pts.length - 1;
+    const f = Math.min(n - 1e-6, u * n), i = Math.floor(f), k = f - i;
+    const P = (j: number) => pts[Math.max(0, Math.min(n, j))];
+    return [cr(P(i - 1)[0], P(i)[0], P(i + 1)[0], P(i + 2)[0], k), cr(P(i - 1)[1], P(i)[1], P(i + 1)[1], P(i + 2)[1], k)];
+  }
+  function writeCurve(c: number, ptAt: (u: number, out: Vector3) => Vector3, widthAt: (u: number) => number, kind: number, prog: number, inten: number, dir: number) {
+    _fw.set(0, 0, -1).applyQuaternion(refCam.quaternion);
+    _rt.set(1, 0, 0).applyQuaternion(refCam.quaternion);
+    for (let i = 0; i <= SEGS; i++) {
+      const u = i / SEGS;
+      ptAt(u, _a);
+      ptAt(Math.min(1, u + 1 / SEGS), _b);
+      if (i === SEGS) { ptAt(u - 1 / SEGS, _b); _t.subVectors(_a, _b); } else _t.subVectors(_b, _a);
+      if (kind === 3) _sd.copy(_rt); else _sd.crossVectors(_t, _fw).normalize();
+      _sd.multiplyScalar(widthAt(u) / 2);
       for (let s = 0; s < 2; s++) {
-        const o = i * 2 + s;
-        paperPos[o * 3] = tmpA.x + (s ? half : -half);
-        paperPos[o * 3 + 1] = tmpA.y;
-        paperPos[o * 3 + 2] = tmpA.z;
-        paperNrm[o * 3] = 0; paperNrm[o * 3 + 1] = tmpN.y; paperNrm[o * 3 + 2] = tmpN.z;
-        paperUv[o * 2] = s; paperUv[o * 2 + 1] = v;
+        const o = (c * (SEGS + 1) + i) * 2 + s;
+        rPos[o * 3] = _a.x + (s ? _sd.x : -_sd.x); rPos[o * 3 + 1] = _a.y + (s ? _sd.y : -_sd.y); rPos[o * 3 + 2] = _a.z + (s ? _sd.z : -_sd.z);
+        rAux[o * 4] = u; rAux[o * 4 + 1] = s; rAux[o * 4 + 3] = kind;
+        rPar[o * 4] = prog; rPar[o * 4 + 1] = inten; rPar[o * 4 + 2] = dir;
       }
     }
-    paperGeo.attributes.position.needsUpdate = true;
-    paperGeo.attributes.uv.needsUpdate = true;
-    paperGeo.attributes.normal.needsUpdate = true;
   }
-  updatePaper(0.001, 0);
+
+  // ---------------------------------------------------------------- story (a pure function of t; scroll can run backwards)
+  const ph = (a: number, b: number, t: number) => sat((t - a) / (b - a));
+  const _m = new Matrix4(), _q2 = new Quaternion(), _s3 = new Vector3(), _p3 = new Vector3(), _e2 = new Euler();
+  const stampPos = new Vector3();
+  function layoutAndStory(t: number, time: number, aspect: number) {
+    setSafe(aspect);
+    pxScale = (aspect > 1.1 ? Math.min(1, aspect / 1.6) : 1) * SAFE.s;
+    // portrait screens are too narrow for the sheet: the pipeline stays hidden there (the DOM panel tells the story)
+    const vis = aspect > 1.1 ? 1 : 0;
+    const show = vis * sstep(0.12, 0.22, t) * (1 - sstep(0.83, 0.9, t));
+    const stagger = (k: number) => vis * sstep(0.12 + k * 0.012, 0.2 + k * 0.012, t) * (1 - sstep(0.83, 0.9, t));
+    // --- phases
+    const typed = ph(0.17, 0.25, t);
+    const implA = sstep(0.23, 0.27, t) * (1 - sstep(0.38, 0.42, t));
+    const repair = sstep(0.52, 0.535, t) * (1 - sstep(0.605, 0.62, t));
+    const qa = sstep(0.39, 0.42, t) * (1 - sstep(0.49, 0.52, t));
+    const scanK = ph(0.41, 0.48, t);
+    
+    const boardV = t < 0.48 ? 0 : t < 0.51 ? 1 : t < 0.61 ? 2 : t < 0.63 ? 3 : 4;
+    const running = boardV === 1 || boardV === 3;
+    const printK = ph(0.65, 0.7, t);
+    const stampK = ph(0.702, 0.716, t);
+    const youK = sstep(0.735, 0.755, t);
+    const cmdK = (i: number) => sstep(0.745 + i * 0.01, 0.765 + i * 0.01, t);
+    // --- per-item state
+    const P = pP.array as Float32Array, T = pT.array as Float32Array;
+    const set = (id: string, alpha: number, p1 = 0, p2 = 0, tint: [number, number, number] = [1, 1, 1], appear = 1) => {
+      const i = itemIdx[id];
+      P[i * 4 + 1] = alpha; P[i * 4 + 2] = p1; P[i * 4 + 3] = p2;
+      T.set([tint[0], tint[1], tint[2], appear], i * 4);
+    };
+    const hi = (k: number, lo = 0.5): [number, number, number] => { const b = lo + (1 - lo) * k; return [b, b, b]; };
+    set('smokeL', 0.95 * show, 0, 0, [1, 1, 1], 1);
+    set('smokeR', 0.95 * show, 0, 0, [1, 1, 1], 1);
+    set('tag', 0.75 * show, 0, 0, hi(youK, 0.75), stagger(9));
+    set('chip', show, typed, 0, [1, 1, 1], stagger(0));
+    const implOn = Math.max(implA, repair);
+    set('n1', show, 0, 0, hi(implOn, 0.55), stagger(1));
+    set('s1', show * 0.9, 0, 0, hi(implOn, 0.6), stagger(1));
+    const agentAct = [0.55 + 0.1 * Math.sin(time * 0.7), 0.55 + 0.1 * Math.sin(time * 0.9 + 2), 0.28 + 0.72 * implOn];
+    for (let k = 0; k < 3; k++) {
+      // terminals stream line by line; the bottom line types out
+      const rate = k === 2 ? 1.6 : 1.1 + k * 0.3;
+      const lines = time * rate + k * 7.3;
+      const scroll = (Math.floor(lines) % 20) / 20;
+      set(`term${k}`, show * 0.95, scroll, (lines % 1) * 1.15, hi(agentAct[k], 0.45), stagger(2 + k * 0.5));
+      set(`nm${k}`, show, 0, 0, hi(k === 2 ? implOn : 0.6, 0.6), stagger(2 + k * 0.5));
+    }
+    set('n2', show, 0, 0, hi(qa, 0.55), stagger(4));
+    set('s2', show * 0.9, 0, 0, hi(qa, 0.6), stagger(4));
+    const diffOn = sstep(0.38, 0.41, t);
+    set('diff', show * (0.35 + 0.65 * diffOn), scanK, qa, hi(Math.max(diffOn * 0.7, qa), 0.5), stagger(5));
+    set('n3', show, 0, 0, hi(sstep(0.44, 0.47, t) * (1 - sstep(0.62, 0.66, t)), 0.55), stagger(6));
+    set('n4', show, 0, 0, repair > 0.01 ? [1, 0.55 + 0.45 * (1 - repair) - 0.2 * repair, 0.5 + 0.5 * (1 - repair) - 0.25 * repair] : hi(0, 0.55), stagger(6));
+    const blink = running ? 0.75 + 0.25 * Math.sin(time * 14) : 1;
+    set('board', show, boardV, (boardV === 0 ? 0.6 : 1) * blink, [1, 1, 1], stagger(7));
+    // held-out chips fly from the QA orb into the board, then fold into it
+    for (let k = 0; k < 2; k++) {
+      const kk = ph(0.44 + k * 0.015, 0.475 + k * 0.015, t);
+      const vis = kk > 0 && kk < 1 ? 1 : 0;
+      set(`held${k}`, show * vis * Math.min(1, kk * 6) * Math.min(1, (1 - kk) * 5), 0, 0, [1, 1, 1], 1);
+      const it = ITEMS[itemIdx[`held${k}`]];
+      const e = easeInOut(kk);
+      const [cx, cy] = curvePx([[356, 434], [310 + k * 40, 500], [250 + k * 70, 560 + k * 4]], e);
+      it.x = cx - it.w! / 2; it.y = cy - it.h / 2;
+    }
+    set('rcpt', show, printK > 0 ? Math.max(0.002, Math.min(1, (Math.floor(printK * 40) + sstep(0, 0.5, (printK * 40) % 1)) / 40)) : 0, 0, [1, 1, 1], 1);
+    set('bar', show, 0, 0, hi(sstep(0.63, 0.65, t) * (1 - sstep(0.71, 0.74, t)), 0.6), stagger(8));
+    set('n5', show, 0, 0, hi(sstep(0.64, 0.66, t) * (1 - sstep(0.72, 0.75, t)), 0.55), stagger(8));
+    set('ink', show * (stampK > 0 ? 1 : 0) * Math.min(1, stampK * 3), 0, 0, [1.0, 0.24, 0.06], 1);
+    set('n6', show, 0, 0, hi(youK, 0.5), stagger(9));
+    set('s6a', show * (1 - youK) * 0.9, 0, 0, [1, 1, 1], stagger(9));
+    set('s6b', show * youK, 0, 0, [1, 1, 1], 1);
+    for (let i = 0; i < 3; i++) set(`cmd${i}`, show * (0.25 + 0.75 * cmdK(i)), 0, 0, hi(cmdK(i), 0.4), stagger(9));
+    pP.needsUpdate = true; pT.needsUpdate = true;
+
+    // --- panel transforms
+    const wpp = worldPerPx(D_PANEL);
+    ITEMS.forEach((it, i) => {
+      let w = it.w! * pxScale, h = it.h * pxScale;
+      let cx = it.x + it.w! / 2, cy = it.y + it.h / 2;
+      if (it.id === 'ink') {
+        // the stamp slams down: from large + transparent to its resting size, with a small overshoot
+        const k = stampK;
+        const s = k < 1 ? lerp(1.9, 0.94, easeIn(k)) : 1 - 0.06 * Math.exp(-(t - 0.716) * 300) * Math.cos((t - 0.716) * 900);
+        w *= s; h *= s;
+      }
+      if (it.id === 'rcpt') cy = it.y + it.h / 2; // grows upward in the shader; the quad stays put
+      // gentle hologram bob
+      const bob = Math.sin(time * 0.9 + i * 1.7) * 1.2;
+      const D = it.d ?? D_PANEL;
+      anchor(cx, cy + (it.mode === 7 ? 0 : bob), D, _p3);
+      _q2.copy(refCam.quaternion);
+      if (it.rot) _q2.multiply(new Quaternion().setFromEuler(_e2.set(0, 0, it.rot)));
+      const wk = worldPerPx(D) / wpp;
+      _s3.set(w * wpp * wk, h * wpp * wk, 1);
+      _m.compose(_p3, _q2, _s3);
+      panelMesh.setMatrixAt(i, _m);
+      if (it.id === 'ink') stampPos.copy(_p3);
+    });
+    panelMesh.instanceMatrix.needsUpdate = true;
+
+    // --- orbs
+    const youAct = 0.12 + 0.88 * youK;
+    const qaAct = 0.22 + 0.78 * Math.max(qa, sstep(0.61, 0.62, t) * (1 - sstep(0.63, 0.65, t)) * 0.6);
+    const acts = [agentAct[0], agentAct[1], agentAct[2], qaAct, youAct];
+    const wpo = worldPerPx(D_ORB);
+    ORBS.forEach((o, i) => {
+      anchor(o.x, o.y + Math.sin(time * 1.1 + i) * 2, D_ORB, _p3);
+      const s = o.s * pxScale * wpo * (1 + 0.04 * Math.sin(time * 2 + i) * acts[i]);
+      oA.array.set([_p3.x, _p3.y, _p3.z, s * stagger(i < 3 ? 2 + i * 0.5 : i === 3 ? 4 : 9)], i * 4);
+      oB.array[i * 4 + 3] = acts[i];
+      oC.array[i * 4 + 2] = i === 2 ? repair * (0.6 + 0.4 * Math.sin(time * 9)) : 0;
+    });
+    oA.needsUpdate = true; oB.needsUpdate = true; oC.needsUpdate = true;
+
+    // --- tokens
+    uAct[0].value = agentAct[0] * show; uAct[1].value = agentAct[1] * show; uAct[2].value = (0.15 + 0.85 * implOn) * agentAct[2] * show;
+    uAct[3].value = qa * show;
+    uTokSize.value = 10 * wpo * pxScale;
+    const S = tS.array as Float32Array, E = tE.array as Float32Array;
+    for (let i = 0; i < NT; i++) {
+      const st = i < NTA * 3 ? Math.floor(i / NTA) : 3;
+      const j0 = tokJ[i * 3], j1 = tokJ[i * 3 + 1], j2 = tokJ[i * 3 + 2];
+      if (st < 3) {
+        const o = ORBS[st];
+        anchor(o.x + (j0 - 0.5) * 20, o.y + (j1 - 0.5) * 16, D_ORB, _a);
+        const tm = ITEMS[itemIdx[`term${st}`]];
+        anchor(tm.x + 12 + j2 * (tm.w! - 24), tm.y + 6 + j1 * 30, D_PANEL, _b);
+      } else {
+        const dc = ITEMS[itemIdx.diff];
+        anchor(dc.x + 10 + j0 * (dc.w! - 20), dc.y + 10 + j1 * (dc.h - 20), D_PANEL, _a);
+        anchor(ORBS[3].x, ORBS[3].y, D_ORB, _b);
+      }
+      S.set([_a.x, _a.y, _a.z, j0 * 0.618 + j2 * 0.382], i * 4);
+      E.set([_b.x, _b.y, _b.z, st], i * 4);
+    }
+    tS.needsUpdate = true; tE.needsUpdate = true;
+
+    // --- ribbons
+    const wl = 3 * wpp * pxScale;
+    const link = (c: number, prog: number, inten: number, dir = 1, kind = 0) => {
+      const pts = CURVES[c];
+      const w = kind === 1 ? wl * (1 + 1.6 * repair) : wl;
+      writeCurve(c, (u, out) => { const [x, y] = curvePx(pts, u); return anchor(x, y, D_PANEL, out); }, () => w, kind, prog, inten * show, dir);
+    };
+    link(0, ph(0.24, 0.27, t), 1);
+    link(1, ph(0.385, 0.41, t), 1);
+    link(2, ph(0.44, 0.49, t), 1);
+    link(3, ph(0.63, 0.65, t), 1);
+    link(4, ph(0.72, 0.74, t), 1);
+    // repair arc: board → Claude Code (.525 → .565), then the new candidate rides back (.565 → .61)
+    if (t < 0.565) link(5, ph(0.525, 0.565, t), 0.5 + 1.3 * repair, 1, 1);
+    else link(5, 1 - ph(0.565, 0.61, t), 0.5 + 1.3 * repair, -1, 1);
+    // QA beam: from the orb to the scan line across the diff card
+    const dc = ITEMS[itemIdx.diff];
+    const sy = dc.y + 6 + scanK * (dc.h - 12);
+    const beamOn = qa * (scanK > 0 && scanK < 1 ? 1 : 0.0) * show;
+    writeCurve(6, (u, out) => {
+      // u: 0 at the orb → 1 at the scan line; across handled by width
+      anchor(lerp(ORBS[3].x + 20, dc.x + dc.w! / 2, u), lerp(ORBS[3].y, sy, u), D_PANEL, out);
+      return out;
+    }, (u) => lerp(2, dc.w! * 0.98, u) * wpp * pxScale, 3, 0, beamOn, 1);
+    ribGeo.attributes.position.needsUpdate = true;
+    (ribGeo.attributes.aux as BufferAttribute).needsUpdate = true;
+    (ribGeo.attributes.par as BufferAttribute).needsUpdate = true;
+    return { stampK };
+  }
 
   // ---------------------------------------------------------------- dust (additive billboards)
   const nDust = high ? 420 : 240;
-  const uRight = uniform(new Vector3(1, 0, 0)), uUp = uniform(new Vector3(0, 1, 0));
   {
     const dA = new InstancedBufferAttribute(new Float32Array(nDust * 4), 4);
     const r3 = mulberry(9);
@@ -809,7 +1352,6 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
   }
 
   // ---------------------------------------------------------------- async: models + slides
-  let stampObj: Object3D | null = null;
   const ready = (async () => {
     const [gltf, slides] = await Promise.all([new GLTFLoader().loadAsync('/worlds/oge/props.glb'), loadSlides(ctx)]);
     const geos: Record<string, BufferGeometry> = {};
@@ -834,10 +1376,7 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
       parent.add(mesh);
       return mesh;
     };
-    single('Pedestal', ped);
-    const pr = single('Printer', deck);
-    pr?.position.set(0, 0, -0.5);
-    stampObj = single('Stamp', stampHolder);
+    void single;
 
     // slides → textures, thumbnails atlas, average colours
     const imgs: (HTMLImageElement | HTMLCanvasElement)[] = [];
@@ -921,17 +1460,17 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     const tanV = Math.tan((FOV * Math.PI) / 360);
     const tanH = tanV * aspect;
     const land = aspect > 1.1;
-    const widthFrac = land ? 0.6 : 0.94;
+    // landscape: the display sits upper right (clear of the "Selected work" nav), the pipeline wraps around it
+    const widthFrac = land ? 0.365 : 0.94;
     let d = SW / (widthFrac * 2 * tanH);
     d = Math.max(d, SH / (2 * 0.6 * tanV));
-    return { d, ndcX: land ? -0.17 : 0, ndcY: land ? 0.3 : 0.32, tanV, tanH };
+    return { d, ndcX: land ? 0.215 : 0, ndcY: land ? 0.318 : 0.32, tanV, tanH };
   }
   function holdEye(h: number, d: number, out: Vector3) {
-    return out.set(0.42 - 0.38 * h, 1.27 + 0.05 * Math.sin(h * Math.PI), C.z + d + 0.3 - 0.42 * h);
+    return out.set(0.3 - 0.3 * h, EYE_Y + 0.05 * Math.sin(h * Math.PI), C.z + d + 0.3 - 0.42 * h);
   }
   const _q = new Quaternion(), _e = new Euler();
-  function poseCamera(t: number, f: StageFrame) {
-    const aspect = f.aspect || camera.aspect;
+  function poseBase(t: number, aspect: number, cam: PerspectiveCamera, par = { x: 0, y: 0 }, time = -1) {
     const H = holdFrame(aspect);
     const h = sat((t - ARRIVE) / (DEPART - ARRIVE));
     let w = 1; // weight of the hold framing offsets
@@ -961,22 +1500,25 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
       look.copy(C);
       w = 1 - sstep(0, 0.85, q);
     }
-    // parallax + idle breathing
-    const par = f.parallax ?? { x: 0, y: 0 };
+    // parallax + idle breathing (none for the reference pose)
     const pw = 0.4 + 0.6 * w;
-    const time = f.time;
-    camera.position.copy(eye);
-    camera.up.copy(up);
-    camera.lookAt(look);
-    camera.translateX(par.x * 0.16 * pw + Math.sin(time * 0.31) * 0.012);
-    camera.translateY(par.y * 0.09 * pw + Math.sin(time * 0.47) * 0.008);
-    camera.lookAt(look);
+    const br = time >= 0 ? 1 : 0;
+    cam.position.copy(eye);
+    cam.up.copy(up);
+    cam.lookAt(look);
+    cam.translateX(par.x * 0.16 * pw + Math.sin(time * 0.31) * 0.012 * br);
+    cam.translateY(par.y * 0.09 * pw + Math.sin(time * 0.47) * 0.008 * br);
+    cam.lookAt(look);
     // place the display at the framed NDC position: yaw/pitch away from it
     const yaw = -Math.atan(H.ndcX * H.tanH) * w;
     const pitch = -Math.atan(H.ndcY * H.tanV) * w;
     // positive rotation about y turns left; the display sits left of centre (ndcX<0) → turn right (negative)
     _q.setFromEuler(_e.set(pitch + par.y * 0.012, -yaw + par.x * -0.015, roll, 'YXZ'));
-    camera.quaternion.multiply(_q);
+    cam.quaternion.multiply(_q);
+    cam.updateMatrixWorld(true);
+  }
+  function poseCamera(t: number, f: StageFrame) {
+    poseBase(t, f.aspect || camera.aspect, camera, f.parallax ?? { x: 0, y: 0 }, f.time);
     // stamp impact shake
     const fl = uFlash.value;
     if (fl > 0.01) {
@@ -987,7 +1529,6 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
   }
 
   // ---------------------------------------------------------------- update
-  const pedLight = new Vector3();
   const stage: Stage = {
     id: ctx.project.id,
     scene,
@@ -1013,29 +1554,21 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
         }
       }
       (uScr.value as Color).lerp(scrTarget, 1 - Math.exp(-Math.max(0, f.dt) * 4));
-      // receipt feed (.24 → .58), stepped like a thermal printer
-      const pf = sat((t - 0.24) / 0.34);
-      const steps = 46;
-      const st = pf * steps;
-      const printed = Math.max(0.001, PRINT_L * Math.min(1, (Math.floor(st) + sstep(0, 0.6, st % 1)) / steps));
-      updatePaper(printed, f.time);
-      // stamp: down .60 → .635, press, up .66 → .74
-      const down = easeIn(sat((t - 0.6) / 0.035));
-      const upK = easeOut(sat((t - 0.66) / 0.08));
-      const yRest = 0.32, yDown = 0.0035;
-      const sy = lerp(yRest, yDown, down * (1 - upK)) + Math.sin(f.time * 1.7) * 0.003 * (1 - down);
-      stampHolder.position.y = sy;
-      const contact = t >= 0.635;
-      uInk.value = contact ? 1 : 0;
-      const since = t - 0.635;
-      uFlash.value = since >= 0 ? Math.exp(-since * 45) : 0;
-      pedLight.set(0, TOP_F + 0.5, DZ + 0.25);
-      ped.localToWorld(uPedLight.value.copy(pedLight));
       poseCamera(t, f);
-      // dust billboards face the camera
+      // the pipeline is laid out against the base hold pose (no parallax / breathing), frozen outside the hold
+      refCam.aspect = f.aspect || camera.aspect;
+      { // follow most of the pointer parallax: the near layer then drifts about as much as the display behind it
+        const par = f.parallax ?? { x: 0, y: 0 };
+        poseBase(Math.min(DEPART, Math.max(ARRIVE, t)), refCam.aspect, refCam, { x: par.x * 0.78, y: par.y * 0.78 }, f.time);
+      }
+      // dust + orbs + tokens face the camera
       uRight.value.set(1, 0, 0).applyQuaternion(camera.quaternion);
       uUp.value.set(0, 1, 0).applyQuaternion(camera.quaternion);
-      void stampObj;
+      layoutAndStory(t, f.time, refCam.aspect);
+      // stamp impact: flash the room accent light from the stamp
+      const since = t - 0.716;
+      uFlash.value = since >= 0 ? Math.exp(-since * 45) : 0;
+      uPedLight.value.copy(stampPos);
     },
     portalQuad() {
       const pts: [number, number][] = [];
@@ -1048,7 +1581,7 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     },
     dispose() {
       scene.traverse((o: any) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
-      [termTex, thumbTex, blank, inkTex, receiptTex, ...slideTex].forEach((t) => t?.dispose());
+      [termTex, thumbTex, blank, atlasTex, ...slideTex].forEach((t) => t?.dispose());
     },
   };
   void wallMesh; void If; void NormalBlending; void min;

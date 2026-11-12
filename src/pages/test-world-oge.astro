@@ -40,7 +40,7 @@
       import { createCamcorder } from '../scene/post/camcorder';
 
       const mods = (import.meta as any).glob(['../scene/worlds/oge.ts', '../scene/worlds/oge.wip.ts'], { eager: true }) as Record<string, any>;
-      const mod = mods['../scene/worlds/oge.ts'] ?? mods['../scene/worlds/oge.wip.ts'];
+      const mod = mods['../scene/worlds/oge.wip.ts'] ?? mods['../scene/worlds/oge.ts'];
 
       const q = new URLSearchParams(location.search);
       const renderer = new WebGPURenderer({ antialias: false, forceWebGL: q.has('webgl') });
