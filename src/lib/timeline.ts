@@ -53,8 +53,10 @@ export interface TransitionDef {
 }
 
 /** memory stages exist only once src/scene/memories/index.ts has landed */
-export const MEMORY_IDS = ['slopes', 'stage', 'teams'] as const;
-export const HAS_MEMORIES = Object.keys((import.meta as any).glob('../scene/memories/index.ts')).length > 0;
+export const MEMORY_IDS = ['stage', 'teams'] as const;
+/** user: "for now hide the memory scenes" — flip to true to bring them back */
+export const SHOW_MEMORIES = false;
+export const HAS_MEMORIES = SHOW_MEMORIES && Object.keys((import.meta as any).glob('../scene/memories/index.ts')).length > 0;
 
 type Spec = Omit<StageDef, 'start' | 'end'> & { t?: [TransitionKind, number, number] };
 const WIPE_HALF = 0.91875 / 2;
@@ -64,7 +66,6 @@ const specs: Spec[] = [
   { id: 'corridor', kind: 'corridor', span: CORRIDOR_LEGACY[1] - CORRIDOR_LEGACY[0], route: 'about', t: HAS_MEMORIES ? ['whiteout', 0.4, 0.4] : ['wipe', WIPE_HALF, WIPE_HALF] },
   ...(HAS_MEMORIES
     ? ([
-        { id: 'slopes', kind: 'memory', span: 2.2, route: 'about', t: ['glitch', 0.3, 0.3] },
         { id: 'stage', kind: 'memory', span: 2.2, route: 'about', t: ['iris', 0.35, 0.35] },
         { id: 'teams', kind: 'memory', span: 2.2, route: 'about', t: ['wipe', WIPE_HALF, WIPE_HALF] },
       ] as Spec[])

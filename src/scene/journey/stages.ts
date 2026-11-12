@@ -9,7 +9,7 @@ import {
 } from 'three/webgpu';
 import { vec3, vec4, uniform, texture, uv, mix, positionWorld, smoothstep, length } from 'three/tsl';
 import { PROJECTS, type Project } from '../../lib/content';
-import { STAGES, HOLD, smoothstep as smoothN } from '../../lib/timeline';
+import { STAGES, HOLD, HAS_MEMORIES, smoothstep as smoothN } from '../../lib/timeline';
 import { PORTAL_H, PORTAL_W, type Portal, type PortalFrame } from '../types';
 import type { Stage, StageContext, StageFrame, SlideImage, CreateWorld, ProjectWorldContext } from './types';
 import { createIntroPortal } from '../portals/intro';
@@ -165,7 +165,7 @@ export async function buildStages(ctx: StageContext, onProgress: (p: number) => 
   const last = createLastStages(ctx);
   let memories: Stage[] = [];
   const memLoader = memoryMods['../memories/index.ts'];
-  if (memLoader) {
+  if (memLoader && HAS_MEMORIES) {
     try {
       const mod = await memLoader();
       memories = mod.createMemoryStages?.(ctx) ?? [];

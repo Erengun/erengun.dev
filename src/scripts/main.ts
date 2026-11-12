@@ -4,7 +4,7 @@ import { createTimeline } from 'animejs';
 import { $route, $preloader, scroll, tilt, type Route } from '../lib/stores';
 import {
   TOTAL_VP, SNAP_VP, STAGES, HOLD, ANCHOR_VP, journeyAt, stageLocal, stageIndex, worldStage, holdCenterVp, clamp, damp,
-  smoothstep, invLerp, PROJECT_COUNT, TRANSITIONS, type StageDef,
+  smoothstep, invLerp, PROJECT_COUNT, TRANSITIONS, HAS_MEMORIES, type StageDef,
 } from '../lib/timeline';
 import { scramble, initHoverScramble } from './scramble';
 import { initMenu } from './menu';
@@ -166,7 +166,7 @@ function addBlock(el: HTMLElement, stageId: string, anchorOffset: number) {
 }
 // memory captions (module may not exist yet)
 const memoryCopy = (import.meta as any).glob('../scene/memories/index.ts') as Record<string, () => Promise<any>>;
-for (const load of Object.values(memoryCopy)) {
+for (const load of HAS_MEMORIES ? Object.values(memoryCopy) : []) {
   load()
     .then((m) => {
       const copy: { id: string; kicker?: string; title?: string; body?: string }[] = m.MEMORY_COPY ?? [];
