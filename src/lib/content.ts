@@ -2,7 +2,7 @@
 export const SITE = {
   name: 'Eren Gün',
   logo: 'eren gün',
-  tagline: 'Software engineer from Istanbul building developer tools, update infrastructure and fast Flutter apps.',
+  tagline: 'Software developer from Istanbul working on AI engineering, developer tools and fast Flutter apps.',
   year: '2026',
   email: 'hi@erengun.dev',
 };
