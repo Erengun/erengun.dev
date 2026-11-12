@@ -704,12 +704,13 @@ def make_splats(N):
     def weight(P):
         d = np.linalg.norm(P - eye, axis=1)
         w = 1.0 / np.maximum(d, 1.1) ** 2
-        w = np.maximum(w, 1.0 / 14.0 ** 2)
+        w = np.maximum(w, 1.0 / 20.0 ** 2)
+        w = np.where(d > 15.0, w * 0.6, w)  # budget goes to what is within ~15 m of the hero eye
         w = np.where(P[:, 1] < -0.3, w * 0.25, w)  # behind the hero
         return w
 
     # uniform candidates with rejection by weight → density rho_u * p
-    rho_u = 80000.0  # candidates per m² before rejection (max density)
+    rho_u = 260000.0  # candidates per m² before rejection (max density)
     cands, cn, cdens, cfeat = [], [], [], []
     cdf = np.cumsum(a) / A
     total = int(rho_u * A)
@@ -763,22 +764,51 @@ def make_splats(N):
     print('visible', vis.sum(), 'of', len(P), 'hero', seen_hero.sum())
     P, Nn, dens, colour, hero, fz = P[vis], Nn[vis], dens[vis], colour[vis], seen_hero[vis], fz[vis]
 
-    # subsample to N: most of the budget goes to surfaces the hero view sees; density scales accordingly
-    nh = min(int(hero.sum()), int(0.82 * N))
+    # subsample to N: most of the budget goes to surfaces the hero view sees.
+    # Hero-visible points are stratified in hero screen space (one per c×c px cell → blue-noise-like
+    # coverage, so discs can be small/crisp without holes); the rest are a uniform random subset.
+    nh = min(int(hero.sum()), int(0.92 * N))
     no = min(int((~hero).sum()), N - nh)
-    parts = []
-    for mask, k in ((hero, nh), (~hero, no)):
-        ids = np.where(mask)[0]
-        sel = t_rng.choice(len(ids), k, replace=False)
-        parts.append((ids[sel], k / len(ids)))
-    sel = np.concatenate([p[0] for p in parts])
-    dens = np.concatenate([dens[p[0]] * p[1] for p in parts])
-    P, Nn, colour, fz = P[sel], Nn[sel], colour[sel], fz[sel]
-    print('hero splats', nh, 'other', no)
+    hid = np.where(hero)[0]
+    (hname, hloc, hrot, hfov, hw, hh, _) = views()[0]
+    hpx, hpy, hz, hf, _ = cam_project(hloc, hrot, hfov, hw, hh, P[hid])
+    perm_h = t_rng.permutation(len(hid))
+    lo_c, hi_c = 0.3, 20.0
+    for _ in range(30):
+        c = 0.5 * (lo_c + hi_c)
+        key = (np.floor(hpx[perm_h] / c).astype(np.int64) * 100003 + np.floor(hpy[perm_h] / c).astype(np.int64))
+        _, first = np.unique(key, return_index=True)
+        if len(first) > nh:
+            lo_c = c
+        else:
+            hi_c = c
+    pick_h = perm_h[first]
+    hsel = hid[pick_h]
+    hdist = np.linalg.norm(P[hsel] - np.array(hloc), axis=1)
+    hview = (np.array(hloc) - P[hsel]) / hdist[:, None]
+    hfacing = np.clip(np.abs(np.sum(hview * Nn[hsel], 1)), 0.25, 1.0)
+    hspacing = c * hdist / hf / np.sqrt(hfacing)
+    oid = np.where(~hero)[0]
+    osel = oid[t_rng.choice(len(oid), no, replace=False)]
+    ospacing = 1.0 / np.sqrt(dens[osel] * (no / len(oid)))
+    sel = np.concatenate([hsel, osel])
+    spacing = np.concatenate([hspacing, ospacing])
+    P, Nn, colour, fz, hero = P[sel], Nn[sel], colour[sel], fz[sel], hero[sel]
+    print('hero splats', len(hsel), 'cell px', round(c, 2), 'other', no)
     n = len(P)
-    sig_t = np.minimum(0.72 / np.sqrt(dens), np.maximum(0.45 * fz, 0.003))
-    # grade toward the reference's deep red night look (darker, less green/blue)
-    colour = np.clip(colour * np.array([1.0, 0.8, 0.74]), 0, 1) ** 1.18
+    sig_t = np.minimum(0.55 * spacing, np.maximum(0.4 * fz, 0.002))
+    sig_t = np.where(hero, sig_t, np.minimum(sig_t, 0.03))  # off-hero filler must not become big floating discs
+    # grade: deep blacks + warm orange/yellow highlights, less uniform red cast
+    c = np.clip(colour, 0, 1)
+    lum = c.max(1, keepdims=True)
+    hi = np.clip((lum - 0.45) / 0.55, 0, 1) ** 2 * (3 - 2 * np.clip((lum - 0.45) / 0.55, 0, 1))
+    gain = np.concatenate([np.ones_like(hi), 0.8 + 0.3 * hi, 0.72 + 0.14 * hi], 1)
+    colour = np.clip(np.clip(c * gain, 0, 1) ** 1.2 * 1.3, 0, 1)
+    # opacity: surfaces facing the hero eye are more opaque (crisper)
+    vdir = eye - P
+    vdir /= np.linalg.norm(vdir, axis=1, keepdims=True)
+    facing = np.abs(np.sum(vdir * Nn, 1))
+    alpha = np.where(hero, 238 + 17 * np.clip(facing * 1.5, 0, 1), 235)
     sig_n = np.maximum(sig_t * 0.12, 0.0008)
 
     # ---- lantern glow halos (soft, bright, low alpha) ≈ baked bloom
@@ -811,7 +841,7 @@ def make_splats(N):
     scale = np.stack([sig_t, sig_t, sig_n], 1)
     rgba = np.zeros((n, 4), np.uint8)
     rgba[:, :3] = np.clip(np.round(colour * 255), 0, 255)
-    rgba[:, 3] = 250
+    rgba[:, 3] = np.round(alpha).astype(np.uint8)
 
     hpt = to_three(hp)
     hq = np.tile([[1, 0, 0, 0]], (len(hp), 1)).astype(np.float64)
@@ -819,10 +849,11 @@ def make_splats(N):
     hrgba = np.zeros((len(hp), 4), np.uint8)
     hrgba[:, :3] = np.round(hc * 255); hrgba[:, 3] = np.round(ha * 255)
 
-    allP = np.concatenate([Pt, hpt]).astype(np.float32)
-    allS = np.concatenate([scale, hscale]).astype(np.float32)
-    allC = np.concatenate([rgba, hrgba])
-    allQ = np.concatenate([q, hq]).astype(np.float32)
+    # (no baked lantern halos: the page's bloom/VHS glow handles that)
+    allP = Pt.astype(np.float32)
+    allS = scale.astype(np.float32)
+    allC = rgba
+    allQ = q.astype(np.float32)
     perm = t_rng.permutation(len(allP))  # shuffled so any prefix is a uniform subsample (phones)
     sys.path.insert(0, HERE)
     from splatio import write_splat
