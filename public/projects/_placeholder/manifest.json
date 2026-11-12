@@ -1,0 +1,30 @@
+[
+ {
+  "src": "/projects/_placeholder/slide-0.webp",
+  "w": 2016,
+  "h": 1200,
+  "kind": "cover",
+  "caption": "Placeholder cover"
+ },
+ {
+  "src": "/projects/_placeholder/slide-1.webp",
+  "w": 2016,
+  "h": 1200,
+  "kind": "desktop",
+  "caption": "Placeholder desktop"
+ },
+ {
+  "src": "/projects/_placeholder/slide-2.webp",
+  "w": 2016,
+  "h": 1200,
+  "kind": "desktop",
+  "caption": "Placeholder desktop"
+ },
+ {
+  "src": "/projects/_placeholder/slide-3.webp",
+  "w": 947,
+  "h": 2048,
+  "kind": "phone",
+  "caption": "Placeholder phone"
+ }
+]

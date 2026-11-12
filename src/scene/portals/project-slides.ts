@@ -82,7 +82,7 @@ function noShadow(c: C) {
 }
 /** film grain so flat fills read like screen captures */
 function grain(c: C, amt = 10) {
-  const img = c.getImageData(0, 0, SLIDE_W, SLIDE_H);
+  const img = c.getImageData(0, 0, c.canvas.width, c.canvas.height);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
     const n = (rnd() - 0.5) * amt;
@@ -980,10 +980,124 @@ export type SlideAtlas = {
   thumbs: string[];
 };
 
-/** draw all slides of a project into one atlas (2 columns × 3 rows of 1008×600 cells) */
-export async function buildSlideAtlas(project: Project): Promise<SlideAtlas> {
+/** manifest entry (same shape as journey/types.ts SlideImage) */
+type SlideImage = { src: string; w: number; h: number; kind: 'desktop' | 'phone' | 'cover'; caption?: string };
+
+/** draw designed slide s of a project at scale k (k = 2 → 2016×1200) */
+export async function renderDesignedSlide(project: Project, s: number, k = 1): Promise<HTMLCanvasElement> {
   await loadFonts();
   const designs = DESIGNS[project.id] ?? oge;
+  const cv = document.createElement('canvas');
+  cv.width = SLIDE_W * k;
+  cv.height = SLIDE_H * k;
+  const c = cv.getContext('2d', { willReadFrequently: true })!;
+  seed = 1 + s * 97 + project.id.length * 13;
+  c.save();
+  c.scale(k, k);
+  designs[s % designs.length](c, project);
+  c.restore();
+  noShadow(c);
+  grain(c, 9);
+  return cv;
+}
+
+export async function loadManifest(project: Project): Promise<SlideImage[] | null> {
+  try {
+    const r = await fetch(`/projects/${project.id}/manifest.json`);
+    if (!r.ok) return null;
+    const m = (await r.json()) as SlideImage[];
+    return Array.isArray(m) && m.length ? m : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.decoding = 'async';
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error('slide image ' + src));
+    im.src = src;
+  });
+}
+
+/** backdrop behind framed captures, per project */
+function backdrop(c: C, p: Project) {
+  const [a, b] = p.palette;
+  const bg: Record<string, [string, string]> = {
+    oge: ['#ff6a2b', '#e04812'],
+    ferman: ['#121a2b', '#0a0f1a'],
+    'cached-network-image-ce': ['#0466c8', '#02467d'],
+    elek: ['#d4ff2e', '#a8d600'],
+    subara: ['#7b5cff', '#ff8fc7'],
+  };
+  const [c0, c1] = bg[p.id] ?? [a, b];
+  c.fillStyle = grad(c, 0, 0, SLIDE_W, SLIDE_H, [[0, c0], [1, c1]]);
+  c.fillRect(0, 0, SLIDE_W, SLIDE_H);
+}
+const ink = (p: Project) => (p.id === 'elek' ? '#101010' : '#ffffff');
+
+/** draw a cover-fit image into a box, top-aligned */
+function drawCover(c: C, im: HTMLImageElement, x: number, y: number, w: number, h: number) {
+  const s = Math.max(w / im.naturalWidth, h / im.naturalHeight);
+  const sw = w / s, sh = h / s;
+  c.drawImage(im, (im.naturalWidth - sw) / 2, 0, sw, sh, x, y, w, h);
+}
+
+/** compose a real capture into a 1008×600 slide: browser window or phone, on the project's colour */
+function composeCapture(c: C, p: Project, im: HTMLImageElement, e: SlideImage) {
+  if (e.kind === 'cover') {
+    drawCover(c, im, 0, 0, SLIDE_W, SLIDE_H);
+    return;
+  }
+  backdrop(c, p);
+  if (e.kind === 'desktop') {
+    const x = 56, y = 34, w = SLIDE_W - 112, h = SLIDE_H - 68;
+    const dark = p.id !== 'subara';
+    browser(c, x, y, w, h, e.caption ?? '', dark);
+    c.save();
+    rr(c, x, y + 30, w, h - 30, 10);
+    c.clip();
+    drawCover(c, im, x, y + 30, w, h - 30);
+    c.restore();
+    return;
+  }
+  // phone: caption as a headline on the left, the capture on the right
+  const words = (e.caption ?? '').split(' ');
+  const lines2: string[] = [];
+  for (const wd of words) {
+    const last = lines2[lines2.length - 1];
+    if (last && (last + ' ' + wd).length <= 13) lines2[lines2.length - 1] = last + ' ' + wd;
+    else lines2.push(wd);
+  }
+  lines2.forEach((l, i) => text(c, l, 76, 200 + i * 62, `900 54px ${BLACK}`, ink(p), 'left', -2));
+  text(c, p.title.toUpperCase(), 78, 200 + lines2.length * 62 + 20, `700 12px ${SANS}`, ink(p), 'left', 2);
+  const h = 540, w = (h * im.naturalWidth) / im.naturalHeight;
+  if (p.id === 'subara') {
+    // store artwork already carries its own device: present it as a rounded card
+    const x = SLIDE_W - 120 - w, y = 30;
+    shadow(c, 40, 'rgba(20,0,60,.45)', 16);
+    fillRR(c, x, y, w, h, 22, '#000');
+    noShadow(c);
+    c.save();
+    rr(c, x, y, w, h, 22);
+    c.clip();
+    c.drawImage(im, x, y, w, h);
+    c.restore();
+  } else {
+    const pw = w + 20;
+    phone(c, SLIDE_W - 130 - pw, 22, pw, (cc, sw, sh) => cc.drawImage(im, 0, 0, sw, sh), '#0c0c0f');
+  }
+}
+
+/** all slides of a project into one atlas (2 columns × 3 rows of 1008×600 cells).
+ *  Uses public/projects/<id>/manifest.json when present (cover drawn live, captures framed), else the designed set. */
+export async function buildSlideAtlas(project: Project): Promise<SlideAtlas> {
+  await loadFonts();
+  const manifest = await loadManifest(project);
+  const count = Math.min(6, manifest ? manifest.length : project.slides);
+  const images = manifest ? await Promise.all(manifest.slice(0, count).map((e, i) => (i === 0 ? null : loadImage(e.src).catch(() => null)))) : [];
   const atlas = document.createElement('canvas');
   atlas.width = ATLAS;
   atlas.height = ATLAS;
@@ -993,21 +1107,21 @@ export async function buildSlideAtlas(project: Project): Promise<SlideAtlas> {
   const slide = document.createElement('canvas');
   slide.width = SLIDE_W;
   slide.height = SLIDE_H;
-  const c = slide.getContext('2d', { willReadFrequently: true })!;
+  const c = slide.getContext('2d')!;
   const thumb = document.createElement('canvas');
   thumb.width = 100;
   thumb.height = 60;
   const t = thumb.getContext('2d')!;
   const rects: SlideAtlas['rects'] = [];
   const thumbs: string[] = [];
-  for (let s = 0; s < project.slides; s++) {
-    seed = 1 + s * 97 + project.id.length * 13;
+  for (let s = 0; s < count; s++) {
     c.save();
     c.clearRect(0, 0, SLIDE_W, SLIDE_H);
-    designs[s % designs.length](c, project);
+    const im = images[s];
+    if (manifest && im) composeCapture(c, project, im, manifest[s]);
+    else c.drawImage(await renderDesignedSlide(project, s), 0, 0);
     c.restore();
     noShadow(c);
-    grain(c, 9);
     const col = s % 2, row = Math.floor(s / 2);
     const x = col * CELL_W + (CELL_W - SLIDE_W) / 2, y = row * CELL_H + (CELL_H - SLIDE_H) / 2;
     // gutter: smear the edge pixels outward so mips don't bleed neighbouring cells

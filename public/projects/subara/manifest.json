@@ -1,0 +1,44 @@
+[
+ {
+  "src": "/projects/subara/slide-0.webp",
+  "w": 2016,
+  "h": 1200,
+  "kind": "cover",
+  "caption": "Subara cover"
+ },
+ {
+  "src": "/projects/subara/slide-1.webp",
+  "w": 1980,
+  "h": 1760,
+  "kind": "desktop",
+  "caption": "App Store listing"
+ },
+ {
+  "src": "/projects/subara/slide-2.webp",
+  "w": 947,
+  "h": 2048,
+  "kind": "phone",
+  "caption": "Manage all subscriptions"
+ },
+ {
+  "src": "/projects/subara/slide-3.webp",
+  "w": 947,
+  "h": 2048,
+  "kind": "phone",
+  "caption": "Detailed spending analytics"
+ },
+ {
+  "src": "/projects/subara/slide-4.webp",
+  "w": 947,
+  "h": 2048,
+  "kind": "phone",
+  "caption": "Customize your view"
+ },
+ {
+  "src": "/projects/subara/slide-5.webp",
+  "w": 947,
+  "h": 2048,
+  "kind": "phone",
+  "caption": "Never miss a payment"
+ }
+]

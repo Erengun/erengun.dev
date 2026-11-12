@@ -55,7 +55,7 @@ export const PROJECTS: Project[] = [
     title: 'Cached Network Image CE',
     info: 'Zero-jank image caching for Flutter. The maintained fork of cached_network_image, rebuilt on hive_ce: 8× faster cache reads, web support, same API.',
     roles: ['Maintainer', 'Development', 'Open Source'],
-    slides: 4,
+    slides: 6,
     palette: ['#02569b', '#ffb300', '#f5f9ff'],
   },
   {
@@ -63,7 +63,7 @@ export const PROJECTS: Project[] = [
     title: 'Elek',
     info: 'Your coding agent is fast. Your test suite isn’t. An incremental test runner for Dart and Flutter that skips what is already green: up to 107× faster loops.',
     roles: ['Design', 'Development', 'Dart'],
-    slides: 4,
+    slides: 5,
     palette: ['#c8ff00', '#101010', '#ffffff'],
   },
   {
@@ -71,7 +71,7 @@ export const PROJECTS: Project[] = [
     title: 'Subara',
     info: 'A subscription manager for iPhone and iPad, built with Flutter: spending charts, a payment calendar, reminders before renewals, widgets and Live Activities. Data stays on device.',
     roles: ['Design', 'Development', 'iOS'],
-    slides: 4,
+    slides: 6,
     palette: ['#5b3df5', '#ff8fc7', '#f6f3ff'],
   },
 ];

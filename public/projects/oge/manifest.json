@@ -1,0 +1,37 @@
+[
+ {
+  "src": "/projects/oge/slide-0.webp",
+  "w": 2016,
+  "h": 1200,
+  "kind": "cover",
+  "caption": "Öge cover"
+ },
+ {
+  "src": "/projects/oge/slide-1.webp",
+  "w": 1760,
+  "h": 1100,
+  "kind": "desktop",
+  "caption": "README · github.com/Erengun/oge"
+ },
+ {
+  "src": "/projects/oge/slide-2.webp",
+  "w": 1760,
+  "h": 1100,
+  "kind": "desktop",
+  "caption": "Quick start"
+ },
+ {
+  "src": "/projects/oge/slide-3.webp",
+  "w": 1760,
+  "h": 1100,
+  "kind": "desktop",
+  "caption": "How the work is checked"
+ },
+ {
+  "src": "/projects/oge/slide-4.webp",
+  "w": 1760,
+  "h": 1100,
+  "kind": "desktop",
+  "caption": "Where Öge is heading: the Desk"
+ }
+]
