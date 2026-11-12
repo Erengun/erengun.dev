@@ -310,8 +310,8 @@ body.is--carousel:not(.is--loading) .work { visibility: visible; opacity: 1; }
 .project-panel[data-shown] { visibility: visible; opacity: 1; transition: opacity var(--dur-reveal) var(--ease-reveal), visibility var(--dur-reveal) var(--ease-reveal); }
 .pp-label { font-size: .875rem; line-height: 1.2; letter-spacing: -.01rem; }
 .pp-title { font-family: var(--font-offbit); line-height: .954; letter-spacing: -.03em; text-wrap: balance; white-space: normal; font-size: 1.875rem; }
-.pp-info p { font-weight: 700; line-height: 1.1; max-width: 16.6875rem; white-space: normal; font-size: .875rem; }
-.pp-role span { display: block; font-weight: 700; font-size: .875rem; line-height: 1.2; }
+.pp-col-info p:not(.pp-label) { font-weight: 700; line-height: 1.1; max-width: 16.6875rem; white-space: normal; font-size: .875rem; }
+.pp-role-list span { display: block; font-weight: 700; font-size: .875rem; line-height: 1.2; }
 .pp-thumbs { margin-top: .5625rem; display: flex; width: 17.875rem; gap: .5625rem; }
 .pp-thumbs button { height: 1.875rem; width: 3.125rem; border: 1px solid #fff; opacity: .5; transition: opacity 150ms var(--ease-out); overflow: hidden; }
 .pp-thumbs button:hover { opacity: .75; }
@@ -333,8 +333,8 @@ body.is--carousel:not(.is--loading) .work { visibility: visible; opacity: 1; }
     inset-block: 0; flex-direction: column; padding: calc(4rem + var(--safe-t)) max(1.25rem, env(safe-area-inset-right)) calc(2rem + var(--safe-b));
   }
   .project-panel::before, .project-panel::after { content: ""; position: absolute; inset-inline: 0; z-index: -1; pointer-events: none; }
-  .project-panel::before { top: 0; height: 40%; background: linear-gradient(to bottom, var(--c-scrim) 35%, transparent); }
-  .project-panel::after { bottom: 0; height: 60%; background: linear-gradient(to top, var(--c-scrim) 40%, transparent); }
+  .project-panel::before { top: 0; height: 24%; background: linear-gradient(to bottom, var(--c-scrim) 45%, transparent); }
+  .project-panel::after { bottom: 0; height: 36%; background: linear-gradient(to top, var(--c-scrim) 55%, transparent); }
   .pp-label { color: var(--c-gray); letter-spacing: .12em; }
   .pp-col-title .row { display: flex; justify-content: space-between; margin-bottom: .75rem; }
   .pp-bottom { margin-top: auto; display: flex; flex-direction: column; gap: 1.5rem; }

@@ -130,6 +130,18 @@ const workList = $('.work__list');
 $$('[data-work-item]').forEach((b, i) => b.addEventListener('click', () => scrollToVp(i + 1, true)));
 $('[data-scroll-back]').addEventListener('click', () => scrollToVp(SCENE_START + SCENE_VP * 0.79, true));
 
+// in-page anchors drive the scroll timeline (the overlays are fixed, so native hash jumps do nothing)
+const ANCHORS: Record<string, number> = { '/': 0, '/#about': SCENE_START + 0.3, '/#contact': TOTAL_VP };
+document.addEventListener('click', (e) => {
+  const a = (e.target as Element).closest?.('a[href]') as HTMLAnchorElement | null;
+  if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
+  const to = ANCHORS[a.getAttribute('href') ?? ''];
+  if (to === undefined) return;
+  e.preventDefault();
+  closeProject();
+  scrollToVp(to);
+});
+
 // ---------------------------------------------------------------- last section
 const lastStages = $$('[data-last-stage]');
 const lastBlocks = $$('[data-last-scroll]');
@@ -286,5 +298,5 @@ export function setScrollRoute(next: Route, overlay: 'hidden' | 'shown' | 'leavi
   lastRouteKey = key;
   $route.set({ ...cur, route: next, overlay });
 }
-(window as any).__lab = { lenis, $route, scroll, overlays, routeToVp, scrollToVp, SCENE_VP };
+(window as any).__lab = { snap, lenis, $route, scroll, overlays, routeToVp, scrollToVp, SCENE_VP };
 if (reducedMq.matches) body.classList.add('is--reduced');
