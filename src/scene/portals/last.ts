@@ -72,7 +72,7 @@ export interface LastStages {
  * (splats grow by √(total/cap) to keep the coverage). Importance pruning (compact.mjs --order importance) was
  * tried and opens holes in this surface-sampled scene (walls/awnings are many small flat splats).
  */
-export const ALLEY_CAP = { high: 350_000, medium: 200_000, phone: 150_000 };
+export const ALLEY_CAP = { high: 350_000, medium: 200_000, low: 80_000, phone: 150_000 };
 
 export function createLastStages(ctx: StageContext): LastStages {
   const { renderer } = ctx;
@@ -506,7 +506,7 @@ export function createLastStages(ctx: StageContext): LastStages {
     try {
       const mod = await loader();
       if (!mod?.createSplat) return false;
-      const cap = ctx.isPhone ? ALLEY_CAP.phone : ALLEY_CAP[ctx.quality];
+      const cap = ctx.quality === 'low' ? ALLEY_CAP.low : ctx.isPhone ? ALLEY_CAP.phone : ALLEY_CAP[ctx.quality];
       const s = mod.createSplat({ renderer, url: '/splats/alley.csplat', isPhone: ctx.isPhone, cap });
       await s.ready;
       splat = s;
@@ -655,7 +655,7 @@ export function createLastStages(ctx: StageContext): LastStages {
     },
   };
   /** internal resolution of the alley splat pass (× the stage target) */
-  const splatRes = { scale: ctx.isPhone ? 0.7 : ctx.quality === 'high' ? 0.75 : 0.7 };
+  const splatRes = { scale: ctx.quality === 'low' ? 0.55 : ctx.isPhone ? 0.7 : ctx.quality === 'high' ? 0.75 : 0.7 };
   const splatRT = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true });
   const blitMat = new MeshBasicNodeMaterial();
   blitMat.colorNode = texture(splatRT.texture, screenUV);

@@ -24,15 +24,43 @@ type Hooks = {
   onProgress: (p: number) => void;
 };
 
+/** GPU name from a throwaway WebGL context ('' when the browser hides it) */
+function probeGpu(): string {
+  try {
+    const c = document.createElement('canvas');
+    const gl = (c.getContext('webgl2') || c.getContext('webgl')) as WebGLRenderingContext | null;
+    if (!gl) return '';
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? '');
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return name;
+  } catch {
+    return '';
+  }
+}
+/** entry-level mobile GPUs (e.g. Galaxy M31s: Mali-G72 MP3): fill-rate bound, slow WebGPU drivers */
+const LOW_END_GPU = /Mali-(T\d+|G(31|51|52|57|71|72|76)\b)|Adreno[^\d]*(\b[2-5]\d\d\b|\b6[01]\d\b)|PowerVR|IMG BXM|Mali-400/i;
+
 export async function createApp(container: HTMLElement, hooks: Hooks) {
   const params = new URLSearchParams(location.search);
-  const forceWebGL = params.has('webgl');
+  const isPhoneDevice = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 820;
+  const gpuName = probeGpu();
+  const forcedQ = params.get('quality');
+  const lowEnd =
+    forcedQ === 'low' ||
+    (!forcedQ && isPhoneDevice && (LOW_END_GPU.test(gpuName) || ((navigator as any).deviceMemory ?? 8) <= 3));
+  // entry-level phone GPUs run three's WebGL2 backend noticeably faster than their WebGPU drivers
+  const forceWebGL = params.has('webgl') || lowEnd;
   const gpuTime = params.has('gputime');
   const renderer = new WebGPURenderer({ antialias: false, forceWebGL, trackTimestamp: gpuTime } as any);
   await renderer.init();
   container.appendChild(renderer.domElement);
   const isPhoneNow = () => scroll.isPhone || matchMedia('(max-width: 47.99rem), (max-aspect-ratio: 4/3)').matches;
-  const quality: 'high' | 'medium' = (navigator as any).deviceMemory <= 4 || (renderer.backend as any).isWebGLBackend ? 'medium' : 'high';
+  const quality: 'high' | 'medium' | 'low' = lowEnd
+    ? 'low'
+    : forcedQ === 'high' || forcedQ === 'medium'
+      ? forcedQ
+      : (navigator as any).deviceMemory <= 4 || (renderer.backend as any).isWebGLBackend ? 'medium' : 'high';
   const ctx: StageContext = { renderer, isPhone: isPhoneNow(), quality };
 
   // ------------------------------------------------------------- compositor + post
@@ -78,14 +106,16 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   });
 
   // ------------------------------------------------------------- resolution
-  // tier caps (spec §9): desktop 1.6 / phone 2 on high; medium (WebGL2 fallback, ≤ 4 GB) lower
+  // tier caps: desktop 1.6 / phone 1.75 on high; medium (WebGL2 fallback, ≤ 4 GB) 1 / 1.25; low (entry-level
+  // phone GPU) 1, down to .5. Phones start a step below their cap and climb only if frames stay smooth.
   const dprCap = () => {
     const dev = Math.min(devicePixelRatio, 2);
-    const cap = ctx.isPhone ? (quality === 'high' ? 2 : 1.25) : quality === 'high' ? 1.6 : 1;
+    const cap = quality === 'low' ? 1 : ctx.isPhone ? (quality === 'high' ? 1.75 : 1.25) : quality === 'high' ? 1.6 : 1;
     return Math.min(dev, cap);
   };
   const DPR_STEP = 0.25;
-  const dpr = { reduction: 0, applied: 0, minRatio: 0.75 };
+  const dpr = { reduction: 0, applied: 0, minRatio: quality === 'low' ? 0.5 : 0.75 };
+  if (ctx.isPhone && quality !== 'low') dpr.reduction = DPR_STEP;
   const floorRatio = () => Math.min(dpr.minRatio, dprCap());
   const targetRatio = () => Math.max(dprCap() - dpr.reduction, floorRatio());
   function applySize() {
@@ -113,7 +143,8 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   let loading = () => true; // set once the journey exists: background loads/compiles make frames unrepresentative
   function skipWindow() { ctl.skip = true; }
   function adapt(dt: number, now: number) {
-    if (document.hidden || dt > 0.1 || loading()) skipWindow();
+    // while stages stream in, frames are noisy; still react to a clearly struggling GPU (< 30 fps)
+    if (document.hidden || dt > 0.1) skipWindow();
     ctl.t += dt; ctl.n++; ctl.sum += dt; ctl.sq += dt * dt;
     if (ctl.t < 1) return;
     const mean = ctl.sum / ctl.n;
@@ -124,11 +155,15 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     if (skip) return;
     const fps = 1 / mean;
     const capped30 = fps > 26 && fps < 34 && sd < 0.004;
+    if (loading() && fps >= 30) return;
+    // safety net when the GPU name is hidden: still < 30 fps at the floor → allow going down to .5
+    if (fps < 30 && !capped30 && dpr.applied <= floorRatio() + 1e-3 && dpr.minRatio > 0.5) dpr.minRatio = 0.5;
     if (fps < 45 && !capped30 && dpr.applied > floorRatio() + 1e-3) {
       ctl.blockedRatio = dpr.applied;
       ctl.blockUpUntil = now + 8;
-      dpr.reduction = Math.min(dpr.reduction + DPR_STEP, dprCap() - floorRatio());
-    } else if (fps > 58 && dpr.reduction > 0) {
+      // badly struggling: drop two steps at once
+      dpr.reduction = Math.min(dpr.reduction + (fps < 30 ? 2 : 1) * DPR_STEP, dprCap() - floorRatio());
+    } else if (fps > 58 && dpr.reduction > 0 && !loading()) {
       const next = Math.max(dprCap() - (dpr.reduction - DPR_STEP), floorRatio());
       if (next >= ctl.blockedRatio - 1e-3 && now < ctl.blockUpUntil) return;
       dpr.reduction = Math.max(0, dpr.reduction - DPR_STEP);
