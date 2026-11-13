@@ -55,6 +55,7 @@ export interface TransitionDef {
 /** memory stages exist only once src/scene/memories/index.ts has landed */
 export const MEMORY_IDS = ['stage', 'teams'] as const;
 /** user: "for now hide the memory scenes" — flip to true to bring them back */
+// assets removed from public/ (2026-11-13); restore first: git checkout memories-assets-2026-11-13 -- public/memories
 export const SHOW_MEMORIES = false;
 export const HAS_MEMORIES = SHOW_MEMORIES && Object.keys((import.meta as any).glob('../scene/memories/index.ts')).length > 0;
 
