@@ -1,0 +1,92 @@
+---
+import { render } from 'astro:content';
+import BlogLayout from '../../layouts/BlogLayout.astro';
+import { getPosts, displayDate, isoDate, readingTime, type Post } from '../../lib/blog';
+import { SITE } from '../../lib/content';
+
+export async function getStaticPaths() {
+  const posts = await getPosts();
+  return posts.map((post, i) => ({
+    params: { slug: post.id },
+    // posts are newest first: "newer" is the previous index
+    props: { post, newer: posts[i - 1] ?? null, older: posts[i + 1] ?? null },
+  }));
+}
+
+interface Props { post: Post; newer: Post | null; older: Post | null }
+const { post, newer, older } = Astro.props;
+const { Content } = await render(post);
+const URL_BASE = 'https://erengun.dev';
+const path = `/blog/${post.id}/`;
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'BlogPosting',
+  headline: post.data.title,
+  description: post.data.summary,
+  datePublished: isoDate(post.data.date),
+  url: URL_BASE + path,
+  mainEntityOfPage: URL_BASE + path,
+  image: URL_BASE + '/og.jpg',
+  keywords: post.data.tags.join(', '),
+  author: { '@type': 'Person', name: SITE.name, url: URL_BASE + '/' },
+  publisher: { '@type': 'Person', name: SITE.name, url: URL_BASE + '/' },
+};
+---
+<BlogLayout title={post.data.title} description={post.data.summary} path={path} type="article" jsonLd={jsonLd} published={post.data.date}>
+  <article>
+    <header class="head">
+      <p class="eyebrow"><a href="/blog/"><span class="g">&lt;</span> all posts</a></p>
+      <h1>{post.data.title}</h1>
+      <p class="eyebrow"><time datetime={isoDate(post.data.date)}>{displayDate(post.data.date)}</time> · {readingTime(post.body)}</p>
+      {post.data.tags.length > 0 && <ul class="tags">{post.data.tags.map((t) => <li>{t}</li>)}</ul>}
+    </header>
+    <div class="prose">
+      <Content />
+    </div>
+  </article>
+
+  <nav class="pager" aria-label="More posts">
+    {older ? <a href={`/blog/${older.id}/`} rel="prev"><span class="eyebrow">&lt; older</span><span>{older.data.title}</span></a> : <span />}
+    {newer ? <a class="r" href={`/blog/${newer.id}/`} rel="next"><span class="eyebrow">newer &gt;</span><span>{newer.data.title}</span></a> : <span />}
+  </nav>
+</BlogLayout>
+
+<style>
+  .head { display: grid; gap: .75rem; margin-bottom: 2.5rem; padding-bottom: 2rem; border-bottom: 1px solid var(--line); }
+  .head a { text-decoration: none; }
+  .head a:hover { color: var(--fg); }
+  h1 { font-size: clamp(1.875rem, 5.5vw, 2.75rem); line-height: 1.12; letter-spacing: -.02em; margin: .25rem 0; font-weight: 700; text-wrap: balance; }
+
+  .pager { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--line); }
+  .pager a { display: grid; gap: .35rem; text-decoration: none; font-weight: 600; line-height: 1.35; }
+  .pager a:hover span:last-child { text-decoration: underline; text-underline-offset: .2em; text-decoration-thickness: 1px; }
+  .pager .r { text-align: right; }
+  @media (max-width: 480px) { .pager { grid-template-columns: 1fr; } .pager .r { text-align: left; } }
+
+  .prose :global(> * + *) { margin-top: 1.25em; }
+  .prose :global(p), .prose :global(ul), .prose :global(ol) { margin-block: 0; }
+  .prose :global(li + li) { margin-top: .4em; }
+  .prose :global(ul), .prose :global(ol) { padding-left: 1.4em; }
+  .prose :global(h2) { font-size: 1.5rem; line-height: 1.25; letter-spacing: -.01em; margin: 2.5em 0 0; }
+  .prose :global(h3) { font-size: 1.1875rem; line-height: 1.3; margin: 2em 0 0; }
+  .prose :global(h2 + *), .prose :global(h3 + *) { margin-top: .75em; }
+  .prose :global(a) { color: var(--ice); text-underline-offset: .2em; text-decoration-thickness: 1px; }
+  .prose :global(a:hover) { color: var(--fg); }
+  .prose :global(strong) { color: #fff; }
+  .prose :global(em) { color: #d0d0d0; }
+  .prose :global(hr) { border: 0; border-top: 1px solid var(--line); margin-block: 2.5em; }
+  .prose :global(blockquote) { margin-inline: 0; padding-left: 1em; border-left: 2px solid var(--accent); color: var(--dim); }
+  .prose :global(:not(pre) > code) {
+    font: .875em/1 var(--font-mono); background: var(--code-bg); border: 1px solid var(--line); padding: .15em .35em; border-radius: 3px;
+    overflow-wrap: anywhere;
+  }
+  .prose :global(pre) {
+    font: .875rem/1.6 var(--font-mono); padding: 1rem 1.125rem; border: 1px solid var(--line); border-radius: 4px;
+    overflow-x: auto; background: var(--code-bg) !important; tab-size: 2;
+  }
+  @media (max-width: 640px) { .prose :global(pre) { margin-inline: -16px; border-radius: 0; border-inline: 0; } }
+  .prose :global(img) { max-width: 100%; height: auto; }
+  .prose :global(table) { width: 100%; border-collapse: collapse; font-size: .9375rem; display: block; overflow-x: auto; }
+  .prose :global(th), .prose :global(td) { border: 1px solid var(--line); padding: .5em .75em; text-align: left; }
+  .prose :global(iframe) { border: 0; }
+</style>

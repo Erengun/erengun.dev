@@ -2,6 +2,8 @@
 import '../styles/global.css';
 import { SITE, SOCIALS, MENU, PROJECTS, LAST } from '../lib/content';
 import { TOTAL_VP } from '../lib/timeline';
+import { getPosts } from '../lib/blog';
+const posts = await getPosts();
 const pad = (n: number) => String(n).padStart(2, '0');
 const plus = `data:image/svg+xml,${encodeURIComponent('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 23.5V0M0 11.5H24" stroke="white" stroke-opacity="0.5"/></svg>')}`;
 const URL_BASE = 'https://erengun.dev/';
@@ -56,6 +58,7 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="sitemap" href="/sitemap.xml" />
+    <link rel="alternate" type="application/rss+xml" title="Eren Gün — Blog" href="/rss.xml" />
     <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Ccircle cx='8' cy='8' r='3' fill='%2311ff00'/%3E%3C/svg%3E" />
     <title>{TITLE}</title>
@@ -80,6 +83,10 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
             <li><article><h3>{p.url ? <a href={p.url}>{p.title}</a> : p.title}</h3><p>{p.info}</p><p>Role: {p.roles.join(', ')}</p></article></li>
           ))}
         </ol>
+      </section>
+      <section aria-labelledby="seo-blog">
+        <h2 id="seo-blog"><a href="/blog/">Blog</a></h2>
+        <ul>{posts.map((p) => <li><a href={`/blog/${p.id}/`}>{p.data.title}</a></li>)}</ul>
       </section>
       <section aria-labelledby="seo-contact">
         <h2 id="seo-contact">Contact</h2>

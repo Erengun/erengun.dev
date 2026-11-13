@@ -1,0 +1,57 @@
+---
+import BlogLayout from '../../layouts/BlogLayout.astro';
+import { getPosts, BLOG_TITLE, BLOG_DESC, displayDate, isoDate, readingTime } from '../../lib/blog';
+import { SITE } from '../../lib/content';
+
+const posts = await getPosts();
+const URL_BASE = 'https://erengun.dev';
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Blog',
+  name: `${SITE.name} — ${BLOG_TITLE}`,
+  url: URL_BASE + '/blog/',
+  description: BLOG_DESC,
+  author: { '@type': 'Person', name: SITE.name, url: URL_BASE + '/' },
+  blogPost: posts.map((p) => ({
+    '@type': 'BlogPosting',
+    headline: p.data.title,
+    url: `${URL_BASE}/blog/${p.id}/`,
+    datePublished: isoDate(p.data.date),
+  })),
+};
+---
+<BlogLayout title={BLOG_TITLE} description={BLOG_DESC} path="/blog/" jsonLd={jsonLd}>
+  <p class="eyebrow"><span class="g">&gt;</span> {posts.length} posts</p>
+  <h1 class="display">Blog</h1>
+  <p class="lede">{BLOG_DESC}</p>
+
+  <ol class="posts">
+    {posts.map((p, i) => (
+      <li>
+        <a href={`/blog/${p.id}/`}>
+          <span class="n" aria-hidden="true">{String(posts.length - i).padStart(2, '0')}</span>
+          <span class="body">
+            <span class="meta"><time datetime={isoDate(p.data.date)}>{displayDate(p.data.date)}</time> · {readingTime(p.body)}</span>
+            <span class="t">{p.data.title}</span>
+            <span class="s">{p.data.summary}</span>
+          </span>
+        </a>
+      </li>
+    ))}
+  </ol>
+</BlogLayout>
+
+<style>
+  .lede { color: var(--dim); margin: 0 0 2.5rem; max-width: 34rem; }
+  .posts { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  .posts li { border-bottom: 1px solid var(--line); }
+  .posts a { display: grid; grid-template-columns: 2.5rem 1fr; gap: 1rem; padding: 1.5rem 0; text-decoration: none; }
+  .n { font: 900 1.5rem/1.2 var(--font-doto); color: var(--dim); }
+  .body { display: grid; gap: .35rem; min-width: 0; }
+  .meta { font: 400 .75rem/1.4 var(--font-mono); text-transform: uppercase; color: var(--dim); }
+  .t { font-size: 1.25rem; font-weight: 600; line-height: 1.3; }
+  .s { color: var(--dim); font-size: .9375rem; line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .posts a:hover .t { text-decoration: underline; text-underline-offset: .2em; text-decoration-thickness: 1px; }
+  .posts a:hover .n { color: var(--accent); }
+  @media (max-width: 480px) { .posts a { grid-template-columns: 1fr; gap: .25rem; } .n { font-size: 1.125rem; } }
+</style>
