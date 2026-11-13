@@ -17,6 +17,7 @@ export const MENU = [
   { label: 'home', href: '/' },
   { label: 'about', href: '/#about' },
   { label: 'work', href: '/#work' },
+  { label: 'blog', href: '/blog/' },
   { label: 'contact', href: '/#contact' },
   { label: 'github', href: 'https://github.com/Erengun' },
   { label: 'linkedin', href: 'https://www.linkedin.com/in/erengun/' },

@@ -36,5 +36,6 @@ export default defineConfig({
     },
   },
   server: { port: 4380 },
+  markdown: { shikiConfig: { theme: 'vitesse-black', wrap: false } },
   devToolbar: { enabled: false },
 });

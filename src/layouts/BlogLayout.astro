@@ -1,0 +1,130 @@
+---
+// Plain, fast reading pages: no WebGL, one small stylesheet, Doto only for display type.
+import { SITE } from '../lib/content';
+
+interface Props {
+  title: string;
+  description: string;
+  path: string;
+  type?: 'website' | 'article';
+  jsonLd?: object;
+  published?: Date;
+}
+const { title, description, path, type = 'website', jsonLd, published } = Astro.props;
+const URL_BASE = 'https://erengun.dev';
+const url = URL_BASE + path;
+const fullTitle = `${title} — ${SITE.name}`;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#050505" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    <meta name="author" content={SITE.name} />
+    <link rel="canonical" href={url} />
+    <meta property="og:type" content={type} />
+    <meta property="og:site_name" content={SITE.name} />
+    <meta property="og:url" content={url} />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={URL_BASE + '/og.jpg'} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    {published && <meta property="article:published_time" content={published.toISOString()} />}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={fullTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={URL_BASE + '/og.jpg'} />
+    <link rel="alternate" type="application/rss+xml" title={`${SITE.name} — Blog`} href="/rss.xml" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Doto:wght@700;900&display=swap" rel="stylesheet" />
+    {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="bar">
+      <a class="logo" href="/">{SITE.logo}</a>
+      <nav aria-label="Site">
+        <a href="/blog/" aria-current={path.startsWith('/blog') ? 'page' : undefined}>blog</a>
+        <a href="/#work">work</a>
+        <a href={`mailto:${SITE.email}`}>let's talk</a>
+      </nav>
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+    <footer class="foot">
+      <a href="/">&gt; back to the journey</a>
+      <a href="/rss.xml">rss</a>
+      <a href="/privacy/">privacy</a>
+      <span>© {SITE.year} {SITE.name}</span>
+    </footer>
+  </body>
+</html>
+
+<style is:global>
+  :root {
+    --bg: #050505;
+    --fg: #e6e6e6;
+    --dim: #9a9a9a;
+    --line: #ffffff1f;
+    --accent: #1f0;
+    --ice: #cde7e9;
+    --code-bg: #0e0f10;
+    --font-doto: "Doto", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color-scheme: dark;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { background: var(--bg); -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--fg);
+    font: 400 1.0625rem/1.7 var(--font-body);
+    display: flex; flex-direction: column;
+  }
+  a { color: inherit; }
+  .skip { position: absolute; left: -9999px; }
+  .skip:focus { left: 16px; top: 16px; background: var(--fg); color: var(--bg); padding: .5rem .75rem; z-index: 10; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  .bar, .foot, main { width: 100%; max-width: 46rem; margin-inline: auto; padding-inline: 16px; }
+  @media (min-width: 640px) { .bar, .foot, main { padding-inline: 24px; } }
+
+  .bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding-block: 1.25rem; font: 700 .8125rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: .04em;
+  }
+  .bar .logo { font: 900 1.25rem/1 var(--font-doto); text-decoration: none; text-transform: uppercase; letter-spacing: 0; }
+  .bar nav { display: flex; gap: 1.25rem; }
+  .bar nav a { text-decoration: none; color: var(--dim); }
+  .bar nav a:hover, .bar nav a[aria-current] { color: var(--fg); }
+  .bar nav a[aria-current]::before { content: "> "; color: var(--accent); }
+
+  main { flex: 1; padding-block: 2rem 4rem; }
+
+  .foot {
+    display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; padding-block: 2rem 2.5rem; border-top: 1px solid var(--line);
+    font: 400 .75rem/1.4 var(--font-mono); text-transform: uppercase; color: var(--dim);
+  }
+  .foot a { text-decoration: none; }
+  .foot a:hover { color: var(--fg); }
+  .foot span { margin-left: auto; }
+
+  .eyebrow { font: 400 .75rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 0; }
+  .eyebrow .g { color: var(--accent); }
+  .display {
+    font: 900 clamp(2.5rem, 9vw, 4.5rem)/.95 var(--font-doto); text-transform: uppercase; margin: .5rem 0 1rem;
+    text-shadow: 0 0 .2rem #ffffff9c; letter-spacing: -.01em;
+  }
+  .tags { display: flex; flex-wrap: wrap; gap: .375rem; padding: 0; margin: 0; list-style: none; }
+  .tags li { font: 400 .6875rem/1 var(--font-mono); text-transform: uppercase; color: var(--ice); border: 1px solid #cde7e933; padding: .3rem .45rem; }
+</style>
