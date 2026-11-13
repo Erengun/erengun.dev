@@ -136,7 +136,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     c = mix(c, uHorizon.mul(0.8), smoothstep(40.0, 320.0, d).mul(0.6));
     return vec4(c, 1);
   })();
-  const PINES = ctx.isPhone ? 260 : 520;
+  const PINES = ctx.quality === 'low' ? 140 : ctx.isPhone ? 260 : 520;
   const pines = new InstancedMesh(pineGeometry(), pineMat, PINES);
   pines.count = 0;
   pines.frustumCulled = false;
@@ -155,12 +155,14 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   world.add(ridge);
 
   // ------------------------------------------------------------------ splat (photo, hero)
-  const splat: SplatHandle = createSplat({ renderer: ctx.renderer, url: BASE + 'ski.csplat', isPhone: ctx.isPhone });
+  const splat: SplatHandle = createSplat({
+    renderer: ctx.renderer, url: BASE + 'ski.csplat', isPhone: ctx.isPhone, cap: ctx.quality === 'low' ? 110_000 : undefined,
+  });
   splat.object.renderOrder = 10;
   world.add(splat.object);
 
   // ------------------------------------------------------------------ falling snow + spray
-  const SNOW = ctx.isPhone ? 700 : 1600;
+  const SNOW = ctx.quality === 'low' ? 350 : ctx.isPhone ? 700 : 1600;
   const flakeMat = new SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: AdditiveBlending });
   const fi = float(instanceIndex);
   const h1 = hash(fi), h2 = hash(fi.add(3.1)), h3 = hash(fi.add(7.7)), h4 = hash(fi.add(11.3));

@@ -46,7 +46,7 @@ export interface Portal {
 export interface PortalContext {
   renderer: WebGPURenderer;
   isPhone: boolean;
-  quality: 'high' | 'medium';
+  quality: 'high' | 'medium' | 'low';
 }
 
 export const PORTAL_H = 1.5;

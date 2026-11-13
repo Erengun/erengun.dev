@@ -24,7 +24,7 @@ export interface StageFrame {
   parallax: { x: number; y: number };
   aspect: number;
   isPhone: boolean;
-  quality: 'high' | 'medium';
+  quality: 'high' | 'medium' | 'low';
   /** project stages: active slide index driven by the DOM thumbs / arrow keys / drag */
   slide: number;
   /** true once the preloader gate has opened */
@@ -60,7 +60,7 @@ export interface Stage {
 export interface StageContext {
   renderer: WebGPURenderer;
   isPhone: boolean;
-  quality: 'high' | 'medium';
+  quality: 'high' | 'medium' | 'low';
 }
 
 /** Real screenshots for a project, from public/projects/<id>/manifest.json */
