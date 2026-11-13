@@ -777,9 +777,9 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
       // portrait: panel + bench side by side would be tiny, so frame the patch bench (the hero) on its own;
       // the screenshots are still on the scroll to its left and in the DOM thumbnails
       const bx0 = benchCorner(0, 0).x - 0.05, bx1 = benchR.x + 0.05;
-      const Hb = Math.max((benchT.y - B_POS.y + 0.1) / (0.62 - 0.12), (bx1 - bx0) / (0.94 * aspect));
+      const Hb = Math.max((benchT.y - B_POS.y + 0.1) / (0.64 - 0.2), (bx1 - bx0) / (0.94 * aspect));
       const db = Hb / 2 / tanH + 0.4;
-      const cxb = (bx0 + bx1) / 2 + 0.1, cyb = benchT.y + 0.165 * Hb - Hb / 2;
+      const cxb = (bx0 + bx1) / 2 + 0.1, cyb = benchT.y + 0.23 * Hb - Hb / 2;
       out.pos.set(cxb + lerp(0.04, -0.04, u) - 0.25, cyb + 0.05, db + 0.6);
       out.look.set(cxb - 0.05, cyb, 0.5);
       return;

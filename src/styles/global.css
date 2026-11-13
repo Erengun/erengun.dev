@@ -301,8 +301,10 @@ body.is--project [data-chapter="work"] > a i, body.is--contact [data-chapter="co
   .project-panel::after { content: ""; position: absolute; inset: 0 0 auto; height: 30%; background: linear-gradient(to bottom, rgb(8 8 10 / .7), rgb(8 8 10 / 0)); pointer-events: none; z-index: -1; }
   .pp-grid { height: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto 1fr auto; row-gap: 1.25rem; padding-top: calc(5.5rem + var(--safe-t)); padding-bottom: calc(1.5rem + var(--safe-b)); }
   .pp-col-title { grid-column: 1 / -1; align-self: start; }
-  .pp-title { font-size: clamp(3.5rem, 17vw, 7rem); }
-  .pp-title.is-long { font-size: clamp(2.25rem, 9.5vw, 4rem); }
+  /* smaller than desktop: the worlds frame their hero below a ~25 % top band on phones */
+  .pp-col-title { gap: .5rem; }
+  .pp-title { font-size: clamp(2.75rem, 12vw, 5rem); }
+  .pp-title.is-long { font-size: clamp(1.875rem, 7.5vw, 3rem); }
   .pp-col-info { grid-column: 1 / -1; grid-row: 3; }
   .pp-col-role { grid-column: 1 / -1; grid-row: 4; }
   .pp-text { font-size: .9375rem; }

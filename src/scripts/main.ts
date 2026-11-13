@@ -200,14 +200,14 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------------------------------------------------------------- about / memories / who text blocks
-type TextBlock = { el: HTMLElement; stage: number; anchor: number };
+type TextBlock = { el: HTMLElement; stage: number; anchor: number; top: number };
 const lastSection = $('[data-last]');
 const backdropFade = $('[data-last-backdrop-fade]');
 const blocks: TextBlock[] = [];
 function addBlock(el: HTMLElement, stageId: string, anchorOffset: number) {
   const i = stageIndex(stageId);
   if (i < 0) return;
-  blocks.push({ el, stage: i, anchor: STAGES[i].start + anchorOffset });
+  blocks.push({ el, stage: i, anchor: STAGES[i].start + anchorOffset, top: -1 });
 }
 {
   const [about, who] = $$('[data-last-scroll]');
@@ -249,6 +249,9 @@ const setStyle = (el: HTMLElement, prop: 'clipPath' | 'opacity' | 'translate', v
   w[prop] = v;
   el.style[prop] = v;
 };
+let headerBottomPx = -1;
+const headerBottom = () => (headerBottomPx >= 0 ? headerBottomPx : (headerBottomPx = $('.header__grid')?.getBoundingClientRect().bottom ?? 72));
+addEventListener('resize', () => { headerBottomPx = -1; blocks.forEach((b) => (b.top = -1)); });
 function updateBlocks(vp: number, vh: number) {
   let anyVisible = false;
   for (const b of blocks) {
@@ -266,7 +269,11 @@ function updateBlocks(vp: number, vh: number) {
     const fadeIn = tin?.kind === 'wipe' ? 1 : smoothstep(0.55, 0.95, l.enter);
     const fadeOut = tout?.kind === 'wipe' ? 1 : 1 - smoothstep(0.05, 0.45, l.exit);
     setStyle(b.el, 'opacity', String(fadeIn * fadeOut));
-    setStyle(b.el, 'translate', `0px ${-(vp - b.anchor) * 0.5 * vh}px`);
+    // drift with the scroll (slower on phones, where the block is tall), but never up under the header
+    if (b.top < 0) b.top = b.el.offsetTop;
+    const drift = -(vp - b.anchor) * (phoneMq.matches ? 0.16 : 0.5) * vh;
+    const minShift = headerBottom() + 20 - b.top;
+    setStyle(b.el, 'translate', `0px ${Math.round(Math.max(drift, Math.min(0, minShift)))}px`);
   }
   if (backdropFade.hasAttribute('data-past-header') !== !anyVisible) backdropFade.toggleAttribute('data-past-header', !anyVisible);
 }
