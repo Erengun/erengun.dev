@@ -1,5 +1,5 @@
 ---
-// Plain, fast reading pages: no WebGL, one small stylesheet, Doto only for display type.
+// Plain, fast reading pages: no WebGL, one small stylesheet, same type as the journey (Space Grotesk + IBM Plex Mono).
 import { SITE } from '../lib/content';
 
 interface Props {
@@ -45,7 +45,7 @@ const fullTitle = `${title} — ${SITE.name}`;
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Doto:wght@700;900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
     {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
   </head>
   <body>
@@ -72,16 +72,16 @@ const fullTitle = `${title} — ${SITE.name}`;
 
 <style is:global>
   :root {
-    --bg: #050505;
+    --bg: #08080a;
     --fg: #e6e6e6;
     --dim: #9a9a9a;
     --line: #ffffff1f;
-    --accent: #1f0;
+    --accent: #ff5a1f;
     --ice: #cde7e9;
     --code-bg: #0e0f10;
-    --font-doto: "Doto", ui-monospace, SFMono-Regular, Menlo, monospace;
-    --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    --font-body: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     color-scheme: dark;
   }
   *, *::before, *::after { box-sizing: border-box; }
@@ -101,9 +101,9 @@ const fullTitle = `${title} — ${SITE.name}`;
 
   .bar {
     display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-    padding-block: 1.25rem; font: 700 .8125rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: .04em;
+    padding-block: 1.25rem; border-bottom: 1px solid var(--line); font: 400 .75rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: .08em;
   }
-  .bar .logo { font: 900 1.25rem/1 var(--font-doto); text-decoration: none; text-transform: uppercase; letter-spacing: 0; }
+  .bar .logo { font: 700 1.125rem/1 var(--font-display); text-decoration: none; letter-spacing: -.01em; text-transform: none; }
   .bar nav { display: flex; gap: 1.25rem; }
   .bar nav a { text-decoration: none; color: var(--dim); }
   .bar nav a:hover, .bar nav a[aria-current] { color: var(--fg); }
@@ -122,8 +122,7 @@ const fullTitle = `${title} — ${SITE.name}`;
   .eyebrow { font: 400 .75rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 0; }
   .eyebrow .g { color: var(--accent); }
   .display {
-    font: 900 clamp(2.5rem, 9vw, 4.5rem)/.95 var(--font-doto); text-transform: uppercase; margin: .5rem 0 1rem;
-    text-shadow: 0 0 .2rem #ffffff9c; letter-spacing: -.01em;
+    font: 700 clamp(3.5rem, 12vw, 7rem)/.85 var(--font-display); margin: .5rem 0 1.25rem; letter-spacing: -.055em;
   }
   .tags { display: flex; flex-wrap: wrap; gap: .375rem; padding: 0; margin: 0; list-style: none; }
   .tags li { font: 400 .6875rem/1 var(--font-mono); text-transform: uppercase; color: var(--ice); border: 1px solid #cde7e933; padding: .3rem .45rem; }

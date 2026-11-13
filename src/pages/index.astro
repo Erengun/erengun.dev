@@ -1,11 +1,23 @@
 ---
 import '../styles/global.css';
 import { SITE, SOCIALS, MENU, PROJECTS, LAST } from '../lib/content';
-import { TOTAL_VP } from '../lib/timeline';
+import { TOTAL_VP, STAGES } from '../lib/timeline';
 import { getPosts } from '../lib/blog';
 const posts = await getPosts();
+const STAGE_COUNT = STAGES.length;
+const linkLabel = (u: string) => (u.includes('apps.apple.com') ? 'App Store' : u.replace(/^https:\/\/(www\.)?/, ''));
+const CHAPTERS = [
+  { id: 'intro', n: '00', label: 'Intro', href: '/' },
+  { id: 'about', n: '01', label: 'About', href: '/#about' },
+  { id: 'who', n: '02', label: 'Who I work with', href: '/#who' },
+  { id: 'work', n: '03', label: 'Work', href: '/#work' },
+  { id: 'contact', n: '04', label: 'Contact', href: '/#contact' },
+];
+const FEATURED = [
+  { id: 'oge', label: 'Latest · Öge', href: '/#work' },
+  { id: 'cached-network-image-ce', label: 'Most used · CNI CE', href: '/#work-3' },
+];
 const pad = (n: number) => String(n).padStart(2, '0');
-const plus = `data:image/svg+xml,${encodeURIComponent('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 23.5V0M0 11.5H24" stroke="white" stroke-opacity="0.5"/></svg>')}`;
 const URL_BASE = 'https://erengun.dev/';
 const TITLE = `${SITE.name} — Software Developer | AI Engineering`;
 const DESC = 'Eren Gün is a software developer from Istanbul working on AI engineering, developer tools and fast Flutter apps: Öge, Ferman, Cached Network Image CE, Elek and Subara.';
@@ -28,14 +40,13 @@ const jsonLd = {
     })),
   ],
 };
-const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 9h23M16 1l8 8-8 8" stroke="white" stroke-width="1.5"/></svg>`;
 ---
 <!doctype html>
 <html lang="en" style={`--scroll-viewports:${TOTAL_VP}`}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#000" />
+    <meta name="theme-color" content="#08080a" />
     <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="description" content={DESC} />
     <meta name="author" content={SITE.name} />
@@ -64,8 +75,7 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
     <title>{TITLE}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Doto:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="preload" href="/fonts/OffBit-DotBold.subset.woff2" as="font" type="font/woff2" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
   </head>
   <body class="is--loading">
     <a class="sr-only" href="#about">Skip to content</a>
@@ -96,12 +106,22 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
     </main>
 
     <div class="preloader" data-preloader role="status" aria-live="polite">
-      <span class="preloader__label">Loading</span>
-      <div class="preloader__pill"><span class="preloader__dot"></span></div>
+      <div class="pl-top container-b">
+        <span class="pl-name">{SITE.name}</span>
+        <span class="mono">Loading the journey</span>
+        <span class="mono hide-phone">{STAGE_COUNT} scenes · {PROJECTS.length} projects</span>
+        <span class="mono pl-right hide-phone">Istanbul, TR</span>
+      </div>
+      <div class="pl-line container-b"><i data-preloader-bar></i></div>
+      <div class="pl-bottom container-b">
+        <p class="pl-count"><span data-preloader-count>0</span><small>%<br />loaded</small></p>
+        <p class="mono pl-note">Best with a real GPU</p>
+      </div>
       <div class="motion-gate" role="dialog" aria-modal="true" aria-label="Motion sensors">
-        <svg width="56" height="56" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="32" cy="32" r="30"/><ellipse cx="32" cy="32" rx="30" ry="12" transform="rotate(35 32 32)"/><ellipse cx="32" cy="32" rx="30" ry="12" transform="rotate(-35 32 32)"/></svg>
-        <p>This site would like to use your device's<br /><em>Motion and Orientation</em> sensors.</p>
-        <div class="btns"><button class="allow" data-motion-allow>Allow</button><button class="decline" data-motion-decline>Decline</button></div>
+        <p class="mono">Optional</p>
+        <p class="mg-h">Tilt your phone to look around?</p>
+        <p class="mg-b">The scenes can follow your device's motion and orientation sensors. Nothing is stored or sent anywhere.</p>
+        <div class="btns"><button class="allow" data-motion-allow>Allow motion</button><button class="decline" data-motion-decline>No thanks</button></div>
       </div>
     </div>
 
@@ -114,36 +134,37 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
         </div>
 
         <section class="ov intro" data-intro>
-          <div class="container intro__inner" style="width:100%">
-            <div class="intro__left">
-              <p class="intro__name"><span data-scramble-text>{SITE.name}</span></p>
-              <p class="intro__meta"><span data-scramble-text>// portfolio</span><span><span data-scramble-text>©</span><span data-scramble-text>{SITE.year}</span></span></p>
+          <div class="container-b intro__grid">
+            <p class="intro__name" aria-hidden="true"><span data-reveal>Eren</span><span data-reveal>Gün</span></p>
+            <div class="intro__side" data-reveal>
+              <p class="intro__para">{SITE.tagline}</p>
+              <p class="mono intro__meta"><span>Field notes, {SITE.year}</span><span>Scroll ↓</span></p>
             </div>
-            <p class="intro__para"><span data-scramble-text>{SITE.tagline}</span></p>
           </div>
         </section>
 
         <section class="ov project" data-project>
           {PROJECTS.map((p, i) => (
             <div class="project-panel" data-project-panel={i}>
-              <div class="pp-col-title">
-                <div class="row"><p class="pp-label">Project</p><p class="pp-label pp-counter"><span style="color:#fff" data-project-slide-number>01</span> / {pad(p.slides)}</p></div>
-                <h2 class="pp-title">{p.title}</h2>
-              </div>
-              <div class="pp-bottom">
-                <div class="pp-col-info">
-                  <p class="pp-label">Info</p>
-                  <p>{p.info}</p>
+              <div class="container-b pp-grid">
+                <div class="pp-col-title">
+                  <p class="mono pp-counter">{pad(i + 1)} / {pad(PROJECTS.length)} · slide <span data-project-slide-number>01</span> / {pad(p.slides)}</p>
+                  <h2 class:list={["pp-title", { "is-long": p.title.length > 10 }]}>{p.title}</h2>
                 </div>
-                <div class="pp-col-role">
-                  <p class="pp-label">Role</p>
-                  <div class="pp-role-list">{p.roles.map((r) => <span>{r}</span>)}</div>
+                <div class="pp-col pp-col-info">
+                  <p class="mono pp-label">What</p>
+                  <p class="pp-text">{p.info}</p>
                 </div>
-              </div>
-              <div class="pp-thumbs">
-                {Array.from({ length: p.slides }).map((_, s) => (
-                  <button data-thumb={s} aria-label={`Slide ${s + 1}`} disabled><img alt="" data-thumb-img={`${p.id}:${s}`} /></button>
-                ))}
+                <div class="pp-col pp-col-role">
+                  <p class="mono pp-label">Role</p>
+                  <p class="pp-text">{p.roles.join(', ')}</p>
+                  {p.url ? <a class="pp-link" href={p.url} target="_blank" rel="noopener">{linkLabel(p.url)} ↗</a> : <p class="pp-text pp-dim">Private repository</p>}
+                  <div class="pp-thumbs">
+                    {Array.from({ length: p.slides }).map((_, s) => (
+                      <button data-thumb={s} aria-label={`${p.title}, slide ${s + 1}`} disabled><img alt="" data-thumb-img={`${p.id}:${s}`} /></button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           ))}
@@ -154,59 +175,57 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
           {LAST.map((s, i) => (
             <div class="last-stage" data-last-stage={i} id={i === 0 ? 'about' : undefined}>
               <div class="last-block" data-last-scroll={i}>
-                <div class="last-rail" aria-hidden="true">
-                  <svg width="6" height="5" viewBox="0 0 5.77 5"><path d="M2.885 0 5.77 5H0z" fill="#fff" /></svg>
-                  <span class="line"></span>
-                  <svg width="6" height="5" viewBox="0 0 5.77 5"><path d="M2.885 5 0 0h5.77z" fill="#fff" /></svg>
-                </div>
+                <p class="mono last-label">{pad(i + 1)} — {s.h.replace(/^about me$/, "about")}</p>
                 <div class="last-text">
-                  <p class="h">{s.h}</p>
                   <p class="b1">{s.b1}</p>
                   {s.b2 && <p class="b2">{s.b2}</p>}
                 </div>
-                <a class="last-more" href="/#work"><span style="opacity:.5">&gt; </span><span data-scramble-text>learn more</span></a>
+                <a class="mono last-more" href="/#work">See the work →</a>
               </div>
             </div>
           ))}
           <div class="last-stage" data-last-stage="2" id="contact">
             <div class="talk-wrap" data-last-parallax>
-              <div class="talk-vignette"></div>
-              <div class="talk-col">
+              <div class="container-b talk-grid">
+                <p class="mono talk-label" data-talk-reveal>04 — Contact</p>
                 <a class="talk" href={`mailto:${SITE.email}`} data-talk-reveal>
-                  <span class="talk__plus" data-talk-plus>{[0, 1, 2, 3].map(() => <img src={plus} alt="" />)}</span>
-                  <svg class="talk__icon" viewBox="0 0 29 29" fill="none"><circle cx="14.5" cy="14.5" r="14" stroke="white" stroke-dasharray="2 2" /><path d="M10.36 15.77c1.6 3.5 7 3.5 8.28 0" stroke="white" stroke-linecap="round" stroke-dasharray="2 2" /><circle cx="8.1" cy="10.85" r="1.05" fill="white" /><circle cx="20.9" cy="10.85" r="1.05" fill="white" /></svg>
-                  <span class="talk__h uc" data-talk-reveal>let's talk about<br />your next project</span>
-                  <span class="talk__sub uc" data-talk-reveal>drop me an email and tell me what you're building</span>
-                  <span class="talk__arrow l" set:html={arrow} />
-                  <span class="talk__arrow r" set:html={arrow} />
-                  <span class="talk__arrow b" set:html={arrow} />
+                  <span class="talk__h">Let's talk about your next project.</span>
+                  <span class="talk__mail">{SITE.email} <span aria-hidden="true">↗</span></span>
                 </a>
-                <ul class="socials uc" data-talk-reveal>
-                  {SOCIALS.map((s) => <li><a href={s.href}><span class="gt">&gt; </span><span data-scramble-text>{s.short}</span></a></li>)}
-                </ul>
+                <div class="talk-side" data-talk-reveal>
+                  <p class="talk__sub">Drop me an email and tell me what you're building.</p>
+                  <ul class="mono socials">
+                    {SOCIALS.map((s) => <li><a href={s.href}>{s.label}{s.href.startsWith('http') ? ' ↗' : ''}</a></li>)}
+                  </ul>
+                </div>
               </div>
             </div>
             <div class="last-bottom">
-              <button class="scroll-back uc" data-scroll-back data-talk-reveal>&gt; <span data-scramble-text>scroll back</span> &lt;</button>
-              <div class="container footer-row" data-talk-reveal>
-                <a href="/privacy/"><span data-scramble-text>privacy policy</span></a>
-                <span>{SITE.name} all rights reserved</span>
-                <span><span class="c">©</span> {SITE.year}</span>
+              <button class="mono scroll-back" data-scroll-back data-talk-reveal>↑ Back to the work</button>
+              <div class="container-b" data-talk-reveal>
+                <div class="footer-row mono">
+                  <a href="/privacy/">Privacy</a>
+                  <a href="/blog/">Blog</a>
+                  <span>© {SITE.year} {SITE.name}</span>
+                </div>
               </div>
             </div>
           </div>
         </section>
 
-        <nav class="ov work" data-work aria-label="Selected work">
-          <div class="container">
-            <p class="work__title">Selected work</p>
-            <div class="work__list" style={`--n:${PROJECTS.length}`}>
-              <span class="work__dot"><i></i></span>
-              {PROJECTS.map((p, i) => (
-                <button data-work-item={i}>[{pad(i + 1)}] {p.title}</button>
-              ))}
-            </div>
-          </div>
+        <nav class="ov rail" data-work aria-label="Chapters">
+          <ol class="mono rail__list">
+            {CHAPTERS.map((c) => (
+              <li data-chapter={c.id}>
+                <a href={c.href}><i></i>{c.n} {c.label}</a>
+                {c.id === 'work' && (
+                  <ol class="rail__projects work__list">
+                    {PROJECTS.map((p, i) => <li><button data-work-item={i}><i></i>{pad(i + 1)} {p.short ?? p.title}</button></li>)}
+                  </ol>
+                )}
+              </li>
+            ))}
+          </ol>
         </nav>
 
         <div class="scroll-length" data-scroll-length></div>
@@ -216,30 +235,36 @@ const arrow = `<svg viewBox="0 0 26 18" fill="none" xmlns="http://www.w3.org/200
     <div class="menu-backdrop" data-menu-backdrop></div>
 
     <header class="header" data-header>
-      <div class="container header__inner">
-        <a class="header__logo" href="/" data-difference><span data-scramble-text data-logo>{SITE.logo}</span></a>
-        <div class="header__right">
-          <a class="header__talk" href={`mailto:${SITE.email}`} data-talk><span data-scramble-text>let's talk</span><i></i></a>
-          <div data-difference>
-            <nav class="menu" data-menu>
-              <button class="menu-trigger" data-menu-trigger aria-expanded="false" aria-controls="menu-list">
-                <span class="when-closed" data-scramble-text>menu</span>
-                <svg class="when-closed" viewBox="0 0 8.68 9.91" fill="none"><path d="M0 1.5h8.68M0 4.95h8.68M0 8.4h8.68" stroke="currentColor" stroke-width=".91" stroke-dasharray=".91 .2" /></svg>
-                <span class="when-open">close - x</span>
-              </button>
-              <ul class="menu-list" id="menu-list" data-menu-list>
-                {MENU.map((m, i) => (
-                  <li><a class="item" href={m.href} aria-current={i === 0 ? 'page' : undefined}><span data-scramble-text>{m.label}</span><span>{pad(i + 1)}</span></a></li>
+      <div class="container-b header__grid">
+        <a class="header__logo" href="/">{SITE.name}</a>
+        <p class="mono header__col hide-phone" data-hdr-a>Software developer<br />AI engineering</p>
+        <p class="mono header__col hide-phone" data-hdr-b>Istanbul, TR<br />41.0082° N 28.9784° E</p>
+        <div class="header__right mono">
+          <a class="header__talk" href={`mailto:${SITE.email}`} data-talk>Write me</a>
+          <nav class="menu" data-menu>
+            <button class="menu-trigger" data-menu-trigger aria-expanded="false" aria-controls="menu-list">
+              <span class="when-closed">Index</span><span class="when-closed bars" aria-hidden="true"></span>
+              <span class="when-open">Close ×</span>
+            </button>
+            <div class="menu-sheet" id="menu-list" data-menu-list>
+              <ul class="menu-items">
+                {MENU.filter((m) => !m.href.startsWith('http')).map((m) => (
+                  <li><a class="item" href={m.href} aria-current={m.href === '/' ? 'page' : undefined}><span class="mono">{m.n}</span><span class="item__t">{m.label}</span><span class="mono">{m.note}</span></a></li>
                 ))}
-                <li class="links">
-                  <ul>{SOCIALS.map((s) => <li><a href={s.href}><span class="gt">&gt; </span><span data-scramble-text>{s.label}</span></a></li>)}</ul>
-                </li>
               </ul>
-            </nav>
-          </div>
+              <div class="menu-feature">
+                {FEATURED.map((f) => (
+                  <a href={f.href}><span class="menu-feature__img"><img alt="" data-thumb-img={`${f.id}:0`} /></span><span class="mono">{f.label}</span></a>
+                ))}
+              </div>
+              <div class="menu-foot mono">
+                <a href={`mailto:${SITE.email}`}>{SITE.email}</a>
+                <span><a href="https://github.com/Erengun">GitHub ↗</a><a href="https://www.linkedin.com/in/erengun/">LinkedIn ↗</a></span>
+              </div>
+            </div>
+          </nav>
         </div>
       </div>
-      <div class="menu-footer"><div class="container footer-row"><a href="/privacy/"><span data-scramble-text>privacy policy</span></a><span>{SITE.name} all rights reserved</span><span><span class="c">©</span> {SITE.year}</span></div></div>
     </header>
 
     <div class="page-fade" data-page-fade></div>
