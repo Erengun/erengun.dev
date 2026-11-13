@@ -225,9 +225,19 @@ body.is--intro .intro__grid { visibility: visible; opacity: 1; }
 .intro__para { font-size: 1.125rem; line-height: 1.4; }
 .intro__meta { display: flex; justify-content: space-between; padding-top: .75rem; border-top: 1px solid rgb(255 255 255 / .4); color: #d4d4d4; }
 @media (max-width: 63.99rem), (max-aspect-ratio: 4/3) {
-  .intro__grid { grid-template-columns: 1fr; row-gap: 1.5rem; padding-bottom: calc(1.75rem + var(--safe-b)); }
-  .intro__name { grid-column: auto; font-size: clamp(4.5rem, 24vw, 9rem); }
+  /* portrait: the name goes up under the header and the tagline stays at the bottom, so the middle of the
+     screen (where the photo's subject stands) stays clear */
+  .intro__grid {
+    height: 100%; grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; align-items: start;
+    padding-top: calc(4.5rem + var(--safe-t) + 1.25rem); padding-bottom: calc(1.75rem + var(--safe-b));
+  }
+  .intro__name { grid-column: auto; grid-row: 1; font-size: clamp(4rem, 20vw, 8rem); line-height: .84; }
+  .intro__side { grid-row: 3; }
   .intro__para { font-size: 1.0625rem; max-width: 30ch; }
+  .intro::after {
+    content: ""; position: absolute; inset: 0 0 auto; height: 40%; pointer-events: none; z-index: -1;
+    background: linear-gradient(to bottom, rgb(8 8 10 / .55), rgb(8 8 10 / 0));
+  }
 }
 
 /* chapter rail (replaces the selected-work list) */
