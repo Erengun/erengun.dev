@@ -8,8 +8,7 @@ export const $route = map<{
   overlay: 'hidden' | 'shown' | 'leaving';
   slide: number;
   entered: boolean;
-  isHeaderOnWhite: boolean;
-}>({ route: null, overlay: 'hidden', slide: 0, entered: false, isHeaderOnWhite: false });
+}>({ route: null, overlay: 'hidden', slide: 0, entered: false });
 
 export const $preloader = map({ progress: 0, isReady: false, isWarm: false, isGateOpen: false, isMotionPending: false });
 

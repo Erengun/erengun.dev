@@ -1352,6 +1352,8 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
   }
 
   // ---------------------------------------------------------------- async: models + slides
+  // slide state (declared before the loader below, which sets it once the textures exist)
+  let current = -1, pending = -1, mixT = 0, wantSlide = 0;
   const ready = (async () => {
     const [gltf, slides] = await Promise.all([new GLTFLoader().loadAsync('/worlds/oge/props.glb'), loadSlides(ctx)]);
     const geos: Record<string, BufferGeometry> = {};
@@ -1430,7 +1432,6 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
   })();
 
   // ---------------------------------------------------------------- slide switching
-  let current = -1, pending = -1, mixT = 0, wantSlide = 0;
   function setSlide(i: number, instant = false) {
     if (!slideTex.length) return;
     const n = slideTex.length;
