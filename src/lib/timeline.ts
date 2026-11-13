@@ -161,7 +161,9 @@ export const SNAP_VP = [
 export const ANCHOR_VP: Record<string, number> = {
   '/': 0,
   '/#about': STAGES[stageIndex('corridor')].start + 1.2,
+  '/#who': STAGES[stageIndex('city')].start + 0.46,
   '/#work': holdCenterVp(worldStage(0)),
+  ...Object.fromEntries(PROJECTS.map((_, i) => [`/#work-${i + 1}`, holdCenterVp(worldStage(i))])),
   '/#contact': TOTAL_VP,
 };
 

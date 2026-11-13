@@ -6,7 +6,8 @@ import {
   TOTAL_VP, SNAP_VP, STAGES, HOLD, ANCHOR_VP, journeyAt, stageLocal, stageIndex, worldStage, holdCenterVp, clamp, damp,
   smoothstep, invLerp, PROJECT_COUNT, TRANSITIONS, HAS_MEMORIES, type StageDef,
 } from '../lib/timeline';
-import { scramble, initHoverScramble } from './scramble';
+import { initHoverScramble } from './scramble';
+import { PROJECTS } from '../lib/content';
 import { initMenu } from './menu';
 import { initTilt } from './tilt';
 
@@ -72,21 +73,50 @@ $route.subscribe(({ route }) => {
 });
 
 // ---------------------------------------------------------------- intro text
-const introSpans = $$('[data-intro] [data-scramble-text]');
+const introParts = $$('[data-intro] [data-reveal]');
 let introState = '';
 $route.subscribe(({ route, overlay }) => {
   const state = route === 'intro' ? overlay : 'hidden';
   if (state === introState) return;
   introState = state;
   if (state === 'shown') {
-    introSpans.forEach((el) => {
-      el.style.opacity = '';
-      scramble(el, { duration: 700, override: ' ', settleRate: 15 });
-    });
+    introParts.forEach((el, i) =>
+      el.animate([{ opacity: 0, transform: 'translateY(1.25rem)' }, { opacity: 1, transform: 'none' }], {
+        duration: 900, delay: i * 90, easing: 'cubic-bezier(.22, 1, .36, 1)', fill: 'both',
+      }),
+    );
   } else if (state === 'leaving') {
-    introSpans.forEach((el) => el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, fill: 'forwards' }));
+    introParts.forEach((el) => el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, fill: 'forwards' }));
   }
 });
+
+// ---------------------------------------------------------------- header columns follow the route
+{
+  const a = $('[data-hdr-a]'), b = $('[data-hdr-b]');
+  const idle = [a.innerHTML, b.innerHTML];
+  const titles = PROJECTS.map((p) => p.title);
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  let last = '';
+  $route.subscribe(({ route }) => {
+    const key = route ?? 'intro';
+    if (key === last) return;
+    last = key;
+    const proj = key.startsWith('project') ? Number(key.split('-')[1]) : -1;
+    const [ha, hb] =
+      proj >= 0 ? ['Chapter 03<br>Selected work', `${pad2(proj + 1)} / ${pad2(PROJECT_COUNT)}<br>${titles[proj]}`]
+      : key === 'about' ? ['Chapter 01<br>About', idle[1]]
+      : key === 'who' ? ['Chapter 02<br>Who I work with', idle[1]]
+      : key === 'contact' ? ['Chapter 04<br>Contact', 'Open to work<br>Remote · Istanbul']
+      : idle;
+    for (const [el, html] of [[a, ha], [b, hb]] as const) {
+      if (el.innerHTML === html) continue;
+      el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' }).onfinish = () => {
+        el.innerHTML = html;
+        el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, fill: 'forwards' });
+      };
+    }
+  });
+}
 
 // ---------------------------------------------------------------- project panels + slides
 const panels = $$('[data-project-panel]');
@@ -106,16 +136,24 @@ $route.subscribe(({ route, overlay, slide }) => {
 });
 panels.forEach((p) => $$<HTMLButtonElement>('[data-thumb]', p).forEach((b, s) => b.addEventListener('click', () => $route.setKey('slide', s))));
 // thumbnails come straight from the project's screenshot manifest (lazy: they're tiny but not needed for the gate)
-const fillThumbs = () =>
-  panels.forEach((p) => {
-    const imgs = $$<HTMLImageElement>('[data-thumb-img]', p);
-    const id = imgs[0]?.dataset.thumbImg?.split(':')[0];
-    if (!id) return;
+const fillThumbs = () => {
+  const byId = new Map<string, HTMLImageElement[]>();
+  $$<HTMLImageElement>('[data-thumb-img]').forEach((img) => {
+    const id = img.dataset.thumbImg!.split(':')[0];
+    byId.set(id, [...(byId.get(id) ?? []), img]);
+  });
+  byId.forEach((imgs, id) =>
     fetch(`/projects/${id}/manifest.json`)
       .then((r) => (r.ok ? r.json() : []))
-      .then((slides: { src: string }[]) => imgs.forEach((img, s) => slides[s] && ((img.loading = 'lazy'), (img.decoding = 'async'), (img.src = slides[s].src))))
-      .catch(() => {});
-  });
+      .then((slides: { src: string }[]) =>
+        imgs.forEach((img) => {
+          const sl = slides[Number(img.dataset.thumbImg!.split(':')[1])];
+          if (sl) { img.loading = 'lazy'; img.decoding = 'async'; img.src = sl.src; }
+        }),
+      )
+      .catch(() => {}),
+  );
+};
 ('requestIdleCallback' in window ? requestIdleCallback : setTimeout)(fillThumbs as any, { timeout: 4000 } as any);
 const currentProject = () => {
   const r = $route.get().route;
@@ -301,6 +339,23 @@ requestAnimationFrame(loop);
 
 // ---------------------------------------------------------------- preloader + renderer boot
 const pre = $('[data-preloader]');
+{
+  const count = $('[data-preloader-count]'), bar = $('[data-preloader-bar]');
+  let shown = 0, target = 0, raf = 0;
+  const tick = () => {
+    // ease to the real value; once caught up, creep toward (but never reach) the next milestone
+    if (shown < target - 0.002) shown += (target - shown) * 0.12;
+    else if (target < 1) shown += (Math.min(0.97, target + 0.45) - shown) * 0.008;
+    else shown = 1;
+    count.textContent = String(Math.min(100, Math.round(shown * 100)));
+    bar.style.width = `${shown * 100}%`;
+    raf = shown < 1 && !$preloader.get().isGateOpen ? requestAnimationFrame(tick) : 0;
+  };
+  $preloader.subscribe(({ progress, isReady }) => {
+    target = Math.max(target, isReady ? 1 : Math.min(0.99, progress));
+    if (!raf) raf = requestAnimationFrame(tick);
+  });
+}
 const header = $('[data-header]');
 const intro = $('[data-intro]');
 

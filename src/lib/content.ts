@@ -14,18 +14,20 @@ export const SOCIALS = [
 ];
 
 export const MENU = [
-  { label: 'home', href: '/' },
-  { label: 'about', href: '/#about' },
-  { label: 'work', href: '/#work' },
-  { label: 'blog', href: '/blog/' },
-  { label: 'contact', href: '/#contact' },
-  { label: 'github', href: 'https://github.com/Erengun' },
-  { label: 'linkedin', href: 'https://www.linkedin.com/in/erengun/' },
+  { label: 'Home', href: '/', n: '00', note: '' },
+  { label: 'About', href: '/#about', n: '01', note: '' },
+  { label: 'Work', href: '/#work', n: '03', note: '5 projects' },
+  { label: 'Blog', href: '/blog/', n: '—', note: 'Notes' },
+  { label: 'Contact', href: '/#contact', n: '04', note: '' },
+  { label: 'GitHub', href: 'https://github.com/Erengun', n: '', note: '' },
+  { label: 'LinkedIn', href: 'https://www.linkedin.com/in/erengun/', n: '', note: '' },
 ];
 
 export type Project = {
   id: string;
   title: string;
+  /** short label for tight lists (chapter rail) */
+  short?: string;
   info: string;
   roles: string[];
   slides: number;
@@ -57,6 +59,7 @@ export const PROJECTS: Project[] = [
     id: 'cached-network-image-ce',
     url: 'https://pub.dev/packages/cached_network_image_ce',
     title: 'Cached Network Image CE',
+    short: 'CNI CE',
     info: 'Zero-jank image caching for Flutter. The maintained fork of cached_network_image, rebuilt on hive_ce: 8× faster cache reads, web support, same API.',
     roles: ['Maintainer', 'Development', 'Open Source'],
     slides: 6,
