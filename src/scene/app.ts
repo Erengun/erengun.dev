@@ -39,6 +39,8 @@ function probeGpu(): string {
   }
 }
 /** entry-level mobile GPUs (e.g. Galaxy M31s: Mali-G72 MP3): fill-rate bound, slow WebGPU drivers */
+/** flagship GPUs always get the high tier, whatever memory the browser reports (Chrome rounds 6 GB down to 4) */
+const HIGH_END_GPU = /Apple (GPU|M\d)|Adreno[^\d]*\b(7\d\d|8\d\d)\b|Mali-G(71[05]|72[05]|9\d\d)|Immortalis|Xclipse|NVIDIA|GeForce|Radeon/i;
 const LOW_END_GPU = /Mali-(T\d+|G(31|51|52|57|71|72|76)\b)|Adreno[^\d]*(\b[2-5]\d\d\b|\b6[01]\d\b)|PowerVR|IMG BXM|Mali-400/i;
 
 export async function createApp(container: HTMLElement, hooks: Hooks) {
@@ -56,11 +58,15 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   await renderer.init();
   container.appendChild(renderer.domElement);
   const isPhoneNow = () => scroll.isPhone || matchMedia('(max-width: 47.99rem), (max-aspect-ratio: 4/3)').matches;
+  // hybrid: a tier from the GPU (low / medium / high) picks resolution caps and scene detail; the adaptive pixel
+  // ratio below then only steps down if frames actually drop, and climbs back when they recover
   const quality: 'high' | 'medium' | 'low' = lowEnd
     ? 'low'
     : forcedQ === 'high' || forcedQ === 'medium'
       ? forcedQ
-      : (navigator as any).deviceMemory <= 4 || (renderer.backend as any).isWebGLBackend ? 'medium' : 'high';
+      : HIGH_END_GPU.test(gpuName)
+        ? 'high'
+        : (navigator as any).deviceMemory <= 4 || (renderer.backend as any).isWebGLBackend ? 'medium' : 'high';
   const ctx: StageContext = { renderer, isPhone: isPhoneNow(), quality };
 
   // ------------------------------------------------------------- compositor + post
@@ -106,16 +112,17 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   });
 
   // ------------------------------------------------------------- resolution
-  // tier caps: desktop 1.6 / phone 1.75 on high; medium (WebGL2 fallback, ≤ 4 GB) 1 / 1.25; low (entry-level
+  // tier caps: desktop 1.6 / phone 2 on high; medium (WebGL2 fallback, ≤ 4 GB) 1 / 1.25; low (entry-level
   // phone GPU) 1, down to .5. Phones start a step below their cap and climb only if frames stay smooth.
   const dprCap = () => {
     const dev = Math.min(devicePixelRatio, 2);
-    const cap = quality === 'low' ? 1 : ctx.isPhone ? (quality === 'high' ? 1.75 : 1.25) : quality === 'high' ? 1.6 : 1;
+    const cap = quality === 'low' ? 1 : ctx.isPhone ? (quality === 'high' ? 2 : 1.25) : quality === 'high' ? 1.6 : 1;
     return Math.min(dev, cap);
   };
   const DPR_STEP = 0.25;
   const dpr = { reduction: 0, applied: 0, minRatio: quality === 'low' ? 0.5 : 0.75 };
-  if (ctx.isPhone && quality !== 'low') dpr.reduction = DPR_STEP;
+  // medium phones start a step below their cap and climb if smooth; high-tier devices start at full quality
+  if (ctx.isPhone && quality === 'medium') dpr.reduction = DPR_STEP;
   const floorRatio = () => Math.min(dpr.minRatio, dprCap());
   const targetRatio = () => Math.max(dprCap() - dpr.reduction, floorRatio());
   function applySize() {
