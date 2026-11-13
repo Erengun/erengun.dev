@@ -10,8 +10,8 @@ export type PostState = { isHome: boolean; isPhone: boolean; inside: boolean; id
 export function createPostChain(o: {
   renderer: WebGPURenderer;
   scenePass: PassNode;
-  uFish: UniformNode<number>;
-  uOverscan: UniformNode<number>;
+  uFish: UniformNode<'float', number>;
+  uOverscan: UniformNode<'float', number>;
   fishEye: (uv: Node, s: Node, ov: Node) => Node;
 }) {
   const uvFish = o.fishEye(screenUV, o.uFish, o.uOverscan);

@@ -1,12 +1,11 @@
 import Lenis from 'lenis';
 import Snap from 'lenis/snap';
-import { createTimeline } from 'animejs';
+import { createTimeline, stagger } from 'animejs';
 import { $route, $preloader, scroll, tilt, type Route } from '../lib/stores';
 import {
   TOTAL_VP, SNAP_VP, STAGES, HOLD, ANCHOR_VP, journeyAt, stageLocal, stageIndex, worldStage, holdCenterVp, clamp, damp,
   smoothstep, invLerp, PROJECT_COUNT, TRANSITIONS, HAS_MEMORIES, type StageDef,
 } from '../lib/timeline';
-import { initHoverScramble } from './scramble';
 import { PROJECTS } from '../lib/content';
 import { initMenu } from './menu';
 import { initTilt } from './tilt';
@@ -22,7 +21,6 @@ const reducedMq = matchMedia('(prefers-reduced-motion: reduce)');
 addEventListener('keydown', (e) => e.key === 'Tab' && document.documentElement.classList.add('is-tabbing'));
 addEventListener('pointerdown', () => document.documentElement.classList.remove('is-tabbing'));
 
-initHoverScramble();
 initMenu();
 
 // ---------------------------------------------------------------- Lenis + snap
@@ -225,10 +223,11 @@ for (const load of HAS_MEMORIES ? Object.values(memoryCopy) : []) {
         stageEl.className = 'last-stage';
         stageEl.setAttribute('data-memory-stage', c.id);
         stageEl.innerHTML = `<div class="last-block" data-memory-block>
-          <div class="last-rail" aria-hidden="true"><svg width="6" height="5" viewBox="0 0 5.77 5"><path d="M2.885 0 5.77 5H0z" fill="#fff"/></svg><span class="line"></span><svg width="6" height="5" viewBox="0 0 5.77 5"><path d="M2.885 5 0 0h5.77z" fill="#fff"/></svg></div>
-          <div class="last-text"><p class="h"></p><p class="b1"></p><p class="b2"></p></div></div>`;
-        const [h, b1, b2] = $$('.last-text p', stageEl);
-        h.textContent = c.kicker ?? '';
+          <p class="mono last-label"></p>
+          <div class="last-text"><p class="b1"></p><p class="b2"></p></div></div>`;
+        const label = $('.last-label', stageEl);
+        const [b1, b2] = $$('.last-text p', stageEl);
+        label.textContent = c.kicker ?? '';
         b1.textContent = c.title ?? '';
         b2.textContent = c.body ?? '';
         if (!c.body) b2.remove();
@@ -282,7 +281,7 @@ function updateBlocks(vp: number, vh: number) {
 const alleyIndex = stageIndex('alley');
 const contactStage = $('[data-last-stage="2"]');
 const talkTl = createTimeline({ autoplay: false });
-talkTl.add($$('[data-talk-reveal]'), { opacity: [0, 1], duration: 900, delay: (_: unknown, i: number) => i * 70, ease: 'outCubic' }, 0);
+talkTl.add($$('[data-talk-reveal]'), { opacity: [0, 1], duration: 900, delay: stagger(70), ease: 'outCubic' }, 0);
 let talkP = -1;
 function updateContact(vp: number) {
   const l = stageLocal(alleyIndex, vp);
