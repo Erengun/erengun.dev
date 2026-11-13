@@ -8,9 +8,10 @@ interface Props {
   path: string;
   type?: 'website' | 'article';
   jsonLd?: object;
+  noindex?: boolean;
   published?: Date;
 }
-const { title, description, path, type = 'website', jsonLd, published } = Astro.props;
+const { title, description, path, type = 'website', jsonLd, published, noindex = false } = Astro.props;
 const URL_BASE = 'https://erengun.dev';
 const url = URL_BASE + path;
 const fullTitle = `${title} — ${SITE.name}`;
@@ -21,7 +22,7 @@ const fullTitle = `${title} — ${SITE.name}`;
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#050505" />
-    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="robots" content={noindex ? "noindex" : "index, follow, max-image-preview:large"} />
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
     <meta name="author" content={SITE.name} />
@@ -51,9 +52,9 @@ const fullTitle = `${title} — ${SITE.name}`;
   <body>
     <a class="skip" href="#main">Skip to content</a>
     <header class="bar">
-      <a class="logo" href="/">{SITE.logo}</a>
+      <a class="logo" href="/">{SITE.name}</a>
       <nav aria-label="Site">
-        <a href="/blog/" aria-current={path.startsWith('/blog') ? 'page' : undefined}>blog</a>
+        <a href="/blog/" aria-current={path.startsWith('/blog/') ? 'page' : undefined}>blog</a>
         <a href="/#work">work</a>
         <a href={`mailto:${SITE.email}`}>let's talk</a>
       </nav>

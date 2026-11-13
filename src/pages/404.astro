@@ -1,26 +1,25 @@
 ---
-import { SITE } from '../lib/content';
+import BlogLayout from '../layouts/BlogLayout.astro';
 ---
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex" />
-    <title>Not found — {SITE.name}</title>
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-    <style>
-      html, body { margin: 0; height: 100%; background: #050505; color: #cde7e9; font-family: ui-monospace, Menlo, monospace; }
-      main { min-height: 100%; display: grid; place-content: center; gap: 1rem; text-align: center; padding: 2rem; }
-      h1 { font-size: clamp(2rem, 6vw, 4rem); margin: 0; letter-spacing: -.02em; text-shadow: 0 0 .2rem #ffffffcf; }
-      a { color: #fff; } p { opacity: .7; margin: 0; text-transform: uppercase; font-size: .875rem; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>404 · signal lost</h1>
-      <p>This page moved when the site became one long journey.</p>
-      <p><a href="/">&gt; back to {SITE.name.toLowerCase()} &lt;</a></p>
-    </main>
-  </body>
-</html>
+<BlogLayout title="Not found" description="This page doesn't exist." path="/404/" noindex>
+  <p class="eyebrow"><span class="g">&gt;</span> Error 404</p>
+  <h1 class="display">Lost the trail</h1>
+  <div class="page-copy">
+    <p>This page doesn't exist, or it moved when the site became one long scroll.</p>
+    <ul>
+      <li><a href="/">Start the journey</a></li>
+      <li><a href="/#work">See the work</a></li>
+      <li><a href="/blog/">Read the blog</a></li>
+    </ul>
+  </div>
+</BlogLayout>
+
+<style>
+  .page-copy { display: grid; gap: 1.25rem; max-width: 38rem; font-size: 1.0625rem; line-height: 1.7; color: #d8d8d8; }
+  ul { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
+  li { border-bottom: 1px solid var(--line); }
+  li a { display: block; padding: .9rem 0; font-size: 1.375rem; font-weight: 700; letter-spacing: -.02em; text-decoration: none; color: var(--fg); }
+  li a::after { content: " →"; color: var(--dim); }
+  li a:hover { color: #fff; }
+  li a:hover::after { color: var(--accent); }
+</style>
