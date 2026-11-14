@@ -45,7 +45,8 @@ export interface Stage {
    * extra things a custom render() draws that are not in `scene` (internal passes, blit quads), so the background
    * warm-up can compile them too instead of letting them compile mid-scroll
    */
-  warmup?(): [Object3D, Camera][];
+  /** extra things to compile before the stage is shown; w × h is the stage target size (allocate buffers at it) */
+  warmup?(w: number, h: number): [Object3D, Camera][];
   /**
    * optional: a quad in this stage's screen space (NDC corners TL,TR,BR,BL) through which the NEXT stage
    * is revealed during a 'portal' transition (like the city's quad revealing the alley).

@@ -38,13 +38,37 @@ export function createHud(info: Info, live: () => Info, gl?: WebGL2RenderingCont
     const link = gl.linkProgram.bind(gl), param = gl.getProgramParameter.bind(gl);
     gl.linkProgram = (pr) => { links++; acc(cur || 'loading').links++; link(pr); };
     gl.getProgramParameter = (pr, pname) => {
-      if (pname !== gl.LINK_STATUS) return param(pr, pname);
+      if (pname !== gl.LINK_STATUS) {
+        const t0 = performance.now(); const r0 = param(pr, pname); const d0 = performance.now() - t0;
+        // Safari: a status query waits for the GPU process to drain queued work (e.g. a large texture upload)
+        if (d0 > 8) jl.push(`@${(t0 / 1000).toFixed(2)}s SLOW getProgramParameter(0x${pname.toString(16)}) ${d0.toFixed(0)}ms`);
+        return r0;
+      }
       const t = performance.now(); const r = param(pr, pname); const ms = performance.now() - t;
       const a = acc(cur || 'loading'); a.linkMs += ms; a.linkMax = Math.max(a.linkMax, ms);
       return r;
     };
   }
 
+  // slow individual GL calls (with the upload source) and main-thread gaps > 60 ms (Safari has no long-task API)
+  if (gl) {
+    for (const name of ['compileShader', 'linkProgram', 'shaderSource', 'createProgram', 'attachShader', 'useProgram', 'getShaderParameter', 'getUniformLocation', 'getUniformBlockIndex', 'uniformBlockBinding', 'getAttribLocation', 'drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'texImage2D', 'texSubImage2D', 'readPixels', 'clientWaitSync', 'getError'] as const) {
+      const fn = (gl as any)[name];
+      if (!fn) continue;
+      const b = fn.bind(gl);
+      (gl as any)[name] = (...args: unknown[]) => {
+        const t = performance.now(); const r = b(...args); const ms = performance.now() - t;
+        if (ms > 15) { const src: any = args.find((a: any) => a && typeof a === 'object' && ('width' in a)); jl.push(`@${(t / 1000).toFixed(2)}s SLOW ${name} ${ms.toFixed(0)}ms ${src ? `${src.constructor?.name} ${src.width}x${src.height} ${(src.src ?? '').split('/').slice(-2).join('/')}` : ''}`); }
+        return r;
+      };
+    }
+  }
+  {
+    let lt = performance.now();
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => { const n = performance.now(); if (n - lt > 60) jl.push(`@${(lt / 1000).toFixed(2)}s GAP ${(n - lt).toFixed(0)}ms`); lt = n; setTimeout(() => ch.port2.postMessage(0), 0); };
+    ch.port2.postMessage(0);
+  }
   // WebGL2 only: texture / buffer uploads (image decode happens inside texImage2D for <img> sources)
   if (gl) {
     for (const name of ['texImage2D', 'texSubImage2D', 'texImage3D', 'texSubImage3D', 'compressedTexImage2D', 'bufferData', 'bufferSubData'] as const) {
@@ -111,13 +135,14 @@ export function createHud(info: Info, live: () => Info, gl?: WebGL2RenderingCont
       if (!scroller || document.body.classList.contains('is--loading')) return void setTimeout(start, 500);
       (document.querySelector('[data-motion-decline]') as HTMLElement | null)?.click();
       [...document.querySelectorAll('button')].find((b) => /no thanks/i.test(b.textContent ?? ''))?.click();
-      const t0 = performance.now(), DUR = 60_000, from = 3000;
+      // `&idle=<s>`: watch the opening that long before scrolling (default 3 s)
+      const t0 = performance.now(), DUR = 60_000, from = 1000 * Number(new URLSearchParams(location.search).get('idle') ?? 3);
       const step = () => {
         const k = (performance.now() - t0 - from) / DUR;
         if (k >= 0) scroller.scrollTop = Math.min(1, k) * (scroller.scrollHeight - scroller.clientHeight);
         if (k < 1.05) return void requestAnimationFrame(step);
         const ta = document.createElement('textarea');
-        ta.value = `autotest ${DUR / 1000}s scroll, gate open at ${(t0 / 1000).toFixed(1)}s\n` + report();
+        ta.value = `autotest ${DUR / 1000}s scroll after ${from / 1000}s idle, gate open at ${(t0 / 1000).toFixed(1)}s\n` + report();
         ta.setAttribute('style', 'position:fixed;inset:8px;z-index:100001;font:5px/1.25 ui-monospace,monospace;background:#000;color:#0f0;white-space:pre;overflow:auto');
         document.body.appendChild(ta);
         (window as any).__autotestDone = ta.value;
