@@ -13,7 +13,7 @@ export function createHud(info: Info, live: () => Info, gl?: WebGL2RenderingCont
     backend.createRenderPipeline = (ro: any, promises: unknown) => {
       if (promises === null) {
         const o = ro.object, m = ro.material;
-        jl.push(`@${(performance.now() / 1000).toFixed(2)}s LIVE PIPELINE in ${cur}: ${o?.name || o?.type} [${o?.geometry?.type} ${o?.geometry?.attributes?.position?.count}v] / ${m?.name || m?.type} transparent=${m?.transparent} side=${m?.side} rt=${ro.context?.renderTarget?.texture?.name ?? (ro.context?.textures ? 'target' : 'canvas')}${o?.parent ? ` (parent ${o.parent.name || o.parent.type})` : ''}`);
+        jl.push(`@${(performance.now() / 1000).toFixed(2)}s LIVE PIPELINE in ${cur}: ${o?.name || o?.type} [${o?.geometry?.type} ${o?.geometry?.attributes?.position?.count}v] / ${m?.name || m?.type} transparent=${m?.transparent} side=${m?.side} rt=${ro.context?.renderTarget?.texture?.name ?? (ro.context?.textures ? 'target' : 'canvas')}${o?.parent ? ` (parent ${o.parent.name || o.parent.type})` : ''} target ${ro.context?.width}x${ro.context?.height} det<0=${o?.matrixWorld?.determinant?.() < 0} cam=${ro.camera?.type} mv=${m?.version} nodes=${!!m?.colorNode}${m?.colorNode?.constructor?.name ?? ''} vis=${o?.visible}/${m?.visible}`);
       }
       return crp(ro, promises);
     };
@@ -158,6 +158,7 @@ export function createHud(info: Info, live: () => Info, gl?: WebGL2RenderingCont
   let win: number[] = [], winCpu = 0, last = 0, prev = 0;
   return {
     report,
+    resetClock() { prev = 0; },
     sample(_dt: number, cpuMs: number, stage: string, dpr: number, now: number) {
       cur = stage;
       // real interval between frames (the loop's dt is clamped to 50 ms, which would hide stalls)

@@ -688,6 +688,9 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
   const mScreenGeo = new PlaneGeometry(SCREEN_W - 0.06, SCREEN_H - 0.06);
   const mirrorScreen = new Mesh(mScreenGeo, screenMat(true));
   mirrorScreen.matrixAutoUpdate = false;
+  // start mirrored: on WebGPU the front-face winding is part of the pipeline, so the warm-up must see these
+  // with the negative determinant they always draw with (update() sets the real matrix every frame)
+  mirrorScreen.matrix.copy(MIRROR);
   scene.add(mirrorScreen);
   let mirrorPhone: Mesh | null = null;
   let phoneBody: Mesh | null = null;
@@ -937,6 +940,7 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     phone.add(phoneBody);
     mirrorPhone = new Mesh(phoneGeo, phoneMat(true));
     mirrorPhone.matrixAutoUpdate = false;
+    mirrorPhone.matrix.copy(MIRROR); // mirrored from the start, see mirrorScreen
     scene.add(mirrorPhone);
     cards = new InstancedMesh(cardGeo, cardMat(false), SERVICES.length);
     cards.frustumCulled = false;
