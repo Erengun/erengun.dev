@@ -156,7 +156,8 @@ export function createHud(info: Info, live: () => Info, gl?: WebGL2RenderingCont
   }
 
   // `&bench`: once the background stages are in, time the opening scene under a few variants (adaptation paused)
-  // to find what limits a device: splat count, splat size, pixels, or the instancing layout
+  // to find what limits a device: splat count, splat size, pixels, or the instancing layout. Adaptation is locked
+  // from page load (app.ts), so 'base' is measured at the device's starting quality
   if (new URLSearchParams(location.search).has('bench')) {
     const W = window as any;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -195,7 +196,7 @@ export function createHud(info: Info, live: () => Info, gl?: WebGL2RenderingCont
         await sleep(1200);
         const d = (await frames(2500)).sort((a, b) => a - b);
         const q = (k: number) => d[Math.min(d.length - 1, Math.floor(k * d.length))] ?? 0;
-        rows.push(`${name.padEnd(24)} median ${q(0.5).toFixed(1).padStart(6)} ms  p90 ${q(0.9).toFixed(1).padStart(6)} ms  (${d.length} frames)`);
+        rows.push(`${name.padEnd(24)} median ${q(0.5).toFixed(1).padStart(6)} ms  p90 ${q(0.9).toFixed(1).padStart(6)} ms  (${d.length} frames, sort ${sp.lastSortMs.toFixed(0)} ms)`);
       }
       sp.setBatched(true); sp.setBudget(1, true); dbg.hide = undefined; setRatio(ratio);
       sc.dpr.minRatio = minRatio; sc.dpr.lock = false;
