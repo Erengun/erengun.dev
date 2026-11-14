@@ -138,7 +138,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     return Math.min(dev, cap);
   };
   const DPR_STEP = 0.25;
-  const dpr = { reduction: 0, applied: 0, minRatio: quality === 'low' ? 0.5 : 0.75, lock: false };
+  const dpr = { reduction: 0, applied: 0, minRatio: quality === 'low' ? 0.5 : 0.75, lock: params.has('bench') };
   // medium phones start a step below their cap and climb if smooth; high-tier devices start at full quality
   if (ctx.isPhone && quality === 'medium') dpr.reduction = DPR_STEP;
   const floorRatio = () => Math.min(dpr.minRatio, dprCap());
@@ -171,7 +171,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
    */
   // flips: down-steps that followed an up-step; after FLIPFLOPS of them quality stops climbing (it would only oscillate)
   const FLIPFLOPS = 4;
-  const ctl = { t: 0, dts: [] as number[], skip: true, noisy: false, last: 0, blockUpUntil: 0, blockedRatio: Infinity, wentUp: false, flips: 0 };
+  const ctl = { t: 0, dts: [] as number[], skip: true, noisy: false, last: 0, blockUpUntil: 0, blockedRatio: Infinity, wentUp: false, flips: 0, stage: null as Stage | null };
   let loading = () => true; // set once the journey exists: background loads/compiles make frames unrepresentative
   function skipWindow() { ctl.skip = true; }
   function noisyWindow() { ctl.noisy = true; }
@@ -202,6 +202,8 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     const js = journeyAt(scroll.vp);
     const st = js.trans ? null : stages[js.current];
     const level = st?.setDetail ? detail.get(st) ?? 0 : -1;
+    // flip-flops are counted per stage: a scene that oscillated must not pin the next ones low
+    if (st && st !== ctl.stage) { ctl.stage = st; ctl.flips = 0; ctl.wentUp = false; }
     if (verySlow || (fps < 45 && !capped30 && quiet)) {
       let changed = false;
       // safety net when the GPU name is hidden: still < 30 fps at the floor → allow going down to .5
