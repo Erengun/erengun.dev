@@ -160,9 +160,9 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
 
   /**
    * Adaptive pixel ratio + detail: MEDIAN real frame time over ~1 s windows.
-   * Down (< 45 fps): −.25 pixel ratio; once at the floor (or when below 30 fps) the current stage's detail drops
-   * too (Stage.setDetail: the splat scenes draw fewer, larger splats; their cost is per splat, so resolution
-   * alone can't save them). Up (> 55 fps): detail comes back first, then resolution.
+   * Down (< 45 fps): the current stage's detail first (Stage.setDetail: the splat scenes draw fewer, larger splats;
+   * their cost is per splat, so blurring the frame barely helps them), then −.25 pixel ratio. Up (> 55 fps):
+   * resolution first, then detail.
    * The median measures how fast the GPU draws a typical frame; one-off stalls (a shader link, an image upload)
    * would drag a mean down. Windows with a tab switch or a resize are dropped. While stages stream in (or just
    * swapped/compiled) only a clearly struggling GPU (< 30 fps) is acted on, and nothing goes back up.
@@ -206,30 +206,33 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     if (st && st !== ctl.stage) { ctl.stage = st; ctl.flips = 0; ctl.wentUp = false; }
     if (verySlow || (fps < 45 && !capped30 && quiet)) {
       let changed = false;
-      // safety net when the GPU name is hidden: still < 30 fps at the floor → allow going down to .5
-      if (verySlow && dpr.applied <= floorRatio() + 1e-3 && dpr.minRatio > 0.5) dpr.minRatio = 0.5;
-      if (dpr.applied > floorRatio() + 1e-3) {
-        ctl.blockedRatio = dpr.applied;
-        ctl.blockUpUntil = now + 8;
-        dpr.reduction = Math.min(dpr.reduction + (verySlow ? 2 : 1) * DPR_STEP, dprCap() - floorRatio());
-        changed = true;
-      }
-      if (st && level >= 0 && level < DETAIL.length - 1 && (verySlow || !changed)) {
+      if (st && level >= 0 && level < DETAIL.length - 1) {
+        // the stage has a cheaper mode (fewer splats): use it before blurring the whole frame
         Object.assign(detailBlock, { stage: st, level, until: now + 8 });
         setDetail(st, level + 1);
         changed = true;
+      } else {
+        // safety net when the GPU name is hidden: still < 30 fps at the floor → allow going down to .5
+        if (verySlow && dpr.applied <= floorRatio() + 1e-3 && dpr.minRatio > 0.5) dpr.minRatio = 0.5;
+        if (dpr.applied > floorRatio() + 1e-3) {
+          ctl.blockedRatio = dpr.applied;
+          ctl.blockUpUntil = now + 8;
+          dpr.reduction = Math.min(dpr.reduction + (verySlow ? 2 : 1) * DPR_STEP, dprCap() - floorRatio());
+          changed = true;
+        }
       }
       if (!changed) return;
       if (ctl.wentUp) ctl.flips++;
       ctl.wentUp = false;
     } else if (fps > 55 && quiet && ctl.flips < FLIPFLOPS) {
-      if (st && level > 0) {
-        if (detailBlock.stage === st && level - 1 <= detailBlock.level && now < detailBlock.until) return;
-        setDetail(st, level - 1);
-      } else if (dpr.reduction > 0) {
+      // reverse order of going down: sharpness first, then the stage's detail
+      if (dpr.reduction > 0) {
         const next = Math.max(dprCap() - (dpr.reduction - DPR_STEP), floorRatio());
         if (next >= ctl.blockedRatio - 1e-3 && now < ctl.blockUpUntil) return;
         dpr.reduction = Math.max(0, dpr.reduction - DPR_STEP);
+      } else if (st && level > 0) {
+        if (detailBlock.stage === st && level - 1 <= detailBlock.level && now < detailBlock.until) return;
+        setDetail(st, level - 1);
       } else return;
       ctl.wentUp = true;
     } else return;
