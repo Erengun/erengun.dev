@@ -69,6 +69,19 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
         ? 'high'
         : (navigator as any).deviceMemory <= 4 || (renderer.backend as any).isWebGLBackend ? 'medium' : 'high';
   const ctx: StageContext = { renderer, isPhone: isPhoneNow(), quality };
+  // created early so it also counts the shader programs compiled before the preloader gate opens
+  const hud = params.has('debug')
+    ? createHud(
+        {
+          gpu: gpuName || '(hidden)', backend: (renderer.backend as any).isWebGLBackend ? 'WebGL2' : 'WebGPU', tier: quality,
+          parallelCompile: (renderer.backend as any).isWebGLBackend ? !!(renderer.backend as any).parallel : 'n/a (WebGPU is async)',
+          lowEnd, phone: isPhoneDevice, devicePixelRatio, screen: `${screen.width}x${screen.height}`,
+          deviceMemory: (navigator as any).deviceMemory ?? '?', cores: navigator.hardwareConcurrency ?? '?', ua: navigator.userAgent,
+        },
+        () => ({ dpr: dpr.applied.toFixed(2), buffer: `${size.x}x${size.y}`, minRatio: dpr.minRatio }),
+        (renderer.backend as any).isWebGLBackend ? (renderer.backend as any).gl : null,
+      )
+    : null;
 
   // ------------------------------------------------------------- compositor + post
   const comp = createCompositor(renderer);
@@ -238,16 +251,6 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   }
 
   const gpuMs: number[] = [];
-  const hud = params.has('debug')
-    ? createHud(
-        {
-          gpu: gpuName || '(hidden)', backend: (renderer.backend as any).isWebGLBackend ? 'WebGL2' : 'WebGPU', tier: quality,
-          lowEnd, phone: isPhoneDevice, devicePixelRatio, screen: `${screen.width}x${screen.height}`,
-          deviceMemory: (navigator as any).deviceMemory ?? '?', cores: navigator.hardwareConcurrency ?? '?', ua: navigator.userAgent,
-        },
-        () => ({ dpr: dpr.applied.toFixed(2), buffer: `${size.x}x${size.y}`, minRatio: dpr.minRatio }),
-      )
-    : null;
   function frame(dt: number, time: number) {
     const t0 = hud ? performance.now() : 0;
     ctx.isPhone = scroll.isPhone || isPhoneNow();
