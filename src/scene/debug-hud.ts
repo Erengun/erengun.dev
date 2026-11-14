@@ -3,14 +3,14 @@
  * per-stage summary (frame-time percentiles, slow frames, main-thread long tasks) that can be copied as text.
  */
 type Info = Record<string, string | number | boolean>;
-type Acc = { n: number; dts: number[]; cpu: number; slow: number; long: number; longMs: number; minDpr: number };
+type Acc = { n: number; dts: number[]; cpu: number; slow: number; long: number; longMs: number; minDpr: number; links: number; linkMs: number; linkMax: number };
 
-export function createHud(info: Info, live: () => Info) {
+export function createHud(info: Info, live: () => Info, gl?: WebGL2RenderingContext | null) {
   const per = new Map<string, Acc>();
   let cur = '';
   const acc = (id: string) => {
     let a = per.get(id);
-    if (!a) per.set(id, (a = { n: 0, dts: [], cpu: 0, slow: 0, long: 0, longMs: 0, minDpr: Infinity }));
+    if (!a) per.set(id, (a = { n: 0, dts: [], cpu: 0, slow: 0, long: 0, longMs: 0, minDpr: Infinity, links: 0, linkMs: 0, linkMax: 0 }));
     return a;
   };
   try {
@@ -18,6 +18,20 @@ export function createHud(info: Info, live: () => Info) {
       for (const e of list.getEntries()) { const a = acc(cur || 'loading'); a.long++; a.longMs += e.duration; }
     }).observe({ type: 'longtask', buffered: true });
   } catch { /* Safari: no long-task API */ }
+
+  // WebGL2 only: shader programs linked, and main-thread time blocked waiting on LINK_STATUS (synchronous when the
+  // browser lacks KHR_parallel_shader_compile). WebGPU compiles pipelines asynchronously, so there is nothing to time.
+  let links = 0;
+  if (gl) {
+    const link = gl.linkProgram.bind(gl), param = gl.getProgramParameter.bind(gl);
+    gl.linkProgram = (pr) => { links++; acc(cur || 'loading').links++; link(pr); };
+    gl.getProgramParameter = (pr, pname) => {
+      if (pname !== gl.LINK_STATUS) return param(pr, pname);
+      const t = performance.now(); const r = param(pr, pname); const ms = performance.now() - t;
+      const a = acc(cur || 'loading'); a.linkMs += ms; a.linkMax = Math.max(a.linkMax, ms);
+      return r;
+    };
+  }
 
   const el = document.createElement('div');
   el.setAttribute('style', [
@@ -38,15 +52,16 @@ export function createHud(info: Info, live: () => Info) {
     return s[Math.min(s.length - 1, Math.floor(p * s.length))];
   };
   const report = () => {
-    const lines = Object.entries({ ...info, ...live() }).map(([k, v]) => `${k}: ${v}`);
-    lines.push('', 'stage                          frames  fps(med)  p95ms  >33ms%  cpu ms  longtasks  minDpr');
+    const lines = Object.entries({ ...info, ...live(), programsLinked: links }).map(([k, v]) => `${k}: ${v}`);
+    lines.push('', 'stage                          frames  fps(med)  p95ms  >33ms%  cpu ms  longtasks  minDpr  links  linkMs(max)');
     for (const [id, a] of per) {
-      if (!a.n) continue;
+      if (!a.n && !a.links) continue;
       const med = pct(a.dts, 0.5);
+      const n = Math.max(1, a.n);
       lines.push(
         `${id.padEnd(30)} ${String(a.n).padStart(6)}  ${(med ? 1000 / med : 0).toFixed(0).padStart(8)}  ` +
-        `${pct(a.dts, 0.95).toFixed(0).padStart(5)}  ${((100 * a.slow) / a.n).toFixed(0).padStart(6)}  ` +
-        `${(a.cpu / a.n).toFixed(1).padStart(6)}  ${`${a.long} (${a.longMs.toFixed(0)}ms)`.padStart(9)}  ${a.minDpr.toFixed(2)}`,
+        `${pct(a.dts, 0.95).toFixed(0).padStart(5)}  ${((100 * a.slow) / n).toFixed(0).padStart(6)}  ` +
+        `${(a.cpu / n).toFixed(1).padStart(6)}  ${`${a.long} (${a.longMs.toFixed(0)}ms)`.padStart(9)}  ${(a.n ? a.minDpr.toFixed(2) : '-').padStart(6)}  ${String(a.links).padStart(5)}  ${a.linkMs.toFixed(0)} (${a.linkMax.toFixed(0)})`,
       );
     }
     return lines.join('\n');
@@ -63,12 +78,14 @@ export function createHud(info: Info, live: () => Info) {
     setTimeout(() => (btn.textContent = 'copy report'), 2000);
   });
 
-  let win: number[] = [], winCpu = 0, last = 0;
+  let win: number[] = [], winCpu = 0, last = 0, prev = 0;
   return {
     report,
-    sample(dt: number, cpuMs: number, stage: string, dpr: number, now: number) {
+    sample(_dt: number, cpuMs: number, stage: string, dpr: number, now: number) {
       cur = stage;
-      const ms = dt * 1000;
+      // real interval between frames (the loop's dt is clamped to 50 ms, which would hide stalls)
+      const ms = prev ? (now - prev) * 1000 : 16.7;
+      prev = now;
       const a = acc(stage);
       a.n++; a.cpu += cpuMs; if (ms > 34) a.slow++; a.minDpr = Math.min(a.minDpr, dpr);
       if (a.dts.length < 4000) a.dts.push(ms);
