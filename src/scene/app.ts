@@ -8,7 +8,7 @@
  * stages stream in afterwards (journey/stages.ts buildJourney).
  * Resolution: adaptive pixel ratio (spec §9) — 1 s frame-time windows, −.25 below ~45 fps, +.25 above 58 fps,
  * capped per tier/device.
- * Debug: `?gputime` enables WebGPU timestamp queries; `__scene.gpuMs` holds the last GPU frame times.
+ * Debug: `?debug` shows a perf overlay with a copyable per-stage report; `?gputime` enables WebGPU timestamp queries; `__scene.gpuMs` holds the last GPU frame times.
  */
 import { WebGPURenderer, Vector2, RenderPipeline, PerspectiveCamera } from 'three/webgpu';
 import { pass, uniform } from 'three/tsl';
@@ -19,6 +19,7 @@ import { createPostChain } from './post';
 import { createCompositor } from './journey/compositor';
 import { buildJourney } from './journey/stages';
 import type { Stage, StageContext, StageFrame } from './journey/types';
+import { createHud } from './debug-hud';
 
 type Hooks = {
   onProgress: (p: number) => void;
@@ -237,7 +238,18 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   }
 
   const gpuMs: number[] = [];
+  const hud = params.has('debug')
+    ? createHud(
+        {
+          gpu: gpuName || '(hidden)', backend: (renderer.backend as any).isWebGLBackend ? 'WebGL2' : 'WebGPU', tier: quality,
+          lowEnd, phone: isPhoneDevice, devicePixelRatio, screen: `${screen.width}x${screen.height}`,
+          deviceMemory: (navigator as any).deviceMemory ?? '?', cores: navigator.hardwareConcurrency ?? '?', ua: navigator.userAgent,
+        },
+        () => ({ dpr: dpr.applied.toFixed(2), buffer: `${size.x}x${size.y}`, minRatio: dpr.minRatio }),
+      )
+    : null;
   function frame(dt: number, time: number) {
+    const t0 = hud ? performance.now() : 0;
     ctx.isPhone = scroll.isPhone || isPhoneNow();
     adapt(dt, time);
     const vp = scroll.vp;
@@ -273,6 +285,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
       sceneT: wipeMid + clamp(near, -5, 5) / SCENE_VP, lastOpen: 1,
     });
     pipeline.render();
+    hud?.sample(dt, performance.now() - t0, b >= 0 ? `${STAGES[a].id}>${STAGES[b].id}` : STAGES[a].id, dpr.applied, time);
     if (gpuTime) {
       renderer.resolveTimestampsAsync('render').then((ms) => {
         if (typeof ms === 'number' && ms > 0) { gpuMs.push(ms); if (gpuMs.length > 240) gpuMs.shift(); }
@@ -280,6 +293,6 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     }
   }
 
-  (window as any).__scene = { renderer, stages, comp, uFish, post, journey, dpr, gpuMs, frame };
+  (window as any).__scene = { renderer, stages, comp, uFish, post, journey, dpr, gpuMs, frame, hud };
   return { frame, resize };
 }
