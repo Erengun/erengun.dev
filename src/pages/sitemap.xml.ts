@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { getPosts, isoDate } from '../lib/blog';
+import { PROJECTS } from '../lib/content';
 
 // Generated so new posts land in the sitemap automatically.
 export const GET: APIRoute = async () => {
@@ -8,6 +9,8 @@ export const GET: APIRoute = async () => {
   const today = new Date().toISOString().slice(0, 10);
   const urls = [
     { loc: '/', lastmod: today, freq: 'monthly', pri: '1.0' },
+    { loc: '/work/', lastmod: today, freq: 'monthly', pri: '0.9' },
+    ...PROJECTS.map((p) => ({ loc: `/work/${p.id}/`, lastmod: today, freq: 'monthly', pri: '0.8' })),
     { loc: '/blog/', lastmod: posts[0] ? isoDate(posts[0].data.date) : today, freq: 'monthly', pri: '0.8' },
     ...posts.map((p) => ({ loc: `/blog/${p.id}/`, lastmod: isoDate(p.data.date), freq: 'yearly', pri: '0.7' })),
     { loc: '/privacy/', freq: 'yearly', pri: '0.2' },

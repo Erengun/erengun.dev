@@ -280,6 +280,7 @@ body.is--project [data-chapter="work"] > a i, body.is--contact [data-chapter="co
 .pp-dim { color: #bdbdbd; }
 .pp-link { font-size: 1rem; line-height: 1.45; text-decoration: underline; text-underline-offset: .25em; text-decoration-thickness: 1px; width: fit-content; }
 .pp-link:hover { color: #fff; text-decoration-color: var(--c-accent); }
+.pp-case { font-weight: 500; text-decoration-color: var(--c-accent); }
 .pp-thumbs { margin-top: .375rem; display: flex; gap: .375rem; flex-wrap: wrap; }
 .pp-thumbs button { height: 1.875rem; width: 2.875rem; overflow: hidden; opacity: .55; outline: 1px solid rgb(255 255 255 / .35); transition: opacity 150ms var(--ease-out); }
 .pp-thumbs button:hover { opacity: .85; }

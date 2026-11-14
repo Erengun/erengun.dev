@@ -87,10 +87,10 @@ const jsonLd = {
         {LAST.map((l) => (<><h3>{l.h}</h3><p>{l.b1}</p>{l.b2 && <p>{l.b2}</p>}</>))}
       </section>
       <section aria-labelledby="seo-work">
-        <h2 id="seo-work">Selected work</h2>
+        <h2 id="seo-work"><a href="/work/">Selected work</a></h2>
         <ol>
           {PROJECTS.map((p) => (
-            <li><article><h3>{p.url ? <a href={p.url}>{p.title}</a> : p.title}</h3><p>{p.info}</p><p>Role: {p.roles.join(', ')}</p></article></li>
+            <li><article><h3><a href={`/work/${p.id}/`}>{p.title}</a></h3><p>{p.info}</p><p>Role: {p.roles.join(', ')}</p></article></li>
           ))}
         </ol>
       </section>
@@ -158,6 +158,7 @@ const jsonLd = {
                 <div class="pp-col pp-col-role">
                   <p class="mono pp-label">Role</p>
                   <p class="pp-text">{p.roles.join(', ')}</p>
+                  <a class="pp-link pp-case" href={`/work/${p.id}/`}>Read the case study →</a>
                   {p.url ? <a class="pp-link" href={p.url} target="_blank" rel="noopener">{linkLabel(p.url)} ↗</a> : <p class="pp-text pp-dim">Private repository</p>}
                   <div class="pp-thumbs">
                     {Array.from({ length: p.slides }).map((_, s) => (

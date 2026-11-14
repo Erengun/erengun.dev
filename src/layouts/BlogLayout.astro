@@ -9,9 +9,11 @@ interface Props {
   type?: 'website' | 'article';
   jsonLd?: object;
   noindex?: boolean;
+  /** wider column for pages with galleries */
+  wide?: boolean;
   published?: Date;
 }
-const { title, description, path, type = 'website', jsonLd, published, noindex = false } = Astro.props;
+const { title, description, path, type = 'website', jsonLd, published, noindex = false, wide = false } = Astro.props;
 const URL_BASE = 'https://erengun.dev';
 const url = URL_BASE + path;
 const fullTitle = `${title} — ${SITE.name}`;
@@ -49,13 +51,13 @@ const fullTitle = `${title} — ${SITE.name}`;
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
     {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
   </head>
-  <body>
+  <body class:list={{ wide }}>
     <a class="skip" href="#main">Skip to content</a>
     <header class="bar">
       <a class="logo" href="/">{SITE.name}</a>
       <nav aria-label="Site">
         <a href="/blog/" aria-current={path.startsWith('/blog/') ? 'page' : undefined}>blog</a>
-        <a href="/#work">work</a>
+        <a href="/work/" aria-current={path.startsWith('/work/') ? 'page' : undefined}>work</a>
         <a href={`mailto:${SITE.email}`}>let's talk</a>
       </nav>
     </header>
@@ -111,6 +113,7 @@ const fullTitle = `${title} — ${SITE.name}`;
   .bar nav a[aria-current]::before { content: "> "; color: var(--accent); }
 
   main { flex: 1; padding-block: 2rem 4rem; }
+  body.wide .bar, body.wide .foot, body.wide main { max-width: 72rem; }
 
   .foot {
     display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; padding-block: 2rem 2.5rem; border-top: 1px solid var(--line);
