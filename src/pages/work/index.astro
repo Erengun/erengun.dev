@@ -1,0 +1,51 @@
+---
+import BlogLayout from '../../layouts/BlogLayout.astro';
+import { PROJECTS, SITE } from '../../lib/content';
+import { CASES, loadSlides, workPath } from '../../lib/work';
+
+const items = await Promise.all(PROJECTS.map(async (p) => ({ p, c: CASES[p.id], cover: (await loadSlides(p.id))[0] })));
+const pad = (n: number) => String(n).padStart(2, '0');
+const URL_BASE = 'https://erengun.dev';
+const DESC = `Selected work by ${SITE.name}: developer tools for coding agents, Flutter open source and apps.`;
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  name: `Selected work — ${SITE.name}`,
+  url: URL_BASE + '/work/',
+  description: DESC,
+  hasPart: items.map(({ p, c }) => ({ '@type': 'CreativeWork', name: p.title, description: c.lede, url: URL_BASE + workPath(p) })),
+};
+---
+<BlogLayout title="Selected work" description={DESC} path="/work/" jsonLd={jsonLd} wide>
+  <p class="eyebrow"><span class="g">&gt;</span> {pad(items.length)} projects</p>
+  <h1 class="display">Work</h1>
+  <p class="lede">Tools that make shipping software faster, and the apps that ship on them. Or <a href="/#work">see it in 3D</a>.</p>
+
+  <ol class="list">
+    {items.map(({ p, c, cover }, i) => (
+      <li>
+        <a href={workPath(p)}>
+          <img src={cover.src} width={cover.w} height={cover.h} alt="" loading={i < 2 ? 'eager' : 'lazy'} decoding="async" />
+          <span class="meta eyebrow">{pad(i + 1)} · {p.roles.join(', ')}</span>
+          <span class="t">{p.title}</span>
+          <span class="s">{c.lede}</span>
+        </a>
+      </li>
+    ))}
+  </ol>
+</BlogLayout>
+
+<style>
+  .lede { color: var(--dim); margin: 0 0 2.5rem; max-width: 36rem; }
+  .lede a { color: var(--ice); text-underline-offset: .2em; text-decoration-thickness: 1px; }
+  .list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3rem 1.5rem; }
+  .list li:first-child { grid-column: 1 / -1; }
+  .list a { display: grid; gap: .5rem; text-decoration: none; }
+  .list img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; background: #111; border: 1px solid var(--line); margin-bottom: .5rem; transition: border-color .2s; }
+  .list li:first-child img { aspect-ratio: 21 / 9; }
+  .t { font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 700; letter-spacing: -.035em; line-height: 1; }
+  .s { color: var(--dim); font-size: .9375rem; line-height: 1.55; max-width: 34rem; }
+  .list a:hover img { border-color: var(--accent); }
+  .list a:hover .t { text-decoration: underline; text-underline-offset: .15em; text-decoration-thickness: 2px; }
+  @media (max-width: 640px) { .list { grid-template-columns: 1fr; gap: 2.5rem; } .list li:first-child img { aspect-ratio: 16 / 9; } }
+</style>

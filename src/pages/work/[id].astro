@@ -1,0 +1,147 @@
+---
+import BlogLayout from '../../layouts/BlogLayout.astro';
+import { PROJECTS, SITE, type Project } from '../../lib/content';
+import { CASES, loadSlides, workPath, type Slide } from '../../lib/work';
+
+export async function getStaticPaths() {
+  return Promise.all(
+    PROJECTS.map(async (project, i) => ({
+      params: { id: project.id },
+      props: {
+        project,
+        index: i,
+        slides: await loadSlides(project.id),
+        prev: PROJECTS[i - 1] ?? null,
+        next: PROJECTS[i + 1] ?? PROJECTS[0],
+      },
+    })),
+  );
+}
+
+interface Props { project: Project; index: number; slides: Slide[]; prev: Project | null; next: Project }
+const { project: p, index, slides, prev, next } = Astro.props;
+const c = CASES[p.id];
+const pad = (n: number) => String(n).padStart(2, '0');
+const URL_BASE = 'https://erengun.dev';
+const path = workPath(p);
+const [hero, ...rest] = slides;
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'CreativeWork',
+  name: p.title,
+  headline: `${p.title}: ${c.lede}`,
+  description: c.lede,
+  url: URL_BASE + path,
+  image: URL_BASE + hero.src,
+  keywords: c.stack.join(', '),
+  creator: { '@type': 'Person', name: SITE.name, url: URL_BASE + '/' },
+  ...(c.links[0] ? { sameAs: c.links.map((l) => l.href) } : {}),
+};
+---
+<BlogLayout title={`${p.title} — case study`} description={c.lede} path={path} jsonLd={jsonLd} wide>
+  <article class="case">
+    <header class="head">
+      <p class="eyebrow"><a href="/work/"><span class="g">&lt;</span> all work</a> · {pad(index + 1)} / {pad(PROJECTS.length)}</p>
+      <h1 class="display">{p.title}</h1>
+      <p class="lede">{c.lede}</p>
+      <dl class="facts">
+        <div><dt>Role</dt><dd>{p.roles.join(', ')}</dd></div>
+        <div><dt>Status</dt><dd>{c.status}</dd></div>
+        <div><dt>Stack</dt><dd>{c.stack.join(' · ')}</dd></div>
+        <div><dt>Links</dt><dd>{c.links.length ? c.links.map((l, i) => <>{i > 0 && ' · '}<a href={l.href} rel="noopener" target="_blank">{l.label} ↗</a></>) : 'Private repository'}</dd></div>
+      </dl>
+    </header>
+
+    <figure class="hero">
+      <img src={hero.src} width={hero.w} height={hero.h} alt={hero.caption} fetchpriority="high" />
+    </figure>
+
+    {c.stats && (
+      <section class="stats" aria-label="Numbers">
+        <ul>{c.stats.map((s) => <li><span class="v">{s.value}</span><span class="l">{s.label}</span></li>)}</ul>
+        {c.statsNote && <p class="eyebrow">{c.statsNote}</p>}
+      </section>
+    )}
+
+    <div class="cols">
+      <section>
+        <h2 class="eyebrow"><span class="g">01</span> The problem</h2>
+        {c.problem.map((t) => <p>{t}</p>)}
+      </section>
+      <section>
+        <h2 class="eyebrow"><span class="g">02</span> What I built</h2>
+        {c.built.map((t) => <p>{t}</p>)}
+      </section>
+      <section>
+        <h2 class="eyebrow"><span class="g">03</span> Worth knowing</h2>
+        <ul class="notes">{c.notes.map((t) => <li>{t}</li>)}</ul>
+      </section>
+    </div>
+
+    {rest.length > 0 && (
+      <section class="gallery" aria-label="Screens">
+        {rest.map((s) => (
+          <figure class:list={['shot', `is-${s.kind}`]}>
+            <img src={s.src} width={s.w} height={s.h} alt={s.caption} loading="lazy" decoding="async" />
+            <figcaption class="eyebrow">{s.caption}</figcaption>
+          </figure>
+        ))}
+      </section>
+    )}
+  </article>
+
+  <nav class="pager" aria-label="More work">
+    {prev ? <a href={workPath(prev)} rel="prev"><span class="eyebrow">&lt; previous</span><span>{prev.title}</span></a> : <a href="/work/"><span class="eyebrow">&lt; all work</span><span>Selected work</span></a>}
+    <a class="r" href={workPath(next)} rel="next"><span class="eyebrow">next &gt;</span><span>{next.title}</span></a>
+  </nav>
+</BlogLayout>
+
+<style>
+  .head { display: grid; gap: .75rem; padding-bottom: 2rem; }
+  .head a { text-decoration: none; }
+  .head a:hover { color: var(--fg); }
+  .display { margin-bottom: .25rem; overflow-wrap: anywhere; }
+  .lede { margin: 0; max-width: 40rem; font-size: clamp(1.125rem, 2.2vw, 1.375rem); line-height: 1.45; color: #d8d8d8; text-wrap: pretty; }
+
+  .facts { margin: 1.5rem 0 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+  .facts div { padding: .875rem 1rem .875rem 0; display: grid; gap: .35rem; align-content: start; }
+  .facts dt { font: 400 .6875rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+  .facts dd { margin: 0; font-size: .9375rem; line-height: 1.5; }
+  .facts a { color: var(--ice); text-decoration: underline; text-underline-offset: .2em; text-decoration-thickness: 1px; }
+  .facts a:hover { color: var(--fg); }
+  @media (max-width: 760px) { .facts { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 420px) { .facts { grid-template-columns: 1fr; } .facts div { border-bottom: 1px solid var(--line); } }
+
+  .hero { margin: 0 0 3rem; }
+  .hero img, .shot img { display: block; width: 100%; height: auto; background: #111; border: 1px solid var(--line); }
+
+  .stats { margin: 0 0 3.5rem; display: grid; gap: .75rem; }
+  .stats ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+  .stats li { padding: 1.25rem 1rem 0 0; display: grid; gap: .5rem; align-content: start; }
+  .stats .v { font: 700 clamp(2.75rem, 7vw, 4.5rem)/.9 var(--font-display); letter-spacing: -.045em; color: #fff; }
+  .stats .l { color: var(--dim); font-size: .9375rem; line-height: 1.4; }
+  @media (max-width: 560px) { .stats ul { grid-template-columns: 1fr; } .stats li { padding: 1rem 0; border-bottom: 1px solid var(--line); } }
+
+  .cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2.5rem; margin-bottom: 4rem; }
+  .cols section { display: grid; gap: 1rem; align-content: start; border-top: 1px solid var(--line); padding-top: 1rem; }
+  .cols h2 { margin: 0 0 .25rem; }
+  .cols p { margin: 0; color: #d8d8d8; font-size: 1rem; line-height: 1.65; }
+  .notes { margin: 0; padding: 0; list-style: none; display: grid; gap: .75rem; }
+  .notes li { padding-left: 1.1rem; position: relative; color: #d8d8d8; font-size: 1rem; line-height: 1.55; }
+  .notes li::before { content: "—"; position: absolute; left: 0; color: var(--accent); }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; gap: 2rem; } }
+
+  .gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem 1.5rem; align-items: start; }
+  .shot { margin: 0; display: grid; gap: .6rem; }
+  .shot.is-cover { grid-column: 1 / -1; }
+  .shot.is-phone img { max-height: 80svh; width: auto; max-width: 100%; margin-inline: auto; }
+  .gallery:has(.is-phone) { grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); }
+  .gallery:has(.is-phone) .is-desktop { grid-column: 1 / -1; }
+  @media (max-width: 640px) { .gallery { grid-template-columns: 1fr; } }
+
+  .pager { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 4.5rem; padding-top: 2rem; border-top: 1px solid var(--line); }
+  .pager a { display: grid; gap: .35rem; text-decoration: none; font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; }
+  .pager a:hover span:last-child { text-decoration: underline; text-underline-offset: .2em; text-decoration-thickness: 1px; }
+  .pager a:hover .eyebrow { color: var(--accent); }
+  .pager .r { text-align: right; }
+</style>
