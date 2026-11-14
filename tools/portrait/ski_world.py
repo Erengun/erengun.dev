@@ -80,8 +80,49 @@ cfg = dict(src=SRC, scale=SCALE, stamp=STAMP, zn=1.3, zf=70, relief=0.45, n_bg=1
 # the skier/skis foreground layer is untouched)
 #   - sky splats (far plane) fade radially toward the photo border → no hard band / mirrored extension in the sky
 #   - near-snow band at the bottom fades out over a wide band → the procedural snow takes over without a seam
+# ---- background as a textured depth mesh (default; SKI_BG=splat for the old all-splat output). Like COBE's
+# purpose-built globe: the photo's background (~150k splats, the bulk of the intro's GPU cost on phones) becomes one
+# textured surface with the same depth, colour and feathered alpha; only the skier stays a splat layer.
+#   <out>/ski_bg.webp  RGBA texture of the extended background layer (build resolution)
+#   <out>/ski_bg.bin   'SKBG', u32 gw, u32 gh, f32 WE, HE, f, cx, cy (build px), then gw·gh f32 depths (m) on an
+#                      even grid over [0, WE−1]×[0, HE−1]; vertex = ((u−cx)/f·z, −(v−cy)/f·z, −z), as in build.py
+BG_MESH = os.environ.get('SKI_BG', 'mesh') == 'mesh'
+BG_STEP = 10   # grid spacing in build px
+_bg = {}
+_orig_sfl = B.splats_from_layer
+def _sfl(color, z, alpha, u, v, b, f, cx, cy, **kw):
+    if not _bg:   # build() makes the background layer first
+        _bg.update(color=color, z=z, alpha=alpha, f=f, cx=cx, cy=cy)
+    return _orig_sfl(color, z, alpha, u, v, b, f, cx, cy, **kw)
+B.splats_from_layer = _sfl
+
+def _feather(un, vn, far):
+    r = np.maximum(np.abs(un), np.abs(vn) * 1.1)
+    return np.where(far, 1 - B.smoothstep(0.35, 0.92, r), 1 - B.smoothstep(0.28, 0.95, vn))
+
+def _write_bg_mesh(out_dir):
+    C, Z, A, f, cx, cy = (_bg[k] for k in ('color', 'z', 'alpha', 'f', 'cx', 'cy'))
+    HE, WE = Z.shape
+    Wp, Hp = SCALE * W, SCALE * H
+    vv, uu = np.mgrid[0:HE, 0:WE].astype(np.float32)
+    A2 = A * _feather((uu - cx) / (Wp / 2), (vv - cy) / (Hp / 2), Z > cfg['zf'] * 0.8)
+    rgba = np.concatenate([np.clip(C, 0, 1), np.clip(A2, 0, 1)[..., None]], -1)
+    small = rgba
+    bgra = (np.round(small * 255)).astype(np.uint8)[..., [2, 1, 0, 3]]
+    cv2.imwrite(f'{out_dir}/ski_bg.webp', bgra, [cv2.IMWRITE_WEBP_QUALITY, 92])
+    gw, gh = int(np.ceil((WE - 1) / BG_STEP)) + 1, int(np.ceil((HE - 1) / BG_STEP)) + 1
+    gx = np.round(np.linspace(0, WE - 1, gw)).astype(int); gy = np.round(np.linspace(0, HE - 1, gh)).astype(int)
+    zg = Z[gy][:, gx].astype(np.float32)
+    with open(f'{out_dir}/ski_bg.bin', 'wb') as fh:
+        fh.write(b'SKBG'); fh.write(np.array([gw, gh], '<u4').tobytes())
+        fh.write(np.array([WE, HE, f, cx, cy], '<f4').tobytes()); fh.write(zg.astype('<f4').tobytes())
+    print(f'  wrote ski_bg.webp {small.shape[1]}x{small.shape[0]}, ski_bg.bin grid {gw}x{gh}')
+
 _orig_write = B.write_splat
 def _feathered_write(path, parts, seed=7):
+    if BG_MESH and _bg and len(parts) >= 2:
+        _write_bg_mesh(os.path.dirname(path))
+        return _orig_write(path, list(parts[1:]), seed)
     if len(parts) >= 1:
         pos, sc, col, a, q = parts[0]
         z = np.maximum(-pos[:, 2], 1e-3)
@@ -89,11 +130,7 @@ def _feathered_write(path, parts, seed=7):
         fpx = (Wp / 2) / np.tan(np.radians(B.HFOV / 2))
         un = (pos[:, 0] / z * fpx) / (Wp / 2)            # −1..1 across the photo (beyond = extension)
         vn = (-pos[:, 1] / z * fpx) / (Hp / 2)           # −1 top .. +1 bottom
-        far = z > cfg['zf'] * 0.8
-        r = np.maximum(np.abs(un), np.abs(vn) * 1.1)
-        sky_f = 1 - B.smoothstep(0.35, 0.92, r)
-        bot_f = 1 - B.smoothstep(0.28, 0.95, vn)        # wide band from below the skis to the bottom edge
-        a = a * np.where(far, sky_f, bot_f)
+        a = a * _feather(un, vn, z > cfg['zf'] * 0.8)    # sky fades radially; a wide band at the bottom
         parts = [(pos, sc, col, a, q)] + list(parts[1:])
     return _orig_write(path, parts, seed)
 B.write_splat = _feathered_write
@@ -174,7 +211,7 @@ skier = dict(
 )
 skyc = img2[sky2]
 zen = img2[: max(4, H2 // 12)][sky2[: max(4, H2 // 12)]]
-out = dict(meta, ground=[float(c) for c in coef], skier=skier,
+out = dict(meta, bg_mesh=BG_MESH, ground=[float(c) for c in coef], skier=skier,
            sky_zenith=[float(x) for x in (zen.mean(0) if len(zen) else skyc.mean(0))],
            sky_horizon=[float(x) for x in np.percentile(skyc, 75, axis=0)] if len(skyc) else [0.8, 0.85, 0.9],
            snow=[float(x) for x in np.median(img2[gsel & (img2.mean(-1) > 0.6)], 0)],
