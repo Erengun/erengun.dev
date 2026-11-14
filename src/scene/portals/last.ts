@@ -13,7 +13,7 @@
 import {
   Scene, Color, Mesh, PerspectiveCamera, RenderTarget, HalfFloatType, DataTexture, RGBAFormat, FloatType,
   NearestFilter, InstancedBufferAttribute, BufferGeometry, BufferAttribute, MeshBasicNodeMaterial, QuadMesh,
-  Matrix3, Matrix4, Vector2, Vector3, Vector4, Quaternion, FrontSide, BackSide, BoxGeometry, AnimationMixer, SphereGeometry, Group,
+  Matrix3, Matrix4, Vector2, Vector3, Vector4, Quaternion, Frustum, Sphere, FrontSide, BackSide, BoxGeometry, AnimationMixer, SphereGeometry, Group,
   PlaneGeometry, type Object3D, type SkinnedMesh, type WebGPURenderer, type Texture,
 } from 'three/webgpu';
 import {
@@ -290,11 +290,21 @@ export function createLastStages(ctx: StageContext): LastStages {
   const cityCount = (ROWS_ABOVE + ROWS_BELOW) * 2 * LEVELS;
   /** blocks come in VARIANTS (city-block.glb); each variant is one instanced draw with its own instance data */
   const VARIANTS = 4;
-  type CityVariant = { mesh: Mesh | null; iA: InstancedBufferAttribute; iB: InstancedBufferAttribute };
+  /**
+   * cA/cB hold every block around the camera (rebuilt when the street advances a level); iA/iB, the instance data
+   * actually drawn, get only the blocks inside the view (cullCity). Most of the canyon is behind or beside the
+   * camera, and the city is vertex-bound on small phone GPUs (~1,650 triangles a block).
+   */
+  type CityVariant = {
+    mesh: Mesh | null; iA: InstancedBufferAttribute; iB: InstancedBufferAttribute;
+    cA: Float32Array; cB: Float32Array; n: number; drawn: number; center: Vector3; radius: number;
+  };
   const variants: CityVariant[] = Array.from({ length: VARIANTS }, () => ({
     mesh: null,
     iA: new InstancedBufferAttribute(new Float32Array(cityCount * 4), 4), // pos.xyz, seed
     iB: new InstancedBufferAttribute(new Float32Array(cityCount * 4), 4), // cos roll, sin roll, scale, side
+    cA: new Float32Array(cityCount * 4), cB: new Float32Array(cityCount * 4), n: 0, drawn: -1,
+    center: new Vector3(), radius: 0,
   }));
   let firstLevel = Number.NaN;
 
@@ -312,6 +322,9 @@ export function createLastStages(ctx: StageContext): LastStages {
     });
     variants.forEach((v, vi) => {
       const geo = geos[vi] ?? geos[0];
+      geo.computeBoundingSphere();
+      v.center.copy(geo.boundingSphere!.center);
+      v.radius = geo.boundingSphere!.radius;
       const mesh = new Mesh(geo, makeCityMaterial(v));
       mesh.frustumCulled = false;
       (mesh as any).count = 2;
@@ -394,7 +407,7 @@ export function createLastStages(ctx: StageContext): LastStages {
           const vi = Math.floor(rnd(j * 1.3, r * 2.1, s + 7) * VARIANTS) % VARIANTS;
           const v = variants[vi];
           const n = counts[vi]++;
-          const a = v.iA.array as Float32Array, b = v.iB.array as Float32Array;
+          const a = v.cA, b = v.cB;
           const h = rnd(j, r, s);
           const sc = 1 + (rnd(r, j, s * 3) * 2 - 1) * 0.125;
           const rr = h < 0.6 ? 0 : h < 0.8 ? Math.PI / 2 : -Math.PI / 2;
@@ -407,11 +420,53 @@ export function createLastStages(ctx: StageContext): LastStages {
         }
       }
     }
-    variants.forEach((v, i) => {
-      (v.mesh as any).count = Math.max(2, counts[i]);
+    variants.forEach((v, i) => { v.n = counts[i]; v.drawn = -1; });
+  }
+
+  // CPU mirror of the vertex shader's twist (makeCityMaterial), applied to each block's bounding sphere
+  const frustum = new Frustum(), projView = new Matrix4(), sph = new Sphere();
+  // diagnostics: `?nocull` (or __cityCull.off = true) draws every block
+  const cullStats = { drawn: 0, total: 0, off: new URLSearchParams(location.search).has('nocull') };
+  function cullCity(cam: PerspectiveCamera) {
+    if (!variants[0].mesh) return;
+    projView.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(projView);
+    const cam3 = uCityCam.value as Vector3, twist = uTwist.value as number;
+    cullStats.drawn = cullStats.total = 0;
+    for (const v of variants) {
+      const ia = v.iA.array as Float32Array, ib = v.iB.array as Float32Array;
+      const { cA, cB, center: c } = v;
+      let m = 0, h = 7;
+      for (let n = 0; n < v.n; n++) {
+        const o = n * 4;
+        const cr = cB[o], sr = cB[o + 1], sc = cB[o + 2], sd = cB[o + 3];
+        // roll about x, scale, mirror, translate (same order as the shader)
+        const ry = c.y * cr - c.z * sr, rz = c.y * sr + c.z * cr;
+        const px = c.x * sc * sd + cA[o], py = ry * sc + cA[o + 1], pz = rz * sc * sd + cA[o + 2];
+        const k = Math.min(1, Math.max(0, (cam3.z + 10 - pz) / TWIST_LEN)) * twist;
+        const ang = -3.14 * k, ca = Math.cos(ang), sa = Math.sin(ang);
+        const ex = px * (1 - 0.35 * k), ey = py - cam3.y;
+        sph.center.set(ex * ca - ey * sa, ex * sa + ey * ca + cam3.y, pz);
+        // the twist angle changes along a block (its z extent): pad by the arc that sweeps at this distance
+        const r = v.radius * sc;
+        sph.radius = r + Math.hypot(ex, ey) * 3.14 * twist * (2 * r / TWIST_LEN) + 2;
+        if (!cullStats.off && !frustum.intersectsSphere(sph)) continue;
+        ia.set(cA.subarray(o, o + 4), m * 4);
+        ib.set(cB.subarray(o, o + 4), m * 4);
+        h = (Math.imul(h, 31) + n + 1) | 0;
+        m++;
+      }
+      // keep at least two instances (as before); padding slots are collapsed to a point (scale 0)
+      for (let q = m; q < 2; q++) { ia.fill(0, q * 4, q * 4 + 4); ib.fill(0, q * 4, q * 4 + 4); }
+      cullStats.drawn += m; cullStats.total += v.n;
+      // upload only when the visible set changed (drawn is reset to -1 whenever the candidates are rebuilt)
+      const sig = h >>> 0;
+      if (sig === v.drawn) continue;
+      v.drawn = sig;
+      (v.mesh as any).count = Math.max(2, m);
       v.iA.needsUpdate = true;
       v.iB.needsUpdate = true;
-    });
+    }
   }
 
   // city camera path: forward through the canyon (x³ - x⁴/2 = ∫ smoothstep speed), roll π/2 over .45→.9,
@@ -591,6 +646,7 @@ export function createLastStages(ctx: StageContext): LastStages {
       r.setRenderTarget(rt);
       r.setClearColor(skyColor, 1);
       r.clear();
+      cullCity(cityCam);
       r.render(cityScene, cityCam);
       // project the portal quad with the projection actually used for this frame (compositor overscan)
       quadNdc = null;
@@ -623,7 +679,11 @@ export function createLastStages(ctx: StageContext): LastStages {
     // spec §7.3: splat pixels skip AgX; the VHS post pushes saturated reds further, so trim exposure/saturation
     grade: { exposure: SPLAT_EXPOSURE, saturation: SPLAT_SAT, clamp: true, vignette: true },
     // the blit samples splatRT: give it real contents first (its variant differs until the target was drawn to)
-    warmup: () => {
+    warmup: (w, h) => {
+      // allocate the splat target at its real size now: created at 1×1 by the warm-up draw, it would be
+      // reallocated (and its pipelines' attachments rebuilt) on the first visible frame
+      const k = splatRes.scale;
+      splatRT.setSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
       const r = ctx.renderer, prev = r.getRenderTarget();
       r.setRenderTarget(splatRT);
       r.render(splatScene, splatCam);
@@ -653,7 +713,8 @@ export function createLastStages(ctx: StageContext): LastStages {
         return;
       }
       const w = Math.max(1, Math.round(rt.width * k)), h = Math.max(1, Math.round(rt.height * k));
-      if (splatRT.width !== w || splatRT.height !== h) splatRT.setSize(w, h);
+      // (the 1×1 warm-up draw keeps the real-size target allocated in warmup())
+      if (rt.width > 1 && (splatRT.width !== w || splatRT.height !== h)) splatRT.setSize(w, h);
       r.setRenderTarget(splatRT);
       r.setClearColor(splatScene.background as Color, 1);
       r.clear();
@@ -673,6 +734,36 @@ export function createLastStages(ctx: StageContext): LastStages {
   const splatBlit = new QuadMesh(blitMat);
 
   if (import.meta.env.DEV) (globalThis as any).__lastDebug = { state, quadCenter, cityCam, getQuad: () => quadNdc, splatRes };
+  (globalThis as any).__cityCull = cullStats;
+  // `?debug`: exact check that culling never drops a block with any vertex on screen
+  if (new URLSearchParams(location.search).has('debug')) (cullStats as any).validate = () => {
+    const cam3 = uCityCam.value as Vector3, twist = uTwist.value as number, q = new Vector4();
+    let wrong = 0, checked = 0;
+    for (const v of variants) {
+      if (!v.mesh) continue;
+      const pos = (v.mesh.geometry as BufferGeometry).attributes.position;
+      const drawnSet = new Set<string>();
+      const ia = v.iA.array as Float32Array;
+      for (let m = 0; m < (v.mesh as any).count; m++) drawnSet.add(`${ia[m * 4]},${ia[m * 4 + 1]},${ia[m * 4 + 2]}`);
+      for (let n = 0; n < v.n; n++) {
+        const o = n * 4;
+        if (drawnSet.has(`${v.cA[o]},${v.cA[o + 1]},${v.cA[o + 2]}`)) continue;
+        checked++;
+        const cr = v.cB[o], sr = v.cB[o + 1], sc = v.cB[o + 2], sd = v.cB[o + 3];
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+          const ry = y * cr - z * sr, rz = y * sr + z * cr;
+          const px = x * sc * sd + v.cA[o], py = ry * sc + v.cA[o + 1], pz = rz * sc * sd + v.cA[o + 2];
+          const k = Math.min(1, Math.max(0, (cam3.z + 10 - pz) / TWIST_LEN)) * twist;
+          const ang = -3.14 * k, ca = Math.cos(ang), sa = Math.sin(ang);
+          const ex = px * (1 - 0.35 * k), ey = py - cam3.y;
+          q.set(ex * ca - ey * sa, ex * sa + ey * ca + cam3.y, pz, 1).applyMatrix4(projView);
+          if (q.w > 0 && Math.abs(q.x) <= q.w && Math.abs(q.y) <= q.w && q.z >= -q.w && q.z <= q.w) { wrong++; break; }
+        }
+      }
+    }
+    return { culled: checked, wronglyCulled: wrong };
+  };
 
   // =========================================================== loading
   // corridor loads up front (it is part of the preloader gate); city and alley load when the journey loader

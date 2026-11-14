@@ -10,7 +10,7 @@
  * capped per tier/device.
  * Debug: `?debug` shows a perf overlay with a copyable per-stage report; `?gputime` enables WebGPU timestamp queries; `__scene.gpuMs` holds the last GPU frame times.
  */
-import { WebGPURenderer, Vector2, RenderPipeline, PerspectiveCamera, type Object3D, type Camera, type Mesh, type Material, type RenderTarget, RenderTarget as RenderTargetClass, HalfFloatType } from 'three/webgpu';
+import { WebGPURenderer, TextureLoader, type Texture, Vector2, RenderPipeline, PerspectiveCamera, type Object3D, type Camera, type Mesh, type Material, type RenderTarget, RenderTarget as RenderTargetClass, HalfFloatType } from 'three/webgpu';
 import { pass, uniform } from 'three/tsl';
 import { $route, $preloader, scroll, tilt, pointer as sharedPointer } from '../lib/stores';
 import { STAGES, TRANSITIONS, SCENE_VP, WIPES, journeyAt, stageLocal, clamp, damp, smoothstep } from '../lib/timeline';
@@ -156,27 +156,29 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   }
 
   /**
-   * Adaptive pixel ratio: mean frame time over 1 s windows → −.25 below 45 fps, +.25 above 58 fps.
-   * Windows containing a long frame (tab switch), a stage swap/compile or a resize are dropped; a 30 Hz-capped
-   * display (steady ~33 ms) is not treated as slow; after a step down, going back up to that ratio waits 8 s
-   * so it can't oscillate between two levels.
+   * Adaptive pixel ratio: MEDIAN frame time over 1 s windows → −.25 below 45 fps, +.25 above 55 fps.
+   * The median measures how fast the GPU draws a typical frame; one-off stalls (a shader link, an image upload)
+   * would drag a mean down and cut resolution for nothing, then block it from coming back. Windows containing
+   * a tab switch, a stage swap/compile or a resize are dropped; a 30 Hz-capped display (steady ~33 ms) is not
+   * treated as slow; after a step down, going back up to that ratio waits 8 s so it can't oscillate.
    */
-  const ctl = { t: 0, n: 0, sum: 0, sq: 0, skip: true, blockUpUntil: 0, blockedRatio: Infinity };
+  const ctl = { t: 0, dts: [] as number[], skip: true, blockUpUntil: 0, blockedRatio: Infinity };
   let loading = () => true; // set once the journey exists: background loads/compiles make frames unrepresentative
   function skipWindow() { ctl.skip = true; }
   function adapt(dt: number, now: number) {
     // while stages stream in, frames are noisy; still react to a clearly struggling GPU (< 30 fps)
     if (document.hidden || dt > 0.1) skipWindow();
-    ctl.t += dt; ctl.n++; ctl.sum += dt; ctl.sq += dt * dt;
+    ctl.t += dt; ctl.dts.push(dt);
     if (ctl.t < 1) return;
-    const mean = ctl.sum / ctl.n;
-    const sd = Math.sqrt(Math.max(0, ctl.sq / ctl.n - mean * mean));
+    const d = ctl.dts.sort((a, b) => a - b);
+    const q = (p: number) => d[Math.min(d.length - 1, Math.floor(p * d.length))];
+    const med = q(0.5), spread = q(0.75) - q(0.25);
     const skip = ctl.skip;
-    ctl.t = ctl.n = ctl.sum = ctl.sq = 0;
+    ctl.t = 0; ctl.dts = [];
     ctl.skip = false;
     if (skip) return;
-    const fps = 1 / mean;
-    const capped30 = fps > 26 && fps < 34 && sd < 0.004;
+    const fps = 1 / med;
+    const capped30 = fps > 26 && fps < 34 && spread < 0.004;
     if (loading() && fps >= 30) return;
     // safety net when the GPU name is hidden: still < 30 fps at the floor → allow going down to .5
     if (fps < 30 && !capped30 && dpr.applied <= floorRatio() + 1e-3 && dpr.minRatio > 0.5) dpr.minRatio = 0.5;
@@ -185,7 +187,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
       ctl.blockUpUntil = now + 8;
       // badly struggling: drop two steps at once
       dpr.reduction = Math.min(dpr.reduction + (fps < 30 ? 2 : 1) * DPR_STEP, dprCap() - floorRatio());
-    } else if (fps > 58 && dpr.reduction > 0 && !loading()) {
+    } else if (fps > 55 && dpr.reduction > 0 && !loading()) {
       const next = Math.max(dprCap() - (dpr.reduction - DPR_STEP), floorRatio());
       if (next >= ctl.blockedRatio - 1e-3 && now < ctl.blockUpUntil) return;
       dpr.reduction = Math.max(0, dpr.reduction - DPR_STEP);
@@ -198,6 +200,25 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   resize();
 
   // ------------------------------------------------------------- stages
+  // every image texture the worlds load; the ones a stage doesn't show right away (later slides) would otherwise
+  // upload the first time they appear, mid-scroll. They are uploaded in the background with their stage.
+  const loadedTextures = new Set<Texture>();
+  const tlLoad = TextureLoader.prototype.load;
+  TextureLoader.prototype.load = function (this: TextureLoader, ...a: Parameters<TextureLoader['load']>) {
+    const t = tlLoad.apply(this, a);
+    loadedTextures.add(t);
+    return t;
+  };
+  async function uploadPending() {
+    for (const t of loadedTextures) {
+      const im = t.image as { width?: number } | null;
+      if (!im?.width) continue; // still loading: picked up with a later stage
+      loadedTextures.delete(t);
+      renderer.initTexture(t);
+      // one upload per frame: a large image can take tens of ms on the GPU side
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    }
+  }
   const journey = buildJourney(ctx, hooks.onProgress);
   stages = journey.stages;
   journey.onActivity = skipWindow;
@@ -259,15 +280,28 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   }
   // everything else streams in after the gate opens (a beat later, so it never competes with the gate itself);
   // each stage is compiled before it is swapped in
+  // Streaming the other stages in costs a phone dearly: without KHR_parallel_shader_compile (e.g. Mali) every
+  // shader link blocks the page for 40–90 ms, and with WebGPU on Android the intro was measured at 12 fps for
+  // ~10 s while stages streamed in, with the main thread mostly idle (GPU-side work). On phones, keep the opening shot
+  // clean: wait until the viewer scrolls or the intro's glide has played (a stage the viewer reaches still
+  // loads at once, see journey.tick).
+  const syncCompile = (renderer.backend as any).isWebGLBackend && !(renderer.backend as any).parallel;
+  const afterIntro = (go: () => void) => {
+    if (!syncCompile && !ctx.isPhone) return void setTimeout(go, 400);
+    const t0 = performance.now(), vp0 = scroll.vp;
+    const poll = () => (Math.abs(scroll.vp - vp0) > 0.05 || performance.now() - t0 > 6000 ? go() : setTimeout(poll, 150));
+    poll();
+  };
   const startBackground = () =>
-    setTimeout(() => journey.startBackground(async (s) => {
+    afterIntro(() => journey.startBackground(async (s) => {
         if (params.has('nowarm')) return; // diagnostics: load stages without the warm-up
         const cam = fitCamera(s);
         await warm(s.scene, cam);
-        for (const [o, c] of s.warmup?.() ?? []) await warm(o, c);
+        for (const [o, c] of s.warmup?.(comp.stageTarget.width, comp.stageTarget.height) ?? []) await warm(o, c);
         // pipelines are compiled by now: the draw only creates the remaining GPU state
         await warm(s.scene, cam, comp.stageTarget, () => (s.render ? s.render(renderer, warmRT) : renderer.render(s.scene, cam)));
-      }), 400);
+        await uploadPending();
+      }));
   if ($preloader.get().isGateOpen) startBackground();
   else {
     const off = $preloader.subscribe((p) => {
