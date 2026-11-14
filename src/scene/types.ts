@@ -38,6 +38,8 @@ export interface Portal {
   update(f: PortalFrame): void;
   /** optional custom render into rt (multi-pass scenes); default: renderer.render(scene, camera) */
   render?(renderer: WebGPURenderer, camera: PerspectiveCamera, rt: RenderTarget): void;
+  /** adaptive detail 0..1 (see Stage.setDetail) */
+  setDetail?(d: number): void;
   /** pointer click inside the opened portal, NDC coords. Return true if consumed. */
   onClick?(x: number, y: number): boolean;
   dispose?(): void;

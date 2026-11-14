@@ -78,7 +78,10 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
           lowEnd, phone: isPhoneDevice, devicePixelRatio, screen: `${screen.width}x${screen.height}`,
           deviceMemory: (navigator as any).deviceMemory ?? '?', cores: navigator.hardwareConcurrency ?? '?', ua: navigator.userAgent,
         },
-        () => ({ dpr: dpr.applied.toFixed(2), buffer: `${size.x}x${size.y}`, minRatio: dpr.minRatio }),
+        () => ({
+          dpr: dpr.applied.toFixed(2), buffer: `${size.x}x${size.y}`, minRatio: dpr.minRatio,
+          detail: [...detail].map(([s, l]) => `${s.id} ${DETAIL[l]}`).join(', ') || 'full',
+        }),
         (renderer.backend as any).isWebGLBackend ? (renderer.backend as any).gl : null,
         renderer.backend,
       )
@@ -135,7 +138,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     return Math.min(dev, cap);
   };
   const DPR_STEP = 0.25;
-  const dpr = { reduction: 0, applied: 0, minRatio: quality === 'low' ? 0.5 : 0.75 };
+  const dpr = { reduction: 0, applied: 0, minRatio: quality === 'low' ? 0.5 : 0.75, lock: false };
   // medium phones start a step below their cap and climb if smooth; high-tier devices start at full quality
   if (ctx.isPhone && quality === 'medium') dpr.reduction = DPR_STEP;
   const floorRatio = () => Math.min(dpr.minRatio, dprCap());
@@ -156,46 +159,80 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   }
 
   /**
-   * Adaptive pixel ratio: MEDIAN frame time over 1 s windows → −.25 below 45 fps, +.25 above 55 fps.
+   * Adaptive pixel ratio + detail: MEDIAN real frame time over ~1 s windows.
+   * Down (< 45 fps): −.25 pixel ratio; once at the floor (or when below 30 fps) the current stage's detail drops
+   * too (Stage.setDetail: the splat scenes draw fewer, larger splats; their cost is per splat, so resolution
+   * alone can't save them). Up (> 55 fps): detail comes back first, then resolution.
    * The median measures how fast the GPU draws a typical frame; one-off stalls (a shader link, an image upload)
-   * would drag a mean down and cut resolution for nothing, then block it from coming back. Windows containing
-   * a tab switch, a stage swap/compile or a resize are dropped; a 30 Hz-capped display (steady ~33 ms) is not
-   * treated as slow; after a step down, going back up to that ratio waits 8 s so it can't oscillate.
+   * would drag a mean down. Windows with a tab switch or a resize are dropped. While stages stream in (or just
+   * swapped/compiled) only a clearly struggling GPU (< 30 fps) is acted on, and nothing goes back up.
+   * A 30 Hz-capped display (steady ~33 ms) is not treated as slow; after a step down, going back up to that level
+   * waits 8 s so it can't oscillate.
    */
-  const ctl = { t: 0, dts: [] as number[], skip: true, blockUpUntil: 0, blockedRatio: Infinity };
+  // flips: down-steps that followed an up-step; after FLIPFLOPS of them quality stops climbing (it would only oscillate)
+  const FLIPFLOPS = 4;
+  const ctl = { t: 0, dts: [] as number[], skip: true, noisy: false, last: 0, blockUpUntil: 0, blockedRatio: Infinity, wentUp: false, flips: 0 };
   let loading = () => true; // set once the journey exists: background loads/compiles make frames unrepresentative
   function skipWindow() { ctl.skip = true; }
-  function adapt(dt: number, now: number) {
-    // while stages stream in, frames are noisy; still react to a clearly struggling GPU (< 30 fps)
-    if (document.hidden || dt > 0.1) skipWindow();
+  function noisyWindow() { ctl.noisy = true; }
+  const DETAIL = [1, 0.75, 0.5, 0.35];
+  const detail = new Map<Stage, number>();
+  const detailBlock = { stage: null as Stage | null, level: -1, until: 0 };
+  function setDetail(s: Stage, level: number) {
+    detail.set(s, level);
+    s.setDetail!(DETAIL[level]);
+  }
+  function adapt(now: number) {
+    // the real interval: the loop's dt is clamped to 50 ms, which would make a 7 fps GPU look like 20 fps
+    const dt = ctl.last ? now - ctl.last : 1 / 60;
+    ctl.last = now;
+    if (document.hidden || dt > 0.5 || dpr.lock) skipWindow();
     ctl.t += dt; ctl.dts.push(dt);
-    if (ctl.t < 1) return;
+    if (ctl.t < 1 || ctl.dts.length < 4) return;
     const d = ctl.dts.sort((a, b) => a - b);
     const q = (p: number) => d[Math.min(d.length - 1, Math.floor(p * d.length))];
     const med = q(0.5), spread = q(0.75) - q(0.25);
-    const skip = ctl.skip;
+    const skip = ctl.skip, quiet = !ctl.noisy && !loading();
     ctl.t = 0; ctl.dts = [];
-    ctl.skip = false;
+    ctl.skip = ctl.noisy = false;
     if (skip) return;
     const fps = 1 / med;
     const capped30 = fps > 26 && fps < 34 && spread < 0.004;
-    if (loading() && fps >= 30) return;
-    // safety net when the GPU name is hidden: still < 30 fps at the floor → allow going down to .5
-    if (fps < 30 && !capped30 && dpr.applied <= floorRatio() + 1e-3 && dpr.minRatio > 0.5) dpr.minRatio = 0.5;
-    if (fps < 45 && !capped30 && dpr.applied > floorRatio() + 1e-3) {
-      ctl.blockedRatio = dpr.applied;
-      ctl.blockUpUntil = now + 8;
-      // badly struggling: drop two steps at once
-      dpr.reduction = Math.min(dpr.reduction + (fps < 30 ? 2 : 1) * DPR_STEP, dprCap() - floorRatio());
-    } else if (fps > 55 && dpr.reduction > 0 && !loading()) {
-      const next = Math.max(dprCap() - (dpr.reduction - DPR_STEP), floorRatio());
-      if (next >= ctl.blockedRatio - 1e-3 && now < ctl.blockUpUntil) return;
-      dpr.reduction = Math.max(0, dpr.reduction - DPR_STEP);
+    const verySlow = fps < 30 && !capped30;
+    const js = journeyAt(scroll.vp);
+    const st = js.trans ? null : stages[js.current];
+    const level = st?.setDetail ? detail.get(st) ?? 0 : -1;
+    if (verySlow || (fps < 45 && !capped30 && quiet)) {
+      let changed = false;
+      // safety net when the GPU name is hidden: still < 30 fps at the floor → allow going down to .5
+      if (verySlow && dpr.applied <= floorRatio() + 1e-3 && dpr.minRatio > 0.5) dpr.minRatio = 0.5;
+      if (dpr.applied > floorRatio() + 1e-3) {
+        ctl.blockedRatio = dpr.applied;
+        ctl.blockUpUntil = now + 8;
+        dpr.reduction = Math.min(dpr.reduction + (verySlow ? 2 : 1) * DPR_STEP, dprCap() - floorRatio());
+        changed = true;
+      }
+      if (st && level >= 0 && level < DETAIL.length - 1 && (verySlow || !changed)) {
+        Object.assign(detailBlock, { stage: st, level, until: now + 8 });
+        setDetail(st, level + 1);
+        changed = true;
+      }
+      if (!changed) return;
+      if (ctl.wentUp) ctl.flips++;
+      ctl.wentUp = false;
+    } else if (fps > 55 && quiet && ctl.flips < FLIPFLOPS) {
+      if (st && level > 0) {
+        if (detailBlock.stage === st && level - 1 <= detailBlock.level && now < detailBlock.until) return;
+        setDetail(st, level - 1);
+      } else if (dpr.reduction > 0) {
+        const next = Math.max(dprCap() - (dpr.reduction - DPR_STEP), floorRatio());
+        if (next >= ctl.blockedRatio - 1e-3 && now < ctl.blockUpUntil) return;
+        dpr.reduction = Math.max(0, dpr.reduction - DPR_STEP);
+      } else return;
+      ctl.wentUp = true;
     } else return;
-    if (Math.abs(targetRatio() - dpr.applied) > 1e-3) {
-      applySize();
-      skipWindow();
-    }
+    if (Math.abs(targetRatio() - dpr.applied) > 1e-3) applySize();
+    skipWindow();
   }
   resize();
 
@@ -221,7 +258,9 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   }
   const journey = buildJourney(ctx, hooks.onProgress);
   stages = journey.stages;
-  journey.onActivity = skipWindow;
+  journey.onActivity = noisyWindow;
+  // entry-level GPUs open the splat photo one step thinner (it climbs back if frames allow)
+  if (quality === 'low' && stages[0]?.setDetail) setDetail(stages[0], 1);
   loading = () => !$preloader.get().isGateOpen || journey.busy();
   await journey.critical;
 
@@ -355,7 +394,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   function frame(dt: number, time: number) {
     const t0 = hud ? performance.now() : 0;
     ctx.isPhone = scroll.isPhone || isPhoneNow();
-    adapt(dt, time);
+    adapt(time);
     const vp = scroll.vp;
     const js = journeyAt(vp);
 
@@ -398,7 +437,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     }
   }
 
-  (window as any).__scene = { renderer, stages, comp, uFish, post, journey, dpr, gpuMs, frame, hud };
+  (window as any).__scene = { renderer, stages, comp, uFish, post, journey, dpr, gpuMs, frame, hud, applySize };
   // Real frames while the preloader still covers the page build the post chain's pipelines (tape passes,
   // fish-eye, output), which compileAsync does not reach. The first one only *starts* every pipeline it needs
   // (async: parallel shader compile on WebGL2, createRenderPipelineAsync on WebGPU) and skips draws that aren't

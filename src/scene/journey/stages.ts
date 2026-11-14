@@ -59,6 +59,7 @@ export function introStage(ctx: StageContext): Stage {
       }
     },
     onClick: portal.onClick ? (x, y) => portal.onClick!(x, y) : undefined,
+    setDetail: portal.setDetail ? (d) => portal.setDetail!(d) : undefined,
     dispose: () => portal.dispose?.(),
   };
 }

@@ -47,6 +47,8 @@ export interface Stage {
    */
   /** extra things to compile before the stage is shown; w × h is the stage target size (allocate buffers at it) */
   warmup?(w: number, h: number): [Object3D, Camera][];
+  /** adaptive detail 0..1 (1 = full): set by the app when frames stay slow at the lowest pixel ratio */
+  setDetail?(d: number): void;
   /**
    * optional: a quad in this stage's screen space (NDC corners TL,TR,BR,BL) through which the NEXT stage
    * is revealed during a 'portal' transition (like the city's quad revealing the alley).
