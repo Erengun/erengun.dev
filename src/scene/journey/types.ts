@@ -1,4 +1,4 @@
-import type { Color, PerspectiveCamera, Scene, WebGPURenderer, RenderTarget } from 'three/webgpu';
+import type { Color, PerspectiveCamera, Scene, WebGPURenderer, RenderTarget, Object3D, Camera } from 'three/webgpu';
 import type { Project } from '../../lib/content';
 
 /**
@@ -41,6 +41,11 @@ export interface Stage {
   update(f: StageFrame): void;
   /** optional custom render into rt (multi-pass). Default: renderer.render(scene, camera) into rt. */
   render?(renderer: WebGPURenderer, rt: RenderTarget): void;
+  /**
+   * extra things a custom render() draws that are not in `scene` (internal passes, blit quads), so the background
+   * warm-up can compile them too instead of letting them compile mid-scroll
+   */
+  warmup?(): [Object3D, Camera][];
   /**
    * optional: a quad in this stage's screen space (NDC corners TL,TR,BR,BL) through which the NEXT stage
    * is revealed during a 'portal' transition (like the city's quad revealing the alley).

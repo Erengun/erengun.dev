@@ -188,6 +188,8 @@ export function createCompositor(renderer: WebGPURenderer) {
   return {
     scene,
     camera,
+    /** a stage target (same format as both slots): background warm-up compiles stage pipelines against it */
+    stageTarget: rts[0],
     setSize(w: number, h: number) {
       for (const rt of rts) rt.setSize(w, h);
       uAspect.value = w / h;

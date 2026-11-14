@@ -622,6 +622,14 @@ export function createLastStages(ctx: StageContext): LastStages {
     ready: Promise.resolve(),
     // spec §7.3: splat pixels skip AgX; the VHS post pushes saturated reds further, so trim exposure/saturation
     grade: { exposure: SPLAT_EXPOSURE, saturation: SPLAT_SAT, clamp: true, vignette: true },
+    // the blit samples splatRT: give it real contents first (its variant differs until the target was drawn to)
+    warmup: () => {
+      const r = ctx.renderer, prev = r.getRenderTarget();
+      r.setRenderTarget(splatRT);
+      r.render(splatScene, splatCam);
+      r.setRenderTarget(prev);
+      return [[splatBlit, splatBlit.camera]];
+    },
     update(f) {
       // small dolly (0.6 m) that ends at the splat's hero eye as the alley settles
       state.splatT = smoothN(-0.25, 0.25, f.t);

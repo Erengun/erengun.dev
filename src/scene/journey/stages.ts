@@ -184,6 +184,8 @@ export interface Journey {
 }
 
 type Job = () => Promise<Stage>;
+/** `?debug` only: timings the perf overlay prints with its report */
+const jlog = (what: string, ms: number) => (window as any).__journeyLog?.push(`@${(performance.now() / 1000).toFixed(2)}s ${what}: ${ms.toFixed(0)}ms`);
 
 export function buildJourney(ctx: StageContext, onProgress: (p: number) => void): Journey {
   const last = createLastStages(ctx);
@@ -228,7 +230,9 @@ export function buildJourney(ctx: StageContext, onProgress: (p: number) => void)
         if (load) {
           try {
             const mod = await load();
+            const t = performance.now();
             if (mod.createWorld) st = mod.createWorld(wctx);
+            jlog(`${project.id} createWorld (sync)`, performance.now() - t);
           } catch (e) {
             console.warn(`[journey] world ${project.id} failed, using placeholder`, e);
           }
@@ -284,8 +288,12 @@ export function buildJourney(ctx: StageContext, onProgress: (p: number) => void)
     started[i] = true;
     running++;
     try {
+      const t0 = performance.now();
       const st = await jobs[i]!();
+      const t1 = performance.now();
       if (compileFn) await compileFn(st).catch((e) => console.warn(`[journey] compile ${st.id}`, e));
+      jlog(`${STAGES[i].id} load (wall)`, t1 - t0);
+      jlog(`${STAGES[i].id} compile (wall)`, performance.now() - t1);
       const prev = stages[i];
       stages[i] = st;
       ready[i] = true;
