@@ -10,7 +10,7 @@
  * capped per tier/device.
  * Debug: `?debug` shows a perf overlay with a copyable per-stage report; `?gputime` enables WebGPU timestamp queries; `__scene.gpuMs` holds the last GPU frame times.
  */
-import { WebGPURenderer, Vector2, RenderPipeline, PerspectiveCamera } from 'three/webgpu';
+import { WebGPURenderer, Vector2, RenderPipeline, PerspectiveCamera, type Object3D, type Camera, type Mesh, type Material, type RenderTarget, RenderTarget as RenderTargetClass, HalfFloatType } from 'three/webgpu';
 import { pass, uniform } from 'three/tsl';
 import { $route, $preloader, scroll, tilt, pointer as sharedPointer } from '../lib/stores';
 import { STAGES, TRANSITIONS, SCENE_VP, WIPES, journeyAt, stageLocal, clamp, damp, smoothstep } from '../lib/timeline';
@@ -80,6 +80,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
         },
         () => ({ dpr: dpr.applied.toFixed(2), buffer: `${size.x}x${size.y}`, minRatio: dpr.minRatio }),
         (renderer.backend as any).isWebGLBackend ? (renderer.backend as any).gl : null,
+        renderer.backend,
       )
     : null;
 
@@ -209,17 +210,64 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     cam.updateProjectionMatrix();
     return cam;
   };
+  /**
+   * compileAsync only builds pipelines for what would be drawn right now: hidden objects, hidden materials and
+   * anything outside the camera are skipped, and then compile synchronously the first time they appear, which
+   * freezes the page mid-scroll (Safari / WebGL2 most of all). Warm everything: unhide and un-cull the whole
+   * scene for the compile, then restore. Stages being compiled are not on screen yet, so nothing flashes.
+   */
+  // 1×1 stand-in with the stage targets' format, for the warm-up draw below
+  const warmRT = new RenderTargetClass(1, 1, { type: HalfFloatType, depthBuffer: true });
+  async function warm(scene: Object3D, camera: Camera, target: RenderTarget | null = comp.stageTarget, draw?: () => void) {
+    const objs: [Object3D, boolean, boolean][] = [];
+    const mats: Material[] = [];
+    scene.traverse((o) => {
+      objs.push([o, o.visible, o.frustumCulled]);
+      o.visible = true;
+      o.frustumCulled = false;
+      const m = (o as Mesh).material;
+      for (const mm of Array.isArray(m) ? m : m ? [m] : []) if (!mm.visible) { mm.visible = true; mats.push(mm); }
+    });
+    try {
+      // shaders differ per destination (a stage target is linear half-float, the canvas gets the output
+      // transform), so compile against the target the stage really draws into. compileAsync reads the current
+      // target synchronously, so it is set only around the call, never across a frame
+      const prev = renderer.getRenderTarget();
+      renderer.setRenderTarget(target);
+      const done = renderer.compileAsync(scene, camera);
+      renderer.setRenderTarget(prev);
+      await done;
+      // Safari (WebGL over ANGLE/Metal) creates the final GPU pipeline state only at the first draw, so a compiled
+      // stage still hitches the first time it's drawn: draw it once now into a 1×1 target, everything unhidden
+      if (draw) {
+        const p2 = renderer.getRenderTarget();
+        renderer.setRenderTarget(warmRT);
+        try { draw(); } finally { renderer.setRenderTarget(p2); }
+      }
+    } finally {
+      for (const [o, v, f] of objs) { o.visible = v; o.frustumCulled = f; }
+      for (const mm of mats) mm.visible = false;
+    }
+  }
+
   // warm-up: compile the gate stages (intro, corridor) + the compositor/post so the first frames don't hitch
   try {
-    for (const s of stages.slice(0, 2)) await renderer.compileAsync(s.scene, fitCamera(s));
-    await renderer.compileAsync(comp.scene, comp.camera);
+    for (const s of stages.slice(0, 2)) await warm(s.scene, fitCamera(s));
+    await warm(comp.scene, comp.camera, null);
   } catch (e) {
     console.warn('compile warmup', e);
   }
   // everything else streams in after the gate opens (a beat later, so it never competes with the gate itself);
   // each stage is compiled before it is swapped in
   const startBackground = () =>
-    setTimeout(() => journey.startBackground((s) => renderer.compileAsync(s.scene, fitCamera(s))), 400);
+    setTimeout(() => journey.startBackground(async (s) => {
+        if (params.has('nowarm')) return; // diagnostics: load stages without the warm-up
+        const cam = fitCamera(s);
+        await warm(s.scene, cam);
+        for (const [o, c] of s.warmup?.() ?? []) await warm(o, c);
+        // pipelines are compiled by now: the draw only creates the remaining GPU state
+        await warm(s.scene, cam, comp.stageTarget, () => (s.render ? s.render(renderer, warmRT) : renderer.render(s.scene, cam)));
+      }), 400);
   if ($preloader.get().isGateOpen) startBackground();
   else {
     const off = $preloader.subscribe((p) => {
@@ -297,5 +345,8 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   }
 
   (window as any).__scene = { renderer, stages, comp, uFish, post, journey, dpr, gpuMs, frame, hud };
+  // one real frame while the preloader still covers the page: builds the post chain's pipelines (tape, fish-eye,
+  // output pass), which compileAsync does not reach, so the first visible frame doesn't stall
+  try { frame(1 / 60, performance.now() / 1000); } catch (e) { console.warn('first frame', e); }
   return { frame, resize };
 }
