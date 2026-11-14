@@ -239,6 +239,19 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
    */
   // 1×1 stand-in with the stage targets' format, for the warm-up draw below
   const warmRT = new RenderTargetClass(1, 1, { type: HalfFloatType, depthBuffer: true });
+  /**
+   * Runs fn (a draw) with every pipeline it needs created asynchronously (parallel shader compile on WebGL2,
+   * createRenderPipelineAsync on WebGPU) instead of linked on the spot; draws whose pipeline isn't ready yet are
+   * skipped. Resolves once those pipelines are done.
+   */
+  const pipelines = (renderer as any)._pipelines;
+  function asyncPipelines(fn: () => void): Promise<unknown> {
+    const pending: Promise<unknown>[] = [];
+    const syncUpdate = pipelines.updateForRender;
+    pipelines.updateForRender = (ro: unknown) => pipelines.getForRender(ro, pending);
+    try { fn(); } finally { pipelines.updateForRender = syncUpdate; }
+    return Promise.all(pending);
+  }
   async function warm(scene: Object3D, camera: Camera, target: RenderTarget | null = comp.stageTarget, draw?: () => void) {
     const objs: [Object3D, boolean, boolean][] = [];
     const mats: Material[] = [];
@@ -261,9 +274,15 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
       // Safari (WebGL over ANGLE/Metal) creates the final GPU pipeline state only at the first draw, so a compiled
       // stage still hitches the first time it's drawn: draw it once now into a 1×1 target, everything unhidden
       if (draw) {
-        const p2 = renderer.getRenderTarget();
-        renderer.setRenderTarget(warmRT);
-        try { draw(); } finally { renderer.setRenderTarget(p2); }
+        // (pipelines the draw still needs, e.g. passes drawn into a stage's own targets, compile asynchronously;
+        // then it draws once more for the GPU state)
+        for (let k = 0; k < 2; k++) {
+          const p2 = renderer.getRenderTarget();
+          renderer.setRenderTarget(warmRT);
+          let done: Promise<unknown> = Promise.resolve();
+          try { done = asyncPipelines(draw); } finally { renderer.setRenderTarget(p2); }
+          await done;
+        }
       }
     } finally {
       for (const [o, v, f] of objs) { o.visible = v; o.frustumCulled = f; }
@@ -370,7 +389,8 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
       sceneT: wipeMid + clamp(near, -5, 5) / SCENE_VP, lastOpen: 1,
     });
     pipeline.render();
-    hud?.sample(dt, performance.now() - t0, b >= 0 ? `${STAGES[a].id}>${STAGES[b].id}` : STAGES[a].id, dpr.applied, time);
+    // frames drawn behind the preloader are filed separately: nobody sees them
+    hud?.sample(dt, performance.now() - t0, !$preloader.get().isGateOpen ? 'preloader' : b >= 0 ? `${STAGES[a].id}>${STAGES[b].id}` : STAGES[a].id, dpr.applied, time);
     if (gpuTime) {
       renderer.resolveTimestampsAsync('render').then((ms) => {
         if (typeof ms === 'number' && ms > 0) { gpuMs.push(ms); if (gpuMs.length > 240) gpuMs.shift(); }
@@ -379,8 +399,13 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   }
 
   (window as any).__scene = { renderer, stages, comp, uFish, post, journey, dpr, gpuMs, frame, hud };
-  // one real frame while the preloader still covers the page: builds the post chain's pipelines (tape, fish-eye,
-  // output pass), which compileAsync does not reach, so the first visible frame doesn't stall
+  // Real frames while the preloader still covers the page build the post chain's pipelines (tape passes,
+  // fish-eye, output), which compileAsync does not reach. The first one only *starts* every pipeline it needs
+  // (async: parallel shader compile on WebGL2, createRenderPipelineAsync on WebGPU) and skips draws that aren't
+  // ready, instead of linking them one after another on the main thread (~0.7 s on Safari, right at the gate);
+  // the second, once they're done, creates the remaining GPU state.
+  try { await asyncPipelines(() => frame(1 / 60, performance.now() / 1000)); } catch (e) { console.warn('first frame', e); }
   try { frame(1 / 60, performance.now() / 1000); } catch (e) { console.warn('first frame', e); }
+  hud?.resetClock(); // the next sample is the first visible frame, not the gap since these hidden ones
   return { frame, resize };
 }
