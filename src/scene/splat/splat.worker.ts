@@ -7,7 +7,8 @@
  *
  * Messages in:
  *   { type: 'load', url, cap }                    → { type: 'parsed', n, total, rows, centre, covA, covB, colour, bounds }
- *   { type: 'sort', id, viewProj (object→clip), out? } → { type: 'order', order, count, id, ms }
+ *   { type: 'sort', id, viewProj (object→clip), out?, limit?, k? } → { type: 'order', order, count, id, k, ms }
+ *   (limit: sort only the first `limit` splats; k is echoed back)
  * Sorting keeps only splats whose centre lies inside a guard band (GUARD_X/Y, in front of the near plane),
  * the same test the vertex shader uses to drop splats, so culling here only saves work and never changes the image.
  */
@@ -130,14 +131,15 @@ function parseCompact(buf: ArrayBuffer, cap: number): Parsed & { pos: Float32Arr
   return { n, total, ...o, pos, bounds: { min: mn, max: mx } };
 }
 
-function sort(m: number[] | Float32Array, out: Float32Array | null) {
+function sort(m: number[] | Float32Array, out: Float32Array | null, limit = Infinity) {
   const p = pos!;
   // object → clip rows (column-major): x = m0 m4 m8 m12, y = m1 m5 m9 m13, w = m3 m7 m11 m15
   const m0 = m[0], m4 = m[4], m8 = m[8], m12 = m[12];
   const m1 = m[1], m5 = m[5], m9 = m[9], m13 = m[13];
   const m3 = m[3], m7 = m[7], m11 = m[11], m15 = m[15];
   let cnt = 0, lo = Infinity, hi = -Infinity;
-  for (let i = 0, j = 0; i < n; i++, j += 3) {
+  const lim = Math.min(n, limit);
+  for (let i = 0, j = 0; i < lim; i++, j += 3) {
     const x = p[j], y = p[j + 1], z = p[j + 2];
     const w = m3 * x + m7 * y + m11 * z + m15;
     if (w <= NEAR_W) continue;
@@ -190,7 +192,7 @@ self.onmessage = async (e: MessageEvent) => {
   }
   if (msg.type === 'sort' && pos) {
     const t0 = performance.now();
-    const { order, count } = sort(msg.viewProj, msg.out ?? null);
-    (self as any).postMessage({ type: 'order', order, count, id: msg.id, ms: performance.now() - t0 }, [order.buffer]);
+    const { order, count } = sort(msg.viewProj, msg.out ?? null, msg.limit ?? Infinity);
+    (self as any).postMessage({ type: 'order', order, count, id: msg.id, k: msg.k, ms: performance.now() - t0 }, [order.buffer]);
   }
 };

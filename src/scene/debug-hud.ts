@@ -155,6 +155,60 @@ export function createHud(info: Info, live: () => Info, gl?: WebGL2RenderingCont
     start();
   }
 
+  // `&bench`: once the background stages are in, time the opening scene under a few variants (adaptation paused)
+  // to find what limits a device: splat count, splat size, pixels, or the instancing layout
+  if (new URLSearchParams(location.search).has('bench')) {
+    const W = window as any;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const frames = (ms: number) => new Promise<number[]>((res) => {
+      const out: number[] = []; let p = 0; const t0 = performance.now();
+      const f = (t: number) => { if (p) out.push(t - p); p = t; if (t - t0 < ms) requestAnimationFrame(f); else res(out); };
+      requestAnimationFrame(f);
+    });
+    (async () => {
+      while (!W.__scene || document.body.classList.contains('is--loading')) await sleep(300);
+      (document.querySelector('[data-motion-decline]') as HTMLElement | null)?.click();
+      [...document.querySelectorAll('button')].find((b) => /no thanks/i.test(b.textContent ?? ''))?.click();
+      const sc = W.__scene, sp = W.__introSplat, dbg = W.__introDebug;
+      const t0 = performance.now();
+      await sleep(7000);
+      while (sc.journey.busy() && performance.now() - t0 < 90_000) await sleep(500);
+      await sleep(1500);
+      sc.dpr.lock = true;
+      const ratio = sc.dpr.applied, minRatio = sc.dpr.minRatio;
+      const red0 = sc.dpr.reduction;
+      const setRatio = (r: number) => { sc.dpr.minRatio = Math.min(minRatio, r); sc.dpr.reduction = red0 + (ratio - r); sc.applySize(); };
+      const V: [string, () => void][] = [
+        ['base', () => {}],
+        ['one quad per instance', () => sp.setBatched(false)],
+        ['no photo splat', () => (dbg.hide = 1)],
+        ['splats 50% (grown)', () => sp.setBudget(0.5, true)],
+        ['splats 25% (grown)', () => sp.setBudget(0.25, true)],
+        ['splats 25% (small)', () => sp.setBudget(0.25, false)],
+        ['pixel ratio x0.5', () => setRatio(ratio * 0.5)],
+        ['base again', () => {}],
+      ];
+      const rows: string[] = [];
+      for (const [name, set] of V) {
+        sp.setBatched(true); sp.setBudget(1, true); dbg.hide = undefined; setRatio(ratio);
+        set();
+        await sleep(1200);
+        const d = (await frames(2500)).sort((a, b) => a - b);
+        const q = (k: number) => d[Math.min(d.length - 1, Math.floor(k * d.length))] ?? 0;
+        rows.push(`${name.padEnd(24)} median ${q(0.5).toFixed(1).padStart(6)} ms  p90 ${q(0.9).toFixed(1).padStart(6)} ms  (${d.length} frames)`);
+      }
+      sp.setBatched(true); sp.setBudget(1, true); dbg.hide = undefined; setRatio(ratio);
+      sc.dpr.minRatio = minRatio; sc.dpr.lock = false;
+      const ta = document.createElement('textarea');
+      ta.value = `bench (intro, pixel ratio ${ratio.toFixed(2)}, ${sp.count} splats)\n${rows.join('\n')}\n\n` + report();
+      ta.setAttribute('style', 'position:fixed;inset:8px;z-index:100001;font:9px/1.3 ui-monospace,monospace;background:#000;color:#0f0;white-space:pre;overflow:auto');
+      document.body.appendChild(ta);
+      W.__benchDone = ta.value;
+      const post = new URLSearchParams(location.search).get('post');
+      if (post) fetch(post, { method: 'POST', body: ta.value, mode: 'no-cors' }).catch(() => {});
+    })();
+  }
+
   let win: number[] = [], winCpu = 0, last = 0, prev = 0;
   return {
     report,

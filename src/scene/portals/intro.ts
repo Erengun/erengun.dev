@@ -285,6 +285,8 @@ export function createIntroPortal(ctx: PortalContext): Portal {
 
   // ------------------------------------------------------------------ camera path
   const debug: { glide?: number; exit?: number; px?: number; py?: number; hide?: number } = {};
+  // debug handles for the HUD's `&bench` run
+  if (/[?&](debug|gputime)\b/.test(location.search)) Object.assign(globalThis, { __introDebug: debug, __introSplat: splat });
   let t = 0, revealClock = -1;
   const camPos = new Vector3(), look = new Vector3(), tmp = new Vector3(), past = new Vector3();
   function poseCamera(f: PortalFrame, exit: number) {
@@ -358,6 +360,8 @@ export function createIntroPortal(ctx: PortalContext): Portal {
 
   const portal: Portal & { debug: typeof debug } = {
     debug, scene, background, ready, update, render,
+    // fewer (proportionally larger) splats: the photo's cost is per splat, not per pixel
+    setDetail: (d) => splat.setBudget(d, true),
     dispose() {
       splat.dispose();
       for (const o of [sky, ground, ridge]) o.geometry.dispose();

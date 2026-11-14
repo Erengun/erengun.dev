@@ -6,13 +6,16 @@
  *   covA    RGBA32F (σ00, σ01, σ02, σ11)   object-space 3×3 covariance, upper triangle
  *   covB    RGBA32F (σ12, σ22, 0, 0)
  *   colour  RGBA8   (sRGB rgb, opacity)
- * plus one per-instance float attribute `order` (splat index, back to front) rewritten after each sort.
+ * plus `order`, an R32F texture of splat indices (back to front) rewritten after each sort.
+ *
+ * Batching: each instance is BATCH quads (slot = instance·BATCH + quad), not one. A one-quad instance is only four
+ * vertices, which mobile GPUs (Mali, Adreno, Apple) pack poorly into their vertex warps; batching fills them.
  *
  * Loading, parsing and sorting run in a Web Worker (splat.worker.ts), so a background load never blocks the
  * main thread. Sorting: counting sort (65536 depth bins) over the splats inside a guard band around the view
  * frustum (the same test the vertex shader uses to drop splats, so culling only saves work), triggered only
  * when the view changes (direction dot < .9995, camera moved > 2 cm in object units, or the projection changed).
- * instanceCount = number of splats that survived culling.
+ * Drawn: the splats that survived culling (instanceCount = ⌈drawn / BATCH⌉, the tail of the last batch collapses).
  *
  * Hover (§8.2): the WebGPU compute physics is replaced by the documented cheap fallback on all backends:
  * a vertex-shader push of splat centres away from the pointer ray, with a damped strength (rate 2.5) that is
@@ -25,12 +28,12 @@
  * splats first; shuffled files are subsampled uniformly with a size compensation).
  */
 import {
-  Mesh, InstancedBufferGeometry, BufferAttribute, InstancedBufferAttribute, DataTexture, FloatType, RGBAFormat,
+  Mesh, InstancedBufferGeometry, BufferAttribute, DataTexture, FloatType, RGBAFormat, RedFormat,
   UnsignedByteType, NearestFilter, MeshBasicNodeMaterial, Vector3, Matrix4, DoubleSide, NormalBlending,
   type Object3D, type PerspectiveCamera, type WebGPURenderer,
 } from 'three/webgpu';
 import {
-  Fn, If, Discard, instancedBufferAttribute, textureLoad, ivec2, int, float, vec2, vec3, vec4, uniform,
+  Fn, If, Discard, instanceIndex, textureLoad, ivec2, int, float, vec2, vec3, vec4, uniform,
   varyingProperty, positionGeometry, modelViewMatrix, cameraProjectionMatrix, screenSize, dot, sqrt, max, min,
   atan, cos, sin, exp, smoothstep, length, floor, pow, mix, step, select, abs, time,
 } from 'three/tsl';
@@ -40,6 +43,10 @@ export interface SplatHandle {
   object: Object3D;
   ready: Promise<void>;
   update(dt: number, camera: PerspectiveCamera, pointer: SplatPointer): void;
+  /** draw only a fraction of the splats (a prefix of the file); grow: enlarge them to keep the coverage */
+  setBudget(frac: number, grow?: boolean): void;
+  /** debug: BATCH quads per instance (default) or one */
+  setBatched(on: boolean): void;
   setOpacity(v: number): void;
   dispose(): void;
   /** number of splats drawn */
@@ -47,6 +54,8 @@ export interface SplatHandle {
 }
 
 const TEX_W = 2048; // keep in sync with splat.worker.ts
+/** quads per instance */
+const BATCH = 128;
 /** default cap when none is given (phones) — the alley passes its own per-tier cap */
 const PHONE_MAX = 220_000;
 
@@ -71,12 +80,32 @@ export function createSplat({ renderer: _renderer, url, isPhone, cap }: {
   const uRayD = uniform(new Vector3(0, 0, -1));
   const uRadPerDepth = uniform(0.42);
   const uPush = uniform(0);
+  /** covariance multiplier: a uniform subsample of a shuffled file grows its splats by n/limit to keep coverage */
+  const uCovK = uniform(1);
+  /** fraction of the splats drawn (a prefix of the file) */
+  let budget = 1, covK = 1;
 
-  // geometry: one quad [-2,2]² instanced
+  const uDrawn = uniform(0, 'int');
+
+  // geometry: BATCH quads [-2,2]² per instance; position.z = the quad's index in its batch
   const geo = new InstancedBufferGeometry();
-  geo.setAttribute('position', new BufferAttribute(new Float32Array([-2, -2, 0, 2, -2, 0, 2, 2, 0, -2, 2, 0]), 3));
-  geo.setIndex([0, 1, 2, 0, 2, 3]);
+  const quad = [-2, -2, 2, -2, 2, 2, -2, 2];
+  const P = new Float32Array(BATCH * 12), I: number[] = [];
+  for (let q = 0; q < BATCH; q++) {
+    for (let k = 0; k < 4; k++) P.set([quad[k * 2], quad[k * 2 + 1], q], q * 12 + k * 3);
+    const o = q * 4;
+    I.push(o, o + 1, o + 2, o, o + 2, o + 3);
+  }
+  geo.setAttribute('position', new BufferAttribute(P, 3));
+  geo.setIndex(I);
   geo.instanceCount = 0;
+  // one quad per instance (the old layout), kept for the HUD's `&bench` comparison
+  const geo1 = new InstancedBufferGeometry();
+  geo1.setAttribute('position', new BufferAttribute(P.slice(0, 12), 3));
+  geo1.setIndex([0, 1, 2, 0, 2, 3]);
+  geo1.instanceCount = 0;
+  const uBatch = uniform(BATCH, 'int');
+  let batch = BATCH, drawn = 0;
 
   const mat = new MeshBasicNodeMaterial();
   mat.transparent = true;
@@ -97,7 +126,7 @@ export function createSplat({ renderer: _renderer, url, isPhone, cap }: {
 
   let count = 0;
   const textures: DataTexture[] = [];
-  let orderAttr: InstancedBufferAttribute | null = null;
+  let orderTex: DataTexture | null = null;
   let worker: Worker | null = null;
   let inFlight = false, dirty = true, sortId = 0, spare: Float32Array | null = null, firstDone = false;
 
@@ -110,15 +139,15 @@ export function createSplat({ renderer: _renderer, url, isPhone, cap }: {
   function buildMaterial(d: { centre: DataTexture; covA: DataTexture; covB: DataTexture; colour: DataTexture }) {
     const vColor = varyingProperty('vec4', 'vSplatColor');
     const vUv = varyingProperty('vec2', 'vSplatUv');
-    const order = instancedBufferAttribute(orderAttr!, 'float') as any;
-
     mat.vertexNode = Fn(() => {
+      const slot = int(instanceIndex).mul(uBatch).add(int(positionGeometry.z)).toVar();
+      const order = textureLoad(orderTex!, ivec2(slot.mod(TEX_W), slot.div(TEX_W))).x;
       const fy = floor(order.add(0.5).div(TEX_W));
       const fx = order.sub(fy.mul(TEX_W));
       const tc = ivec2(int(fx), int(fy));
       const c = textureLoad(d.centre, tc).xyz.toVar();
-      const ca = textureLoad(d.covA, tc);
-      const cb = textureLoad(d.covB, tc);
+      const ca = textureLoad(d.covA, tc).mul(uCovK);
+      const cb = textureLoad(d.covB, tc).mul(uCovK);
       const col = textureLoad(d.colour, tc);
 
       // ---- hover push (object space): splats near the pointer ray are pushed away from it
@@ -175,7 +204,7 @@ export function createSplat({ renderer: _renderer, url, isPhone, cap }: {
       vUv.assign(pxy);
 
       const out = vec4(clip.xy.add(off.mul(2).div(vp).mul(clip.w)), clip.z, clip.w).toVar();
-      If(v.z.greaterThanEqual(-0.01).or(abs(ndc.x).greaterThan(1.4)).or(abs(ndc.y).greaterThan(1.4)).or(alpha.lessThan(1 / 255)), () => {
+      If(slot.greaterThanEqual(uDrawn).or(v.z.greaterThanEqual(-0.01)).or(abs(ndc.x).greaterThan(1.4)).or(abs(ndc.y).greaterThan(1.4)).or(alpha.lessThan(1 / 255)), () => {
         out.assign(vec4(2, 2, 2, 1));
       });
       return out;
@@ -199,7 +228,8 @@ export function createSplat({ renderer: _renderer, url, isPhone, cap }: {
     dirty = false;
     const out = spare;
     spare = null;
-    worker.postMessage({ type: 'sort', id: ++sortId, viewProj: sortVP.slice(), out }, out ? [out.buffer] : []);
+    const limit = budget >= 1 ? Infinity : Math.max(1, Math.round(count * budget));
+    worker.postMessage({ type: 'sort', id: ++sortId, viewProj: sortVP.slice(), out, limit, k: covK }, out ? [out.buffer] : []);
   }
 
   const ready = new Promise<void>((resolve, reject) => {
@@ -212,23 +242,29 @@ export function createSplat({ renderer: _renderer, url, isPhone, cap }: {
       }
       if (m.type === 'parsed') {
         count = m.n;
-        orderAttr = new InstancedBufferAttribute(new Float32Array(count), 1);
-        geo.setAttribute('order', orderAttr);
+        orderTex = new DataTexture(new Float32Array(m.rows * TEX_W), TEX_W, m.rows, RedFormat, FloatType);
+        orderTex.minFilter = orderTex.magFilter = NearestFilter;
+        orderTex.generateMipmaps = false;
+        orderTex.flipY = false;
+        orderTex.needsUpdate = true;
         const tex = {
           centre: dataTex(m.centre, m.rows, true), covA: dataTex(m.covA, m.rows, true),
           covB: dataTex(m.covB, m.rows, true), colour: dataTex(m.colour, m.rows, false),
         };
         buildMaterial(tex);
-        textures.push(tex.centre, tex.covA, tex.covB, tex.colour);
+        textures.push(tex.centre, tex.covA, tex.covB, tex.colour, orderTex);
         (mesh.userData as any).bounds = m.bounds;
         (mesh.userData as any).total = m.total;
         requestSort();
         return;
       }
       if (m.type !== 'order') return;
-      (orderAttr!.array as Float32Array).set(m.order);
-      orderAttr!.needsUpdate = true;
-      geo.instanceCount = m.count;
+      (orderTex!.image.data as Float32Array).set(m.order.subarray(0, m.count));
+      orderTex!.needsUpdate = true;
+      drawn = m.count;
+      (mesh.geometry as InstancedBufferGeometry).instanceCount = Math.ceil(drawn / batch);
+      uDrawn.value = drawn;
+      uCovK.value = m.k ?? 1; // the size compensation switches together with the subset it was sorted for
       spare = m.order;
       lastSortMs = m.ms;
       inFlight = false;
@@ -298,8 +334,23 @@ export function createSplat({ renderer: _renderer, url, isPhone, cap }: {
       worker?.terminate();
       worker = null;
       geo.dispose();
+      geo1.dispose();
       mat.dispose();
       for (const t of textures) t.dispose();
+    },
+    setBatched(on: boolean) {
+      batch = on ? BATCH : 1;
+      uBatch.value = batch;
+      mesh.geometry = on ? geo : geo1;
+      (mesh.geometry as InstancedBufferGeometry).instanceCount = Math.ceil(drawn / batch);
+    },
+    setBudget(frac: number, grow = true) {
+      frac = Math.min(1, Math.max(0.05, frac));
+      const k = grow && frac < 1 ? 1 / frac : 1;
+      if (frac === budget && k === covK) return;
+      budget = frac;
+      covK = k;
+      requestSort();
     },
     get count() { return count; },
     get lastSortMs() { return lastSortMs; },
