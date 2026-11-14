@@ -1,9 +1,10 @@
 /**
  * Intro stage: an immersive SKI SCENE built from Eren's ski photo (a place, not a portrait).
  *
- * Hero: the photo as a layered gaussian splat (tools/portrait/ski_world.py → /intro/ski.splat → tools/splat/compact.mjs → /intro/ski.csplat, using the memories
- * pipeline: background inpainted behind the skier, skier + skis/poles as a clean foreground layer, sky pushed far,
- * borders extended and faded). Splat space: photo camera at the origin looking −Z, +Y up, metres.
+ * Hero: the photo in two layers from tools/portrait/ski_world.py (memories pipeline: background inpainted behind the
+ * skier, sky pushed far, borders extended and faded). The background is one textured depth mesh (/intro/ski_bg.webp +
+ * ski_bg.bin: the layer that used to be ~150k splats, most of the intro's GPU cost on phones); the skier + skis/poles
+ * stay a gaussian splat (/intro/ski.splat → tools/splat/compact.mjs → /intro/ski.csplat). Splat space: photo camera at the origin looking −Z, +Y up, metres.
  * Around it a procedural world in the same frame (/intro/ski.json: ground plane fit, skier position, sky colours):
  *   - snow ground aligned to the photo's slope, flat near the capture, gently undulating far away
  *   - instanced stylised pines continuing the treeline (kept out of the photo's frustum so they never cover it)
@@ -16,7 +17,7 @@
 import {
   Scene, Color, Group, Mesh, PlaneGeometry, SphereGeometry, ConeGeometry, CylinderGeometry, BufferGeometry,
   BufferAttribute, InstancedMesh, MeshBasicNodeMaterial, SpriteNodeMaterial, Sprite, PerspectiveCamera,
-  Vector3, Quaternion, Matrix4, BackSide, AdditiveBlending, SRGBColorSpace, QuadMesh,
+  Vector3, Quaternion, Matrix4, BackSide, AdditiveBlending, SRGBColorSpace, QuadMesh, TextureLoader, DoubleSide,
   type WebGPURenderer, type RenderTarget,
 } from 'three/webgpu';
 import {
@@ -32,6 +33,7 @@ type SkiMeta = {
   ground: [number, number, number];
   skier: { centre: number[]; feet: number[]; head: number[] };
   sky_zenith: number[]; sky_horizon: number[]; snow: number[]; snow_near?: number[]; snow_shadow?: number[];
+  bg_mesh?: boolean;
 };
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
@@ -161,6 +163,41 @@ export function createIntroPortal(ctx: PortalContext): Portal {
   splat.object.renderOrder = 10;
   world.add(splat.object);
 
+  // ------------------------------------------------------------------ photo background: textured depth mesh
+  const bgMat = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false, toneMapped: false, side: DoubleSide });
+  bgMat.forceSinglePass = true;
+  bgMat.fog = false;
+  const bgMesh = new Mesh(new BufferGeometry(), bgMat);
+  bgMesh.renderOrder = 9;          // under the skier splat, like the splat layers it replaces
+  bgMesh.frustumCulled = false;
+  world.add(bgMesh);
+  const bgReady = (async () => {
+    const [buf, tex] = await Promise.all([
+      fetch(BASE + 'ski_bg.bin').then((r) => r.arrayBuffer()),
+      new TextureLoader().loadAsync(BASE + 'ski_bg.webp'),
+    ]);
+    const dv = new DataView(buf);
+    if (dv.getUint32(0, true) !== 0x4742_4b53) throw new Error('ski_bg.bin: bad magic'); // 'SKBG'
+    const gw = dv.getUint32(4, true), gh = dv.getUint32(8, true);
+    const [WE, HE, f, cx, cy] = [12, 16, 20, 24, 28].map((o) => dv.getFloat32(o, true));
+    const z = new Float32Array(buf, 32, gw * gh);
+    // same pinhole as build.py: pixel (u, v) at depth z → ((u−cx)/f·z, −(v−cy)/f·z, −z)
+    const pos = new Float32Array(gw * gh * 3), uvs = new Float32Array(gw * gh * 2), idx: number[] = [];
+    for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+      const k = j * gw + i, u = (i / (gw - 1)) * (WE - 1), v = (j / (gh - 1)) * (HE - 1), d = z[k];
+      pos.set([((u - cx) / f) * d, (-(v - cy) / f) * d, -d], k * 3);
+      uvs.set([(u + 0.5) / WE, 1 - (v + 0.5) / HE], k * 2);
+      if (i < gw - 1 && j < gh - 1) idx.push(k, k + gw, k + 1, k + 1, k + gw, k + gw + 1);
+    }
+    const g = bgMesh.geometry;
+    g.setAttribute('position', new BufferAttribute(pos, 3));
+    g.setAttribute('uv', new BufferAttribute(uvs, 2));
+    g.setIndex(idx);
+    tex.colorSpace = SRGBColorSpace;
+    bgMat.map = tex;
+    bgMat.needsUpdate = true;
+  })();
+
   // ------------------------------------------------------------------ falling snow + spray
   const SNOW = ctx.quality === 'low' ? 350 : ctx.isPhone ? 700 : 1600;
   const flakeMat = new SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: AdditiveBlending });
@@ -280,7 +317,7 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     rg.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2));
     rg.setIndex(idx);
     ridge.visible = true;
-    await splat.ready;
+    await Promise.all([splat.ready, bgReady]);
   })();
 
   // ------------------------------------------------------------------ camera path
@@ -335,9 +372,12 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     uSpray.value = 0.35 + 0.65 * Math.max(0, Math.sin(t * 0.9)) ** 3;
     // exit: the photo layer dissolves while we ski past him (at grazing angles its flat splats would show);
     // the procedural slope + snow carry the motion into the compositor's zoom-dissolve
-    splat.setOpacity(1 - Math.min(1, Math.max(0, (exit - 0.25) / 0.45)));
+    const photoA = 1 - Math.min(1, Math.max(0, (exit - 0.25) / 0.45));
+    splat.setOpacity(photoA);
+    bgMat.opacity = photoA;
+    bgMesh.visible = photoA > 0.001;
     splat.update(dt, cam, { x: 0, y: 0, inside: false });
-    if (debug.hide !== undefined) { splat.object.visible = (debug.hide & 1) === 0; sky.visible = (debug.hide & 2) === 0; flakes.visible = (debug.hide & 4) === 0; }
+    if (debug.hide !== undefined) { splat.object.visible = bgMesh.visible = (debug.hide & 1) === 0; sky.visible = (debug.hide & 2) === 0; flakes.visible = (debug.hide & 4) === 0; }
   }
 
   function render(renderer: WebGPURenderer, camera: PerspectiveCamera, rt: RenderTarget) {
@@ -364,6 +404,9 @@ export function createIntroPortal(ctx: PortalContext): Portal {
     setDetail: (d) => splat.setBudget(d, true),
     dispose() {
       splat.dispose();
+      bgMesh.geometry.dispose();
+      bgMat.map?.dispose();
+      bgMat.dispose();
       for (const o of [sky, ground, ridge]) o.geometry.dispose();
       pines.geometry.dispose();
       skyMat.dispose(); groundMat.dispose(); pineMat.dispose(); ridgeMat.dispose(); flakeMat.dispose(); sprayMat.dispose(); vigMat.dispose();
