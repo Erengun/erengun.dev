@@ -25,7 +25,7 @@ import {
 } from 'three/webgpu';
 import {
   Fn, vec2, vec3, vec4, float, uniform, attribute, varying, texture, instancedBufferAttribute, positionGeometry,
-  positionWorld, normalWorld, cameraPosition, uv, mix, smoothstep, clamp, max, min, pow, exp, length, normalize, dot,
+  positionWorld, normalWorld, cameraPosition, uv, mix, smoothstep, clamp, max, min, pow, pow2, exp, length, normalize, dot,
   sin, cos, fract, abs, reflect, cross, select, frontFacing, step, instancedDynamicBufferAttribute, normalGeometry,
 } from 'three/tsl';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -133,7 +133,7 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     const sh0 = P.x.add(8.4).div(SHAFT_D.x);
     const sq = P.sub(v3(SHAFT_D).mul(sh0));
     const sdz = fract(sq.z.add(0.6).div(4)).sub(0.5).mul(4);
-    const inShaft = exp(pow(sq.y.sub(6.9), 2).div(-0.35).sub(sdz.mul(sdz).div(0.18))).mul(step(0, sh0));
+    const inShaft = exp(pow2(sq.y.sub(6.9)).div(-0.35).sub(sdz.mul(sdz).div(0.18))).mul(step(0, sh0));
     const moon = v3(MOON_C).mul(max(dot(Nn, v3(MOON_D)), 0).mul(inShaft.mul(5).add(0.25)));
     const amb = mix(vec3(0.006, 0.009, 0.02), vec3(0.016, 0.024, 0.05), Nn.y.mul(0.5).add(0.5));
     // floor: tile grout + gold inlay along the aisle
@@ -209,7 +209,7 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
   readoutTex.colorSpace = SRGBColorSpace;
   readoutTex.anisotropy = 8;
 
-  const gleamAt = (P: N) => exp(pow(P.x.mul(0.6).add(P.y.mul(0.8)).sub(uGleam), 2).mul(-3));
+  const gleamAt = (P: N) => exp(pow2(P.x.mul(0.6).add(P.y.mul(0.8)).sub(uGleam)).mul(-3));
 
   // ---------------------------------------------------------------- paper
   {
@@ -304,7 +304,7 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
       const d = iu.mul(0.75).add(float(1).sub(iv).mul(0.25));
       const w = uMix.mul(1.3).sub(0.15);
       const showB = float(1).sub(smoothstep(w.sub(0.01), w, d));
-      const edge = exp(pow(d.sub(w).div(0.025), 2).negate()).mul(step(0.001, uMix)).mul(step(uMix, 0.999));
+      const edge = exp(pow2(d.sub(w).div(0.025)).negate()).mul(step(0.001, uMix)).mul(step(uMix, 0.999));
       const edgeIn = min(min(hw.sub(abs(xm)), hh.sub(abs(ym))), 0.2).div(0.2);
       let img: N = mix(ca, cb, showB).mul(mix(float(0.78), float(1), smoothstep(0, 0.12, edgeIn)));
       img = img.add(v3(GOLD).mul(edge.mul(1.6)));
@@ -406,7 +406,7 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     const vC: N = varying(c, 'vFerShaftC');
     mat.colorNode = Fn(() => {
       const st: N = uv();
-      const across = exp(pow(st.x.sub(0.5).mul(2.6), 2).negate());
+      const across = exp(pow2(st.x.sub(0.5).mul(2.6)).negate());
       const fade = smoothstep(0, 0.12, vA).mul(float(1).sub(smoothstep(0.55, 1, vA)));
       const flick = sin(vA.mul(9).sub(uTime.mul(0.4)).add(vC.w.mul(1.7))).mul(0.18).add(0.82);
       return vec4(vC.rgb.mul(across.mul(fade).mul(flick)), 1);
@@ -430,7 +430,7 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     const t0 = p.x.add(8.4).div(SHAFT_D.x);
     const qx = p.sub(v3(SHAFT_D).mul(t0));
     const dzz = fract(qx.z.add(0.6).div(4)).sub(0.5).mul(4);
-    const inShaft = exp(pow(qx.y.sub(6.9), 2).div(-0.5).sub(dzz.mul(dzz).div(0.35)));
+    const inShaft = exp(pow2(qx.y.sub(6.9)).div(-0.5).sub(dzz.mul(dzz).div(0.35)));
     const nearScroll = exp(length(p.sub(vec3(0, 4.8, 0.8))).mul(-0.45));
     const br = inShaft.mul(0.9).add(nearScroll.mul(1.2)).add(0.06);
     const size = a.w.mul(0.018).add(0.012);
@@ -618,7 +618,7 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     const vI: N = varying(inten.mul(smoothstep(0, 0.08, k)).mul(float(1).sub(smoothstep(0.9, 1, k))), 'vFerSparkI');
     mat.colorNode = Fn(() => {
       const st: N = uv();
-      const across = exp(pow(st.x.sub(0.5).mul(4), 2).negate());
+      const across = exp(pow2(st.x.sub(0.5).mul(4)).negate());
       const hot = pow(st.y, 3);
       const c = mix(v3(GOLD).mul(1.2), vec3(1.6, 1.4, 1.0), hot.mul(across));
       return vec4(c.mul(across.mul(st.y.mul(0.9).add(0.1))).mul(vI).mul(1.6), 1);
@@ -1236,7 +1236,7 @@ function createBench(high: boolean) {
     mat.colorNode = Fn(() => {
       const n = normalize(vN);
       const lam = max(dot(n, normalize(vec3(-0.25, 0.55, 0.8))), 0);
-      const rim = pow(float(1).sub(abs(n.z)), 2).mul(0.25);
+      const rim = pow2(float(1).sub(abs(n.z))).mul(0.25);
       const top = smoothstep(0.5, 0.9, n.y).mul(0.25);
       let c: N = vC.rgb.mul(float(0.22).add(lam.mul(0.78)).add(rim).add(top.mul(vC.w)));
       c = c.add(vC.rgb.mul(vE.mul(1.25))).mul(0.72);

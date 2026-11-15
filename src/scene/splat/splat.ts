@@ -188,7 +188,7 @@ export function createSplat({ renderer: _renderer, url, isPhone, cap }: {
       const det = a.mul(cc).sub(b.mul(b));
       const aScale = sqrt(max(detRaw.div(max(det, 1e-12)), 0));
       const mid = a.add(cc).mul(0.5);
-      const rad = sqrt(a.sub(cc).mul(0.5).pow(2).add(b.mul(b)));
+      const rad = sqrt(a.sub(cc).mul(0.5).pow2().add(b.mul(b)));
       const l1 = mid.add(rad), l2 = max(mid.sub(rad), 0.1);
       const th = atan(b.mul(2), a.sub(cc)).mul(0.5);
       const ax1 = vec2(cos(th), sin(th)), ax2 = vec2(sin(th).negate(), cos(th));

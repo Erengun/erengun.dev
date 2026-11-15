@@ -300,7 +300,7 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     haloMat.colorNode = Fn(() => {
       const d = length(vHu.sub(0.5)).mul(2);
       const k = exp(d.mul(d).mul(-5)).mul(float(1).sub(smoothstep(0.8, 1, d))).mul(0.32).mul(smoothstep(0.4, 2.2, vHd));
-      const fogK = exp(vHd.mul(0.026).pow(2).negate());
+      const fogK = exp(vHd.mul(0.026).pow2().negate());
       return vec4(lime.mul(k).mul(fogK), 1);
     })();
   }
