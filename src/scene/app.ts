@@ -53,7 +53,9 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     forcedQ === 'low' ||
     (!forcedQ && isPhoneDevice && (LOW_END_GPU.test(gpuName) || ((navigator as any).deviceMemory ?? 8) <= 3));
   // entry-level phone GPUs run three's WebGL2 backend noticeably faster than their WebGPU drivers
-  const forceWebGL = params.has('webgl') || lowEnd;
+  // Firefox's WebGPU is slower than its WebGL2 here (M1 report); `?webgpu` opts back in
+  const firefox = /firefox\//i.test(navigator.userAgent) && !params.has('webgpu');
+  const forceWebGL = params.has('webgl') || lowEnd || firefox;
   const gpuTime = params.has('gputime');
   const renderer = new WebGPURenderer({ antialias: false, forceWebGL, trackTimestamp: gpuTime } as any);
   await renderer.init();
