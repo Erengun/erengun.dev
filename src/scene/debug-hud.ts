@@ -64,10 +64,11 @@ export function createHud(info: Info, live: () => Info, gl?: WebGL2RenderingCont
     }
   }
   {
+    // a 20 ms timer, not a zero-delay ping-pong: Firefox starves its refresh driver behind a continuous
+    // setTimeout(0)/postMessage loop (13 fps with it vs 55 without on an M3)
     let lt = performance.now();
-    const ch = new MessageChannel();
-    ch.port1.onmessage = () => { const n = performance.now(); if (n - lt > 60) jl.push(`@${(lt / 1000).toFixed(2)}s GAP ${(n - lt).toFixed(0)}ms`); lt = n; setTimeout(() => ch.port2.postMessage(0), 0); };
-    ch.port2.postMessage(0);
+    const tick = () => { const n = performance.now(); if (n - lt > 80) jl.push(`@${(lt / 1000).toFixed(2)}s GAP ${(n - lt - 20).toFixed(0)}ms`); lt = n; setTimeout(tick, 20); };
+    setTimeout(tick, 20);
   }
   // WebGL2 only: texture / buffer uploads (image decode happens inside texImage2D for <img> sources)
   if (gl) {
