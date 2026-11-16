@@ -222,7 +222,9 @@ export function createSplat({ renderer: _renderer, url, isPhone, cap }: {
   }
 
   function requestSort() {
-    if (!worker) return;
+    // before the file is parsed the worker ignores sort requests (it has no positions yet) and never answers,
+    // which would leave inFlight set for good; the parsed handler asks for the first sort itself
+    if (!worker || !count) return;
     if (inFlight) { dirty = true; return; }
     inFlight = true;
     dirty = false;
