@@ -8,9 +8,10 @@ lang: "en"
 translation: "derleme-2"
 ---
 
-![Claude Monet, Impression, Sunrise (1872): the sun rising over a misty harbour](/blog/derleme-2/monet-impression-sunrise.webp)
-
-*Claude Monet, Impression, Sunrise, 1872. The painting that gave a movement its name: the work changed first, the name came later.*
+<figure>
+  <img src="/blog/derleme-2/monet-impression-sunrise.webp" alt="Claude Monet, Impression, Sunrise (1872): the sun rising over a misty harbour" width="1600" height="1126" />
+  <figcaption>Claude Monet, Impression, Sunrise, 1872. The painting that gave a movement its name: the work changed first, the name came later.</figcaption>
+</figure>
 
 Hello, lovely people. Did your email arrive this week? If it didn't, it wasn't you. It was Microsoft.
 
