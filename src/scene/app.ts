@@ -243,6 +243,18 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     skipWindow();
   }
   resize();
+  // Safari can run this before the stylesheet has applied: the container is then still an unstyled block around
+  // the canvas (150 px tall) and no window resize follows, so the scene would stay rendered into that size and be
+  // stretched. Follow the container's own box instead of relying on window resizes alone.
+  if (typeof ResizeObserver !== 'undefined') {
+    let lw = container.clientWidth, lh = container.clientHeight;
+    new ResizeObserver(() => {
+      const w = container.clientWidth, h = container.clientHeight;
+      if (w === lw && h === lh) return;
+      lw = w; lh = h;
+      if (w > 0 && h > 0) resize();
+    }).observe(container);
+  }
 
   // ------------------------------------------------------------- stages
   // every image texture the worlds load; the ones a stage doesn't show right away (later slides) would otherwise
