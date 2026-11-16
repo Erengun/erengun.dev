@@ -479,6 +479,9 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     const t0 = hud ? performance.now() : 0;
     ctx.isPhone = scroll.isPhone || isPhoneNow();
     adapt(time);
+    // frame-sequence capture (scripts/lite.ts): the capture script pins the scene clock to the scroll position, so
+    // every frame is a function of where the page is scrolled and nothing else
+    if (typeof (window as any).__sceneTime === 'number') time = (window as any).__sceneTime;
     const vp = scroll.vp;
     const js = journeyAt(vp);
 
