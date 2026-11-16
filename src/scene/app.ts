@@ -217,8 +217,9 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     // last resort, independent of the windows below (which drop frames longer than .5 s, so a GPU drawing two
     // frames a second would never register): under 12 fps on average over 5 s stretches, 2 in a row (4 while
     // stages are still streaming in, which slows healthy devices too)
-    if (!document.hidden && !dpr.lock) {
-      slow.t += Math.min(dt, 2); slow.n++;
+    if (dt > 3) slow.t = slow.n = 0; // back from another tab or app: start the stretch over
+    else if (!document.hidden && !dpr.lock) {
+      slow.t += dt; slow.n++;
       if (slow.t >= 5) {
         slow.hits = slow.n / slow.t < 12 ? slow.hits + 1 : 0;
         slow.t = slow.n = 0;
@@ -529,5 +530,11 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   try { await asyncPipelines(() => frame(1 / 60, performance.now() / 1000)); } catch (e) { console.warn('first frame', e); }
   try { frame(1 / 60, performance.now() / 1000); } catch (e) { console.warn('first frame', e); }
   hud?.resetClock(); // the next sample is the first visible frame, not the gap since these hidden ones
-  return { frame, resize, tier: quality };
+  /** the real (loaded, compiled) stages are in for this scroll position, not their stand-ins */
+  const ready = (vp: number) => {
+    const js = journeyAt(vp);
+    const a = js.trans ? js.from : js.current;
+    return journey.isReady(a) && (!js.trans || journey.isReady(a + 1));
+  };
+  return { frame, resize, ready, tier: quality };
 }

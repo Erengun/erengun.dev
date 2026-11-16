@@ -9,7 +9,7 @@ import {
 import { PROJECTS } from '../lib/content';
 import { initMenu } from './menu';
 import { initTilt } from './tilt';
-import { guard, lower, capTo, session, type Tier } from './guard';
+import { guard, lower, session, type Tier } from './guard';
 import { createLite } from './lite';
 
 const $ = <T extends Element = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
@@ -295,10 +295,16 @@ function updateContact(vp: number) {
 }
 
 // ---------------------------------------------------------------- frame loop
-let renderer: { frame: (dt: number, t: number) => void; resize: () => void; tier: Tier } | null = null;
+let renderer: { frame: (dt: number, t: number) => void; resize: () => void; ready: (vp: number) => boolean; tier: Tier } | null = null;
 /** stills of every stage, shown whenever the 3D scene can't be (scripts/lite.ts) */
 const lite = createLite($('#app'));
 let frameErrors = 0;
+/** the context is gone: this renderer can't draw again */
+let lost = false;
+/** the scene arrived while the stills were standing in: it takes over once the stage on screen is really in */
+let handover = false;
+let shownAt = performance.now();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) shownAt = performance.now(); });
 let last = performance.now();
 let lastScroll = 0;
 let lastWorkProj = -1;
@@ -343,7 +349,7 @@ function loop(now: number) {
   }
 
   if (lite.shown) lite.frame(scroll.vp);
-  else if (renderer) {
+  if (renderer && !lost && (!lite.shown || handover)) {
     // a throwing frame must not take the text overlays and the scroll down with it
     try {
       renderer.frame(dt, now / 1000);
@@ -351,8 +357,9 @@ function loop(now: number) {
     } catch (err) {
       if (frameErrors++ === 0) console.error('[lab] frame failed', err);
       // not a one-off: the scene is broken for good in this tab
-      if (frameErrors === 30) { console.error('[lab] scene keeps failing: showing stills'); lite.show(); }
+      if (frameErrors === 30) { console.error('[lab] scene keeps failing: showing stills'); handover = false; lite.show(); }
     }
+    if (handover && renderer.ready(scroll.vp)) { handover = false; lite.hide(); }
   }
   updateBlocks(scroll.vp, vh);
   updateContact(scroll.vp);
@@ -400,13 +407,18 @@ function openGate() {
 
 /** the context is gone (memory pressure, driver reset, a backgrounded tab): stills at once, then one reload */
 function onLost(visible: boolean) {
+  lost = true;
+  handover = false;
   lite.show();
-  // lost in front of the visitor: this tier is too heavy here. Lost in the background: the OS reclaimed it
-  if (visible && renderer) lower(renderer.tier, 'graphics context lost');
+  // lost in front of the visitor: this tier is too heavy here. Lost in the background: the OS reclaimed it, which
+  // says nothing about the device (a loss can be reported only once the tab is back, hence the grace period)
+  if (visible && performance.now() - shownAt > 5000 && renderer) lower(renderer.tier, 'graphics context lost');
   if (!guard.reloadOnce(scroll.vp)) console.warn('[lab] context lost again: staying on stills');
 }
 function onTooSlow() {
-  capTo('lite', 'under 15 fps at the lowest quality');
+  // stills for the rest of this visit; the next one tries again a tier lower (it may have been a busy moment)
+  if (renderer) lower(renderer.tier, 'too slow at the lowest quality');
+  handover = false;
   lite.show();
 }
 async function boot() {
@@ -425,7 +437,7 @@ async function boot() {
         onProgress: (p) => $preloader.setKey('progress', p), cap: guard.cap as Tier, onLost, onTooSlow,
       });
       addEventListener('resize', () => renderer?.resize());
-      lite.hide();
+      handover = lite.shown && !lost;
     } catch (err) {
       failed = true;
       console.error('[lab] renderer failed', err);
@@ -434,7 +446,8 @@ async function boot() {
   }
   clearTimeout(standIn);
   ready();
-  const needsMotion = initTilt(() => tryGate());
+  // no tilt parallax on stills: don't ask for motion access
+  const needsMotion = renderer ? initTilt(() => tryGate()) : false;
   $preloader.setKey('isMotionPending', needsMotion);
   tryGate();
 }

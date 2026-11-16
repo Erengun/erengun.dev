@@ -82,11 +82,12 @@ export const guard = {
   log,
   /** vp to return to after a recovery reload (NaN: none) */
   restoreVp: restore,
-  /** reload once per tab to get the scene back (keeps the scroll position); false when that was already used */
+  /** reload to get the scene back (keeps the scroll position); false when that was just tried */
   reloadOnce(vp: number): boolean {
     // without working storage the reload could not be told apart from a first load, and would repeat
-    if (get('session', RELOADED) === '1' || !storageWorks()) return false;
-    set('session', RELOADED, '1');
+    // (and one that fails again right after a reload would loop: only once a minute)
+    if (Date.now() - Number(get('session', RELOADED) ?? 0) < 60_000 || !storageWorks()) return false;
+    set('session', RELOADED, String(Date.now()));
     set('session', RESTORE, String(vp));
     const go = () => location.reload();
     if (document.hidden) document.addEventListener('visibilitychange', () => !document.hidden && go(), { once: true });
