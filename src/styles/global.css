@@ -87,6 +87,15 @@ html.is-tabbing :is(a, button, input):focus-visible {
 /* stills fallback (scripts/lite.ts): covers the canvas when the scene can't run */
 .lite { position: absolute; inset: 0; overflow: hidden; background: #050505; }
 .lite[hidden] { display: none; }
+.lite__pics { position: absolute; inset: 0; will-change: transform; }
+/* live tape noise over the recorded frames, so a resting picture still flickers like the scene does */
+.lite::after { content: ''; position: absolute; inset: -128px; z-index: 4; pointer-events: none; background-image: var(--lite-noise); opacity: .055; animation: lite-noise .56s steps(1) infinite; }
+@keyframes lite-noise {
+  0% { transform: translate(0, 0); } 14% { transform: translate(-37px, 61px); } 28% { transform: translate(53px, -19px); }
+  42% { transform: translate(-71px, -43px); } 57% { transform: translate(29px, 83px); } 71% { transform: translate(-11px, -97px); }
+  85% { transform: translate(89px, 31px); }
+}
+@media (prefers-reduced-motion: reduce) { .lite::after { display: none; } }
 .lite img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: opacity .2s linear; user-select: none; }
 .lite .lite__seq { position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; object-fit: cover; transition: opacity .15s linear; }
 html[data-lite] #app > canvas { visibility: hidden; }

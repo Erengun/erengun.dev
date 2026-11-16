@@ -38,6 +38,10 @@ function createSequence(root: HTMLElement, variant: string) {
   const fetching = new Set<number>(), decoding = new Set<number>();
   let want = 0, dir = 1, visible = false;
   let drawnA = -1, drawnB = -1, drawnMix = -1;
+  // the real scene never holds still (idle camera drift, tape noise): while the scroll rests, the picture sways
+  // between the neighbouring frames, which moves the camera a touch and keeps the recorded grain alive
+  let lastVp = -1, restSince = 0;
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   fetch(base + 'meta.json')
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
@@ -106,9 +110,13 @@ function createSequence(root: HTMLElement, variant: string) {
     /** draw the journey at vp; false while the frames for it aren't in (the stills show instead) */
     frame(vp: number): boolean {
       if (!meta || !ctx) return false;
-      const f = Math.max(0, Math.min(meta.count - 1, vp * meta.perVp));
-      const a = Math.floor(f), mix = Math.round((f - a) * 16) / 16;
-      const target = Math.round(f);
+      const now = performance.now();
+      if (Math.abs(vp - lastVp) > 2e-4) { lastVp = vp; restSince = now; }
+      const rest = still ? 0 : Math.min(1, Math.max(0, (now - restSince - 150) / 900));
+      const sway = rest * (0.55 * Math.sin(now / 1300) + 0.3 * Math.sin(now / 470 + 1.7));
+      const f = Math.max(0, Math.min(meta.count - 1, vp * meta.perVp + sway));
+      const a = Math.floor(f), mix = Math.round((f - a) * 32) / 32;
+      const target = Math.round(vp * meta.perVp);
       if (target !== want) { dir = target > want ? 1 : -1; want = target; pump(); }
       // exact pair when decoded, else the nearest decoded frame within a few steps
       let pa = pics.get(a), pb = mix > 0 ? pics.get(a + 1) : undefined, ia = a, m = pb ? mix : 0;
@@ -138,6 +146,7 @@ function createSequence(root: HTMLElement, variant: string) {
 
 export function createLite(container: HTMLElement) {
   let root: HTMLElement | null = null;
+  let pics: HTMLElement | null = null;
   let imgs: (HTMLImageElement | null)[] = [];
   let seq: ReturnType<typeof createSequence> | null = null;
   let variant = '';
@@ -145,23 +154,51 @@ export function createLite(container: HTMLElement) {
   const opacity: number[] = [];
   const portrait = () => innerHeight > innerWidth;
   const noSeq = new URLSearchParams(location.search).has('stills');
+  const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // pointer parallax, as the scene has: the picture is drawn slightly oversized and leans away from the pointer
+  const lean = { x: 0, y: 0, tx: 0, ty: 0, last: '' };
+  /** a small tile of tape noise, stepped around by CSS (compositor only) */
+  function noise(): string {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d')!;
+    const d = g.createImageData(128, 128);
+    for (let i = 0; i < d.data.length; i += 4) {
+      const v = (Math.random() * 255) | 0;
+      d.data[i] = d.data[i + 1] = d.data[i + 2] = v;
+      d.data[i + 3] = 255;
+    }
+    g.putImageData(d, 0, 0);
+    return c.toDataURL('image/png');
+  }
 
   function build() {
     root = document.createElement('div');
     root.className = 'lite';
     root.setAttribute('aria-hidden', 'true');
     container.appendChild(root);
+    if (!calm) {
+      root.style.setProperty('--lite-noise', `url(${noise()})`);
+      addEventListener('pointermove', (e) => {
+        if (e.pointerType === 'touch') return;
+        lean.tx = (e.clientX / innerWidth) * 2 - 1;
+        lean.ty = (e.clientY / innerHeight) * 2 - 1;
+      }, { passive: true });
+    }
     addEventListener('resize', () => { if (shown && variant !== (portrait() ? 'p' : 'l')) reset(); });
   }
   function reset() {
     variant = portrait() ? 'p' : 'l';
     seq?.dispose();
     root!.replaceChildren();
+    pics = document.createElement('div');
+    pics.className = 'lite__pics';
+    root!.appendChild(pics);
     imgs = STAGES.map(() => null);
     opacity.length = 0;
     // data saver / 2G: the stills alone
     const conn = (navigator as any).connection as { saveData?: boolean; effectiveType?: string } | undefined;
-    seq = noSeq || conn?.saveData || /2g/.test(conn?.effectiveType ?? '') ? null : createSequence(root!, variant);
+    seq = noSeq || conn?.saveData || /2g/.test(conn?.effectiveType ?? '') ? null : createSequence(pics, variant);
   }
   /** images are created on demand: the stage on screen and its neighbours */
   function img(i: number): HTMLImageElement | null {
@@ -173,7 +210,7 @@ export function createLite(container: HTMLElement) {
     el.draggable = false;
     el.style.opacity = '0';
     el.src = `/lite/${STAGES[i].id}-${variant}.webp`;
-    root!.insertBefore(el, root!.firstChild);
+    pics!.insertBefore(el, pics!.firstChild);
     return (imgs[i] = el);
   }
   const setOpacity = (i: number, v: number) => {
@@ -204,6 +241,12 @@ export function createLite(container: HTMLElement) {
     },
     frame(vp: number) {
       if (!shown) return;
+      if (!calm) {
+        lean.x += (lean.tx - lean.x) * 0.06;
+        lean.y += (lean.ty - lean.y) * 0.06;
+        const t = `translate(${(-lean.x * 1.1).toFixed(2)}%, ${(-lean.y * 0.9).toFixed(2)}%) scale(1.035)`;
+        if (t !== lean.last) { lean.last = t; pics!.style.transform = t; }
+      }
       const playing = seq?.frame(vp) ?? false;
       if (document.documentElement.dataset.lite !== (playing ? 'seq' : '')) document.documentElement.dataset.lite = playing ? 'seq' : '';
       const js = journeyAt(vp);
