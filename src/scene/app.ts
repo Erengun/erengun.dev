@@ -24,7 +24,15 @@ import { createHud } from './debug-hud';
 
 type Hooks = {
   onProgress: (p: number) => void;
+  /** highest tier this device may use (scripts/guard.ts: lowered after a crash or a lost context) */
+  cap?: 'high' | 'medium' | 'low';
+  /** the graphics context / device is gone: nothing more can be drawn by this renderer */
+  onLost?: (visible: boolean) => void;
+  /** still a slideshow at the lowest resolution and detail */
+  onTooSlow?: () => void;
 };
+/** software rasterisers (no usable GPU, or a blocklisted driver): a few frames a second at best */
+const SOFTWARE_GPU = /swiftshader|llvmpipe|softpipe|software|basic render/i;
 
 /** GPU name from a throwaway WebGL context ('' when the browser hides it) */
 function probeGpu(): string {
@@ -50,8 +58,10 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   const isPhoneDevice = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 820;
   const gpuName = probeGpu();
   const forcedQ = params.get('quality');
+  if (!forcedQ && SOFTWARE_GPU.test(gpuName)) throw new Error(`software renderer (${gpuName})`);
+  const cap = forcedQ ? undefined : hooks.cap;
   const lowEnd =
-    forcedQ === 'low' ||
+    forcedQ === 'low' || cap === 'low' ||
     (!forcedQ && isPhoneDevice && (LOW_END_GPU.test(gpuName) || ((navigator as any).deviceMemory ?? 8) <= 3));
   // entry-level phone GPUs run three's WebGL2 backend noticeably faster than their WebGPU drivers
   // Firefox's WebGPU is slower than its WebGL2 here (M1 report); `?webgpu` opts back in
@@ -61,6 +71,13 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   const renderer = new WebGPURenderer({ antialias: false, forceWebGL, trackTimestamp: gpuTime } as any);
   await renderer.init();
   container.appendChild(renderer.domElement);
+  // a lost context never comes back for this renderer: every later frame would throw and the picture would stay
+  // frozen on its last frame. Hand over to the page (stills + one recovery reload, scripts/main.ts)
+  const lostDefault = renderer.onDeviceLost.bind(renderer);
+  renderer.onDeviceLost = (info) => {
+    lostDefault(info);
+    hooks.onLost?.(!document.hidden);
+  };
   const isPhoneNow = () => scroll.isPhone || matchMedia('(max-width: 47.99rem), (max-aspect-ratio: 4/3)').matches;
   // hybrid: a tier from the GPU (low / medium / high) picks resolution caps and scene detail; the adaptive pixel
   // ratio below then only steps down if frames actually drop, and climbs back when they recover
@@ -68,15 +85,17 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     ? 'low'
     : forcedQ === 'high' || forcedQ === 'medium'
       ? forcedQ
-      : HIGH_END_GPU.test(gpuName)
-        ? 'high'
-        : (navigator as any).deviceMemory <= 4 || (renderer.backend as any).isWebGLBackend ? 'medium' : 'high';
+      : cap === 'medium'
+        ? 'medium'
+        : HIGH_END_GPU.test(gpuName)
+          ? 'high'
+          : (navigator as any).deviceMemory <= 4 || (renderer.backend as any).isWebGLBackend ? 'medium' : 'high';
   const ctx: StageContext = { renderer, isPhone: isPhoneNow(), quality };
   // created early so it also counts the shader programs compiled before the preloader gate opens
   const hud = params.has('debug')
     ? createHud(
         {
-          gpu: gpuName || '(hidden)', backend: (renderer.backend as any).isWebGLBackend ? 'WebGL2' : 'WebGPU', tier: quality,
+          cap: cap ?? 'none', gpu: gpuName || '(hidden)', backend: (renderer.backend as any).isWebGLBackend ? 'WebGL2' : 'WebGPU', tier: quality,
           parallelCompile: (renderer.backend as any).isWebGLBackend ? !!(renderer.backend as any).parallel : 'n/a (WebGPU is async)',
           lowEnd, phone: isPhoneDevice, devicePixelRatio, screen: `${screen.width}x${screen.height}`,
           deviceMemory: (navigator as any).deviceMemory ?? '?', cores: navigator.hardwareConcurrency ?? '?', ua: navigator.userAgent,
@@ -174,7 +193,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
    */
   // flips: down-steps that followed an up-step; after FLIPFLOPS of them quality stops climbing (it would only oscillate)
   const FLIPFLOPS = 4;
-  const ctl = { t: 0, dts: [] as number[], skip: true, noisy: false, last: 0, blockUpUntil: 0, blockedRatio: Infinity, wentUp: false, flips: 0, stage: null as Stage | null };
+  const ctl = { t: 0, dts: [] as number[], skip: true, noisy: false, last: 0, blockUpUntil: 0, blockedRatio: Infinity, wentUp: false, flips: 0, stage: null as Stage | null, stuck: 0 };
   let loading = () => true; // set once the journey exists: background loads/compiles make frames unrepresentative
   function skipWindow() { ctl.skip = true; }
   function noisyWindow() { ctl.noisy = true; }
@@ -185,10 +204,27 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     detail.set(s, level);
     s.setDetail!(DETAIL[level]);
   }
+  const slow = { t: 0, n: 0, hits: 0, fired: false };
+  function tooSlow() {
+    if (slow.fired) return;
+    slow.fired = true;
+    hooks.onTooSlow?.();
+  }
   function adapt(now: number) {
     // the real interval: the loop's dt is clamped to 50 ms, which would make a 7 fps GPU look like 20 fps
     const dt = ctl.last ? now - ctl.last : 1 / 60;
     ctl.last = now;
+    // last resort, independent of the windows below (which drop frames longer than .5 s, so a GPU drawing two
+    // frames a second would never register): under 12 fps on average over 5 s stretches, 2 in a row (4 while
+    // stages are still streaming in, which slows healthy devices too)
+    if (!document.hidden && !dpr.lock) {
+      slow.t += Math.min(dt, 2); slow.n++;
+      if (slow.t >= 5) {
+        slow.hits = slow.n / slow.t < 12 ? slow.hits + 1 : 0;
+        slow.t = slow.n = 0;
+        if (slow.hits >= (loading() ? 4 : 2)) tooSlow();
+      }
+    }
     if (document.hidden || dt > 0.5 || dpr.lock) skipWindow();
     ctl.t += dt; ctl.dts.push(dt);
     if (ctl.t < 1 || ctl.dts.length < 4) return;
@@ -202,6 +238,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     const fps = 1 / med;
     const capped30 = fps > 26 && fps < 34 && spread < 0.004;
     const verySlow = fps < 30 && !capped30;
+    if (fps >= 20) ctl.stuck = 0;
     const js = journeyAt(scroll.vp);
     const st = js.trans ? null : stages[js.current];
     const level = st?.setDetail ? detail.get(st) ?? 0 : -1;
@@ -224,7 +261,12 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
           changed = true;
         }
       }
-      if (!changed) return;
+      if (!changed) {
+        // nothing left to give up and still under 15 fps, window after window: the scene can't run here. Longer
+        // patience while stages are still streaming in, which slows a healthy device too
+        if (fps < 15 && ++ctl.stuck >= (quiet ? 4 : 12)) tooSlow();
+        return;
+      }
       if (ctl.wentUp) ctl.flips++;
       ctl.wentUp = false;
     } else if (fps > 55 && quiet && ctl.flips < FLIPFLOPS) {
@@ -478,7 +520,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     }
   }
 
-  (window as any).__scene = { renderer, stages, comp, uFish, post, journey, dpr, gpuMs, frame, hud, applySize };
+  (window as any).__scene = { tier: quality, renderer, stages, comp, uFish, post, journey, dpr, gpuMs, frame, hud, applySize };
   // Real frames while the preloader still covers the page build the post chain's pipelines (tape passes,
   // fish-eye, output), which compileAsync does not reach. The first one only *starts* every pipeline it needs
   // (async: parallel shader compile on WebGL2, createRenderPipelineAsync on WebGPU) and skips draws that aren't
@@ -487,5 +529,5 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   try { await asyncPipelines(() => frame(1 / 60, performance.now() / 1000)); } catch (e) { console.warn('first frame', e); }
   try { frame(1 / 60, performance.now() / 1000); } catch (e) { console.warn('first frame', e); }
   hud?.resetClock(); // the next sample is the first visible frame, not the gap since these hidden ones
-  return { frame, resize };
+  return { frame, resize, tier: quality };
 }

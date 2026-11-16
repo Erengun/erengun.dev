@@ -9,6 +9,8 @@ import {
 import { PROJECTS } from '../lib/content';
 import { initMenu } from './menu';
 import { initTilt } from './tilt';
+import { guard, lower, capTo, session, type Tier } from './guard';
+import { createLite } from './lite';
 
 const $ = <T extends Element = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends Element = HTMLElement>(s: string, r: ParentNode = document) => [...r.querySelectorAll(s)] as T[];
@@ -293,7 +295,10 @@ function updateContact(vp: number) {
 }
 
 // ---------------------------------------------------------------- frame loop
-let renderer: { frame: (dt: number, t: number) => void; resize: () => void } | null = null;
+let renderer: { frame: (dt: number, t: number) => void; resize: () => void; tier: Tier } | null = null;
+/** stills of every stage, shown whenever the 3D scene can't be (scripts/lite.ts) */
+const lite = createLite($('#app'));
+let frameErrors = 0;
 let last = performance.now();
 let lastScroll = 0;
 let lastWorkProj = -1;
@@ -337,7 +342,18 @@ function loop(now: number) {
     workItems.forEach((b, i) => b.toggleAttribute('aria-current', i === proj));
   }
 
-  renderer?.frame(dt, now / 1000);
+  if (lite.shown) lite.frame(scroll.vp);
+  else if (renderer) {
+    // a throwing frame must not take the text overlays and the scroll down with it
+    try {
+      renderer.frame(dt, now / 1000);
+      frameErrors = 0;
+    } catch (err) {
+      if (frameErrors++ === 0) console.error('[lab] frame failed', err);
+      // not a one-off: the scene is broken for good in this tab
+      if (frameErrors === 30) { console.error('[lab] scene keeps failing: showing stills'); lite.show(); }
+    }
+  }
   updateBlocks(scroll.vp, vh);
   updateContact(scroll.vp);
 }
@@ -375,19 +391,49 @@ function openGate() {
   intro.setAttribute('data-ready', '');
   lenis.start();
   scroller.focus({ preventScroll: true });
+  // back where the visitor was before a recovery reload
+  if (guard.restoreVp > 0.05) {
+    lenis.resize();
+    lenis.scrollTo((guard.restoreVp / TOTAL_VP) * lenis.limit, { immediate: true, force: true });
+  }
 }
 
+/** the context is gone (memory pressure, driver reset, a backgrounded tab): stills at once, then one reload */
+function onLost(visible: boolean) {
+  lite.show();
+  // lost in front of the visitor: this tier is too heavy here. Lost in the background: the OS reclaimed it
+  if (visible && renderer) lower(renderer.tier, 'graphics context lost');
+  if (!guard.reloadOnce(scroll.vp)) console.warn('[lab] context lost again: staying on stills');
+}
+function onTooSlow() {
+  capTo('lite', 'under 15 fps at the lowest quality');
+  lite.show();
+}
 async function boot() {
-  const fallback = setTimeout(() => $preloader.set({ ...$preloader.get(), isReady: true, isWarm: true }), 30000);
-  try {
-    const { createApp } = await import('../scene/app');
-    renderer = await createApp($('#app'), { onProgress: (p) => $preloader.setKey('progress', p) });
-    addEventListener('resize', () => renderer?.resize());
-  } catch (err) {
-    console.error('[lab] renderer failed', err);
+  const ready = () => $preloader.set({ ...$preloader.get(), isReady: true, isWarm: true });
+  let failed = false;
+  // a slow or stalled download must not hold the page behind the loader: after a while the stills stand in and
+  // the visitor can start reading; the scene takes over when (if) it arrives
+  const standIn = setTimeout(() => { if (!renderer && !failed) { lite.show(); ready(); } }, 10000);
+  if (guard.cap === 'lite') {
+    console.warn('[lab] stills mode', guard.log.join('; '));
+    lite.show();
+  } else {
+    try {
+      const { createApp } = await import('../scene/app');
+      renderer = await createApp($('#app'), {
+        onProgress: (p) => $preloader.setKey('progress', p), cap: guard.cap as Tier, onLost, onTooSlow,
+      });
+      addEventListener('resize', () => renderer?.resize());
+      lite.hide();
+    } catch (err) {
+      failed = true;
+      console.error('[lab] renderer failed', err);
+      lite.show();
+    }
   }
-  clearTimeout(fallback);
-  $preloader.set({ ...$preloader.get(), isReady: true, isWarm: true });
+  clearTimeout(standIn);
+  ready();
   const needsMotion = initTilt(() => tryGate());
   $preloader.setKey('isMotionPending', needsMotion);
   tryGate();
@@ -395,7 +441,7 @@ async function boot() {
 function tryGate() {
   const p = $preloader.get();
   if (p.isGateOpen || !p.isReady || !p.isWarm) return;
-  if (p.isMotionPending && !sessionStorage.getItem('motion-declined') && !tilt.active) {
+  if (p.isMotionPending && !session.get('motion-declined') && !tilt.active) {
     pre.setAttribute('data-asking', '');
     $<HTMLButtonElement>('[data-motion-allow]').focus();
     return;

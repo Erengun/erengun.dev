@@ -84,6 +84,11 @@ html.is-tabbing :is(a, button, input):focus-visible {
 }
 #app { position: absolute; inset: 0; z-index: 0; }
 #app canvas { display: block; width: 100%; height: 100%; touch-action: pan-y; }
+/* stills fallback (scripts/lite.ts): covers the canvas when the scene can't run */
+.lite { position: absolute; inset: 0; overflow: hidden; background: #050505; }
+.lite[hidden] { display: none; }
+.lite img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: opacity .2s linear; user-select: none; }
+html[data-lite] #app canvas { visibility: hidden; }
 .stage[data-boundary-clickable] .scene-tilt { cursor: pointer; }
 .scroll-length { height: calc(var(--scroll-viewports) * 100svh); pointer-events: none; }
 

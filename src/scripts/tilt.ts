@@ -1,3 +1,4 @@
+import { session } from './guard';
 import { tilt } from '../lib/stores';
 import { Euler, Quaternion, Vector3 } from 'three';
 
@@ -45,7 +46,7 @@ export function initTilt(onResolved: () => void): boolean {
     addEventListener('deviceorientation', onOrient);
     return false;
   }
-  if (sessionStorage.getItem('motion-declined')) return false;
+  if (session.get('motion-declined')) return false;
   document.querySelector('[data-motion-allow]')?.addEventListener('click', async () => {
     try {
       if ((await DOE.requestPermission!()) === 'granted') addEventListener('deviceorientation', onOrient);
@@ -54,7 +55,7 @@ export function initTilt(onResolved: () => void): boolean {
     onResolved();
   });
   document.querySelector('[data-motion-decline]')?.addEventListener('click', () => {
-    sessionStorage.setItem('motion-declined', '1');
+    session.set('motion-declined', '1');
     onResolved();
   });
   return true;
