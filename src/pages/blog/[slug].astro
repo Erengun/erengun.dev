@@ -6,15 +6,21 @@ import { SITE } from '../../lib/content';
 
 export async function getStaticPaths() {
   const posts = await getPosts();
-  return posts.map((post, i) => ({
-    params: { slug: post.id },
-    // posts are newest first: "newer" is the previous index
-    props: { post, newer: posts[i - 1] ?? null, older: posts[i + 1] ?? null },
-  }));
+  return posts.map((post) => {
+    // pager stays within one language; posts are newest first, so "newer" is the previous index
+    const same = posts.filter((p) => p.data.lang === post.data.lang);
+    const i = same.indexOf(post);
+    const translation = posts.find((p) => p.id === post.data.translation) ?? null;
+    return {
+      params: { slug: post.id },
+      props: { post, newer: same[i - 1] ?? null, older: same[i + 1] ?? null, translation },
+    };
+  });
 }
 
-interface Props { post: Post; newer: Post | null; older: Post | null }
-const { post, newer, older } = Astro.props;
+interface Props { post: Post; newer: Post | null; older: Post | null; translation: Post | null }
+const { post, newer, older, translation } = Astro.props;
+const tr = post.data.lang === 'tr';
 const { Content } = await render(post);
 const URL_BASE = 'https://erengun.dev';
 const path = `/blog/${post.id}/`;
@@ -30,14 +36,16 @@ const jsonLd = {
   keywords: post.data.tags.join(', '),
   author: { '@type': 'Person', name: SITE.name, url: URL_BASE + '/' },
   publisher: { '@type': 'Person', name: SITE.name, url: URL_BASE + '/' },
+  inLanguage: post.data.lang,
 };
+const alternates = translation ? [{ lang: translation.data.lang, path: `/blog/${translation.id}/` }] : [];
 ---
-<BlogLayout title={post.data.title} description={post.data.summary} path={path} type="article" jsonLd={jsonLd} published={post.data.date}>
+<BlogLayout title={post.data.title} description={post.data.summary} path={path} type="article" jsonLd={jsonLd} published={post.data.date} lang={post.data.lang} alternates={alternates}>
   <article>
     <header class="head">
-      <p class="eyebrow"><a href="/blog/"><span class="g">&lt;</span> all posts</a></p>
+      <p class="eyebrow"><a href="/blog/"><span class="g">&lt;</span> {tr ? 'tüm yazılar' : 'all posts'}</a></p>
       <h1>{post.data.title}</h1>
-      <p class="eyebrow"><time datetime={isoDate(post.data.date)}>{displayDate(post.data.date)}</time> · {readingTime(post.body)}</p>
+      <p class="eyebrow"><time datetime={isoDate(post.data.date)}>{displayDate(post.data.date)}</time> · {readingTime(post.body)}{translation && <> · <a href={`/blog/${translation.id}/`} hreflang={translation.data.lang} lang={translation.data.lang}>{translation.data.lang === 'tr' ? 'Türkçe oku' : 'Read in English'} <span class="g">&gt;</span></a></>}</p>
       {post.data.tags.length > 0 && <ul class="tags">{post.data.tags.map((t) => <li>{t}</li>)}</ul>}
     </header>
     <div class="prose">

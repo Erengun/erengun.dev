@@ -27,11 +27,11 @@ const jsonLd = {
 
   <ol class="posts">
     {posts.map((p, i) => (
-      <li>
+      <li lang={p.data.lang}>
         <a href={`/blog/${p.id}/`}>
           <span class="n" aria-hidden="true">{String(posts.length - i).padStart(2, '0')}</span>
           <span class="body">
-            <span class="meta"><time datetime={isoDate(p.data.date)}>{displayDate(p.data.date)}</time> · {readingTime(p.body)}</span>
+            <span class="meta"><time datetime={isoDate(p.data.date)}>{displayDate(p.data.date)}</time> · {readingTime(p.body)}{p.data.lang === 'tr' && ' · Türkçe'}</span>
             <span class="t">{p.data.title}</span>
             <span class="s">{p.data.summary}</span>
           </span>
