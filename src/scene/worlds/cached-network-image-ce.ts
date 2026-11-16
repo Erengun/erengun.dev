@@ -214,7 +214,8 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
   });
 
   // =========================================================== real apps: runtime atlases
-  const fmt = (v: number) => v.toLocaleString('en-US');
+  // thousands separators by hand: the first toLocaleString() call initialises Intl, ~50 ms on a phone-class CPU
+  const fmt = (v: number) => String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const rnd = (() => { let s = 1234567; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
   const atlasCanvas = document.createElement('canvas');
   atlasCanvas.width = AT_W; atlasCanvas.height = AT_H;
@@ -231,8 +232,13 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     im.src = `${ASSET}apps/${a.id}.webp`;
   }))).then(() => { appTex.needsUpdate = true; });
 
-  /** name + ★ label per app, one 1024x128 row each */
-  const labelTex = canvasTex(1024, 128 * APPS.length, (g) => {
+  /**
+   * name + ★ label per app, one 1024x128 row each. Drawn in its own task before the world reports ready: the
+   * first text drawn in a font costs tens of ms, and createWorld runs while another stage is on screen.
+   */
+  const labelTex = canvasTex(1024, 128 * APPS.length, () => {});
+  const drawLabels = () => new Promise<void>((done) => setTimeout(() => {
+    const g = (labelTex.image as HTMLCanvasElement).getContext('2d')!;
     APPS.forEach((a, i) => {
       const y = i * 128;
       g.fillStyle = 'rgba(3,16,34,0.94)'; pill(g, 4, y + 10, 1016, 108); g.fill();
@@ -244,7 +250,9 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
       g.fillText('★ ' + fmt(a.stars), 974, y + 66);
       g.textAlign = 'left';
     });
-  });
+    labelTex.needsUpdate = true;
+    done();
+  }, 0));
 
   // =========================================================== device shading (phones + app windows)
   const appNode = texture(appTex);
@@ -727,6 +735,7 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
       new GLTFLoader().loadAsync(ASSET + 'bezel.glb'),
       initSlides(),
       loadApps(),
+      drawLabels(),
     ]);
     let geo: BufferGeometry | null = null;
     gltf.scene.traverse((o: any) => { if (!geo && o.isMesh) geo = o.geometry; });
