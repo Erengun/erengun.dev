@@ -23,6 +23,7 @@ import {
   ClampToEdgeWrapping, Matrix4, Vector3, Quaternion, Euler, Group, Object3D, DoubleSide, BackSide, AdditiveBlending,
   NormalBlending, type WebGPURenderer,
 } from 'three/webgpu';
+import { BITMAP_TEXTURES, fetchBlob, textureBitmap } from '../bitmap';
 import {
   Fn, vec2, vec3, vec4, float, uniform, attribute, texture, instancedBufferAttribute, positionWorld, normalWorld,
   positionGeometry, cameraPosition, uv, mix, smoothstep, clamp, max, min, pow, exp, length, normalize, dot, sin, cos,
@@ -1381,29 +1382,50 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     void single;
 
     // slides → textures, thumbnails atlas, average colours
-    const imgs: (HTMLImageElement | HTMLCanvasElement)[] = [];
+    // Chromium / Firefox: one fetch per slide, decoded off the main thread into the texture's bitmap (see
+    // bitmap.ts) and a thumbnail-sized copy. Scaling the full-size slides synchronously (twelve thumbnails plus
+    // the 4×4 averages below) was one ~100 ms task on a laptop and several times that on a phone, while the
+    // intro is on screen. Safari keeps <img> textures; its thumbnails are still scaled from the file's bytes
+    // (createImageBitmap(img) would copy the full-size image on the main thread first).
+    const imgs: (HTMLImageElement | HTMLCanvasElement | ImageBitmap)[] = [];
+    const small: CanvasImageSource[] = [];
+    const thumbOf = (blob: Blob, w: number, h: number) => {
+      const k = Math.min(500 / w, 295 / h, 1);
+      return createImageBitmap(blob, { resizeWidth: Math.max(1, Math.round(w * k)), resizeHeight: Math.max(1, Math.round(h * k)), resizeQuality: 'high' });
+    };
     await Promise.all(slides.map(async (s, i) => {
       try {
+        if (BITMAP_TEXTURES) {
+          const blob = await fetchBlob(s.src);
+          const full = await textureBitmap(blob);
+          imgs[i] = full;
+          small[i] = await thumbOf(blob, full.width, full.height);
+          return;
+        }
         const im = new Image();
         im.decoding = 'async';
         im.src = s.src;
         await im.decode();
         imgs[i] = im;
-      } catch { imgs[i] = placeholderCanvas(i); }
+        try {
+          small[i] = typeof createImageBitmap === 'function' ? await thumbOf(await fetchBlob(s.src), im.width, im.height) : im;
+        } catch { small[i] = im; }
+      } catch { imgs[i] = small[i] = placeholderCanvas(i); }
     }));
-    if (!imgs.length) for (let i = 0; i < 4; i++) imgs.push(placeholderCanvas(i));
+    if (!imgs.length) for (let i = 0; i < 4; i++) imgs.push((small[i] = placeholderCanvas(i)));
     const avgCv = document.createElement('canvas');
     avgCv.width = avgCv.height = 4;
     const ag = avgCv.getContext('2d', { willReadFrequently: true })!;
     slideTex = imgs.map((im) => {
       const t = im instanceof HTMLCanvasElement ? new CanvasTexture(im) : new Texture(im);
+      if (typeof ImageBitmap !== 'undefined' && im instanceof ImageBitmap) t.flipY = false; // flipped at decode
       t.colorSpace = SRGBColorSpace;
       t.anisotropy = 8;
       t.wrapS = t.wrapT = ClampToEdgeWrapping;
       t.needsUpdate = true;
       return t;
     });
-    slideAvg = imgs.map((im) => {
+    slideAvg = small.map((im) => {
       ag.clearRect(0, 0, 4, 4);
       ag.drawImage(im, 0, 0, 4, 4);
       const d = ag.getImageData(0, 0, 4, 4).data;
@@ -1421,11 +1443,12 @@ export function createWorld(ctx: ProjectWorldContext): Stage {
     const tg = thumbCanvas.getContext('2d')!;
     tg.fillStyle = '#0b0a09'; tg.fillRect(0, 0, 2048, 1024);
     for (let c = 0; c < 12; c++) {
-      const im = imgs[c % imgs.length];
+      const im = small[c % small.length];
       const x = (c % 4) * 512, y = Math.floor(c / 4) * 307;
       tg.fillStyle = '#121110'; tg.fillRect(x, y, 512, 307);
       containDraw(tg, im as any, x + 6, y + 6, 500, 295);
     }
+    for (const im of small) if (typeof ImageBitmap !== 'undefined' && im instanceof ImageBitmap) im.close(); // thumbnails only
     thumbTex.needsUpdate = true;
     current = -1;
     setSlide(wantSlide, true);

@@ -10,7 +10,8 @@
  * capped per tier/device.
  * Debug: `?debug` shows a perf overlay with a copyable per-stage report; `?gputime` enables WebGPU timestamp queries; `__scene.gpuMs` holds the last GPU frame times.
  */
-import { WebGPURenderer, TextureLoader, type Texture, Vector2, RenderPipeline, PerspectiveCamera, type Object3D, type Camera, type Mesh, type Material, type RenderTarget, RenderTarget as RenderTargetClass, HalfFloatType } from 'three/webgpu';
+import { WebGPURenderer, TextureLoader, Texture as TextureClass, type Texture, Vector2, RenderPipeline, PerspectiveCamera, type Object3D, type Camera, type Mesh, type Material, type RenderTarget, RenderTarget as RenderTargetClass, HalfFloatType } from 'three/webgpu';
+import { BITMAP_TEXTURES, fetchBlob, textureBitmap } from './bitmap';
 import { pass, uniform } from 'three/tsl';
 import { $route, $preloader, scroll, tilt, pointer as sharedPointer } from '../lib/stores';
 import { STAGES, TRANSITIONS, SCENE_VP, WIPES, journeyAt, stageLocal, clamp, damp, smoothstep } from '../lib/timeline';
@@ -249,9 +250,30 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   const loadedTextures = new Set<Texture>();
   const tlLoad = TextureLoader.prototype.load;
   TextureLoader.prototype.load = function (this: TextureLoader, ...a: Parameters<TextureLoader['load']>) {
-    const t = tlLoad.apply(this, a);
+    if (!BITMAP_TEXTURES) {
+      const t = tlLoad.apply(this, a);
+      loadedTextures.add(t);
+      return t;
+    }
+    // same contract as TextureLoader.load, with an ImageBitmap as the image (see bitmap.ts): the upload that
+    // follows is a plain copy instead of a main-thread conversion of the <img>
+    const [url, onLoad, , onError] = a;
+    const t = new TextureClass();
+    t.flipY = false;
     loadedTextures.add(t);
-    return t;
+    const full = this.manager.resolveURL(this.path ? this.path + url : url);
+    this.manager.itemStart(full);
+    fetchBlob(full).then(textureBitmap).then((bm) => {
+      t.image = bm;
+      t.needsUpdate = true;
+      onLoad?.(t as never);
+      this.manager.itemEnd(full);
+    }).catch((e) => {
+      if (onError) onError(e); else console.error(e);
+      this.manager.itemError(full);
+      this.manager.itemEnd(full);
+    });
+    return t as ReturnType<TextureLoader['load']>;
   };
   async function uploadPending() {
     for (const t of loadedTextures) {
