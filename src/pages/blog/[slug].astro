@@ -71,8 +71,10 @@ const alternates = translation ? [{ lang: translation.data.lang, path: `/blog/${
   .pager .r { text-align: right; }
   @media (max-width: 480px) { .pager { grid-template-columns: 1fr; } .pager .r { text-align: left; } }
 
+  /* reset first, then space siblings: same specificity, so the later rule wins */
+  .prose :global(> *) { margin-block: 0; }
   .prose :global(> * + *) { margin-top: 1.25em; }
-  .prose :global(p), .prose :global(ul), .prose :global(ol) { margin-block: 0; }
+  .prose :global(li p) { margin-block: 0; }
   .prose :global(li + li) { margin-top: .75em; }
   .prose :global(ul), .prose :global(ol) { padding-left: 1.4em; }
   .prose :global(h2) { font-size: 1.5rem; line-height: 1.25; letter-spacing: -.01em; margin: 2.5em 0 0; }
