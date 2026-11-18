@@ -53,6 +53,43 @@ function probeGpu(): string {
 const HIGH_END_GPU = /Apple (GPU|M\d)|Adreno[^\d]*\b(7\d\d|8\d\d)\b|Mali-G(71[05]|72[05]|9\d\d)|Immortalis|Xclipse|NVIDIA|GeForce|Radeon/i;
 const LOW_END_GPU = /Mali-(T\d+|G(31|51|52|57|71|72|76)\b)|Adreno[^\d]*(\b[2-5]\d\d\b|\b6[01]\d\b)|PowerVR|IMG BXM|Mali-400/i;
 
+/**
+ * WebGL2 with KHR_parallel_shader_compile: three asks every pending program "linked yet?" on every frame. In Safari
+ * (WebGL lives in the GPU process) that question is a synchronous round trip which waits for whatever the GPU
+ * process is busy with: the link itself, or a texture upload queued just before. Asked too early it blocks the page
+ * for the 30-70 ms the work takes; asked a little later it returns at once. So: answer "not yet" without asking
+ * while work was submitted moments ago, ask about one program per frame at most, and back off after an answer
+ * that had to wait. three simply asks again on the next frame. (`?nopace` turns this off for comparison.)
+ */
+function pacePolls(renderer: WebGPURenderer, params: URLSearchParams) {
+  const backend = renderer.backend as any;
+  const gl = backend.isWebGLBackend ? (backend.gl as WebGL2RenderingContext) : null;
+  const ext = backend.parallel as { COMPLETION_STATUS_KHR: number } | null;
+  if (!gl || !ext || params.has('nopace')) return;
+  const QUIET = Number(params.get('pace') ?? 90);
+  let notBefore = 0, frame = -1, tick = 0;
+  requestAnimationFrame(function count() { tick++; requestAnimationFrame(count); });
+  const busy = (ms: number) => { notBefore = Math.max(notBefore, performance.now() + ms); };
+  const real = gl.getProgramParameter.bind(gl);
+  gl.getProgramParameter = ((pr: WebGLProgram, pname: number) => {
+    if (pname !== ext.COMPLETION_STATUS_KHR) return real(pr, pname);
+    const now = performance.now();
+    if (now < notBefore || frame === tick) return false;
+    frame = tick;
+    const done = real(pr, pname);
+    // it had to wait: the GPU process is still working through its queue
+    if (performance.now() - now > 4) busy(QUIET);
+    return done;
+  }) as typeof gl.getProgramParameter;
+  // work that keeps the GPU process busy for a while after the call returns
+  const link = gl.linkProgram.bind(gl);
+  gl.linkProgram = (pr) => { link(pr); busy(QUIET); };
+  for (const name of ['texImage2D', 'texSubImage2D', 'texStorage2D', 'texImage3D', 'texSubImage3D', 'compressedTexSubImage2D'] as const) {
+    const fn = (gl as any)[name].bind(gl);
+    (gl as any)[name] = (...a: unknown[]) => { const r = fn(...a); busy(QUIET * 0.5); return r; };
+  }
+}
+
 export async function createApp(container: HTMLElement, hooks: Hooks) {
   const params = new URLSearchParams(location.search);
   const isPhoneDevice = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 820;
@@ -78,6 +115,7 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     lostDefault(info);
     hooks.onLost?.(!document.hidden);
   };
+  pacePolls(renderer, params);
   const isPhoneNow = () => scroll.isPhone || matchMedia('(max-width: 47.99rem), (max-aspect-ratio: 4/3)').matches;
   // hybrid: a tier from the GPU (low / medium / high) picks resolution caps and scene detail; the adaptive pixel
   // ratio below then only steps down if frames actually drop, and climbs back when they recover
@@ -428,8 +466,11 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
   // clean: wait until the viewer scrolls or the intro's glide has played (a stage the viewer reaches still
   // loads at once, see journey.tick).
   const syncCompile = (renderer.backend as any).isWebGLBackend && !(renderer.backend as any).parallel;
+  const webkit = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Android|Edg\//.test(navigator.userAgent));
   const afterIntro = (go: () => void) => {
-    if (!syncCompile && !ctx.isPhone) return void setTimeout(go, 400);
+    // (Safari on a phone compiles asynchronously too, and the poll pacing above keeps each step short: there it is
+    // better spent while the visitor reads the opening shot than left to start with their first scroll)
+    if (!syncCompile && (!ctx.isPhone || webkit)) return void setTimeout(go, 400);
     const t0 = performance.now(), vp0 = scroll.vp;
     const poll = () => (Math.abs(scroll.vp - vp0) > 0.05 || performance.now() - t0 > 6000 ? go() : setTimeout(poll, 150));
     poll();
@@ -539,5 +580,10 @@ export async function createApp(container: HTMLElement, hooks: Hooks) {
     const a = js.trans ? js.from : js.current;
     return journey.isReady(a) && (!js.trans || journey.isReady(a + 1));
   };
-  return { frame, resize, ready, tier: quality };
+  /** keep the stage loader informed of where the page is without drawing anything (scripts/main.ts: sequence first) */
+  const tick = (vp: number) => {
+    const js = journeyAt(vp);
+    journey.tick(js.trans ? js.from : js.current, js.trans ? js.from + 1 : -1);
+  };
+  return { frame, resize, ready, tick, settled: () => journey.settled(), tier: quality };
 }

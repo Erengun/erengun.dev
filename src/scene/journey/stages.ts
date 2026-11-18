@@ -180,6 +180,8 @@ export interface Journey {
   isReady(i: number): boolean;
   /** true while a background load/compile is in flight (or queued but not yet started after the gate) */
   busy(): boolean;
+  /** background loading was started and has nothing left to do (every stage is in, or failed and kept its stand-in) */
+  settled(): boolean;
   /** called after every swap / compile (adaptive resolution ignores the frame-time window around it) */
   onActivity?: () => void;
 }
@@ -331,6 +333,7 @@ export function buildJourney(ctx: StageContext, onProgress: (p: number) => void)
     },
     isReady: (i) => ready[i],
     busy: () => running > 0 || (!compileFn && jobs.some((j, i) => j && !started[i])),
+    settled: () => !!compileFn && running === 0 && jobs.every((j, i) => !j || started[i]),
   };
   return journey;
 }

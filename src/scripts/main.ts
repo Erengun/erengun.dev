@@ -295,7 +295,10 @@ function updateContact(vp: number) {
 }
 
 // ---------------------------------------------------------------- frame loop
-let renderer: { frame: (dt: number, t: number) => void; resize: () => void; ready: (vp: number) => boolean; tier: Tier } | null = null;
+let renderer: {
+  frame: (dt: number, t: number) => void; resize: () => void; ready: (vp: number) => boolean;
+  tick: (vp: number) => void; settled: () => boolean; tier: Tier;
+} | null = null;
 /** stills of every stage, shown whenever the 3D scene can't be (scripts/lite.ts) */
 const lite = createLite($('#app'));
 let frameErrors = 0;
@@ -350,7 +353,14 @@ function loop(now: number) {
   }
 
   if (lite.shown) lite.frame(scroll.vp);
-  if (renderer && !lost && (!lite.shown || handover)) {
+  if (renderer && !lost && handover && seqFirst) {
+    // sequence first: the scene compiles behind the pre-rendered journey and is not drawn until all of it is in
+    // (drawing it would only queue behind the shader compiles and stall), then takes over between two transitions
+    renderer.tick(scroll.vp);
+    if (renderer.settled() && renderer.ready(scroll.vp) && !journeyAt(scroll.vp).trans) {
+      try { renderer.frame(dt, now / 1000); handover = false; lite.hide(); } catch (err) { console.error('[lab] frame failed', err); }
+    }
+  } else if (renderer && !lost && (!lite.shown || handover)) {
     // a throwing frame must not take the text overlays and the scroll down with it
     try {
       renderer.frame(dt, now / 1000);
@@ -416,7 +426,11 @@ function landing(vh: number) {
   if (pendingJump === null) return;
   lenis.resize();
   if (lenis.limit < vh * TOTAL_VP * 0.5) return;
-  if (pendingJump > 0.05) lenis.scrollTo((pendingJump / TOTAL_VP) * lenis.limit, { immediate: true, force: true });
+  if (pendingJump > 0.05) {
+    lenis.scrollTo((pendingJump / TOTAL_VP) * lenis.limit, { immediate: true, force: true });
+    // phones ease towards the scroll position: start there, or the page would visibly run through every chapter
+    scroll.progress = pendingJump / TOTAL_VP;
+  }
   pendingJump = null;
   linksLive = true;
 }
@@ -478,8 +492,25 @@ function onTooSlow() {
   handover = false;
   lite.show();
 }
+/**
+ * Safari on iPhone/iPad compiles shaders in its GPU process, in line with the page's own drawing: while the other
+ * stages compile (seconds), every 3D frame waits behind them and the opening stutters, however the work is
+ * paced. There the page opens on the pre-rendered journey (scripts/lite.ts) and the scene takes over once all of
+ * it is compiled. `?seqfirst` / `?noseqfirst` force it either way.
+ */
+const bootParams = new URLSearchParams(location.search);
+const seqFirst = !bootParams.has('noseqfirst') && !bootParams.has('quality') && !bootParams.has('debug')
+  && (bootParams.has('seqfirst') || /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent)));
 async function boot() {
   const ready = () => $preloader.set({ ...$preloader.get(), isReady: true, isWarm: true });
+  let motionAsked = false;
+  if (seqFirst && guard.cap !== 'lite') {
+    lite.show();
+    // the tilt question belongs to the loader: ask it now, not when the scene arrives mid-scroll
+    motionAsked = true;
+    $preloader.setKey('isMotionPending', initTilt(() => tryGate()));
+    ready();
+  }
   let failed = false;
   // a slow or stalled download must not hold the page behind the loader: after a while the stills stand in and
   // the visitor can start reading; the scene takes over when (if) it arrives
@@ -504,8 +535,7 @@ async function boot() {
   clearTimeout(standIn);
   ready();
   // no tilt parallax on stills: don't ask for motion access
-  const needsMotion = renderer ? initTilt(() => tryGate()) : false;
-  $preloader.setKey('isMotionPending', needsMotion);
+  if (!motionAsked) $preloader.setKey('isMotionPending', renderer ? initTilt(() => tryGate()) : false);
   tryGate();
 }
 function tryGate() {
