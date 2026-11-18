@@ -324,8 +324,9 @@ function loop(now: number) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   lenis.raf(now);
-  const limit = Math.max(1, lenis.limit);
   const vh = scroller.clientHeight;
+  landing(vh);
+  const limit = Math.max(1, lenis.limit);
   scroll.limit = limit;
   scroll.isPhone = phoneMq.matches;
   const target = lenis.scroll / limit;
@@ -398,12 +399,68 @@ function openGate() {
   intro.setAttribute('data-ready', '');
   lenis.start();
   scroller.focus({ preventScroll: true });
-  // back where the visitor was before a recovery reload
-  if (guard.restoreVp > 0.05) {
-    lenis.resize();
-    lenis.scrollTo((guard.restoreVp / TOTAL_VP) * lenis.limit, { immediate: true, force: true });
-  }
+  // back where the visitor was before a recovery reload, else where the link points (#about, #oge, #oge/3 …)
+  const link = parseHash(location.hash);
+  const to = guard.restoreVp > 0.05 ? guard.restoreVp : link?.vp ?? 0;
+  if (link?.slide) pendingSlide = link;
+  pendingJump = to;
 }
+/** where to land once the gate is open; applied from the frame loop (see landing) */
+let pendingJump: number | null = null;
+/**
+ * The page can open before its stylesheet has applied (WebKit, and at once when the stills stand in for the scene):
+ * the scroll length is then still a fraction of its real size and a jump would land at the top. Wait for the real
+ * length, jump, and only then let the address bar follow the scroll.
+ */
+function landing(vh: number) {
+  if (pendingJump === null) return;
+  lenis.resize();
+  if (lenis.limit < vh * TOTAL_VP * 0.5) return;
+  if (pendingJump > 0.05) lenis.scrollTo((pendingJump / TOTAL_VP) * lenis.limit, { immediate: true, force: true });
+  pendingJump = null;
+  linksLive = true;
+}
+
+// ---------------------------------------------------------------- shareable URLs
+// Every chapter has its own address: /#about, /#who, /#<project id> (optionally /<slide>: /#oge/3), /#contact.
+// The address bar follows the scroll (replaceState: no history entries, so Back still leaves the site), and
+// opening such a link lands on that chapter.
+function parseHash(hash: string): { vp: number; project: number; slide: number } | null {
+  const [name, n] = decodeURIComponent(hash.replace(/^#/, '')).split('/');
+  if (!name) return null;
+  const project = PROJECTS.findIndex((p) => p.id === name);
+  if (project >= 0) return { vp: holdCenterVp(worldStage(project)), project, slide: Math.max(0, (Number(n) || 1) - 1) };
+  const vp = ANCHOR_VP[`/#${name}`];
+  return vp === undefined ? null : { vp, project: -1, slide: 0 };
+}
+function hashFor(route: Route, slide: number): string {
+  if (route === 'about' || route === 'who' || route === 'contact') return `#${route}`;
+  const m = /^project-(\d+)$/.exec(route ?? '');
+  if (!m) return '';
+  return `#${PROJECTS[Number(m[1])].id}${slide > 0 ? `/${slide + 1}` : ''}`;
+}
+let linksLive = false;
+let pendingSlide: { project: number; slide: number } | null = null;
+$route.subscribe(({ route, slide, overlay }) => {
+  if (!linksLive) return;
+  // a link to a later slide: select it once its project is the one on screen
+  if (pendingSlide) {
+    if (route !== `project-${pendingSlide.project}` || overlay !== 'shown') return;
+    const want = pendingSlide.slide;
+    pendingSlide = null;
+    if (want !== slide && want < slideCount(currentProject())) return void $route.setKey('slide', want);
+  }
+  const hash = hashFor(route, slide);
+  if (hash === location.hash) return;
+  try { history.replaceState(history.state, '', location.pathname + location.search + hash); } catch { /* sandboxed frame */ }
+});
+// a chapter address typed or pasted into the open page
+addEventListener('hashchange', () => {
+  const link = parseHash(location.hash);
+  if (!link || !linksLive) return;
+  if (link.slide) pendingSlide = link;
+  scrollToVp(link.vp);
+});
 
 /** the context is gone (memory pressure, driver reset, a backgrounded tab): stills at once, then one reload */
 function onLost(visible: boolean) {
