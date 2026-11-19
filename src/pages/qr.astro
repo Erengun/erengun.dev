@@ -1,9 +1,9 @@
 ---
-// A link as a small city: every dark module of its QR code is a building, and from above the rooftops scan.
+// A link as a small Istanbul: every dark module of its QR code is a rooftop, and from above the rooftops scan.
 // Standalone and light: none of the journey's renderer or assets load here.
 import { SITE } from '../lib/content';
-const title = `QR City — ${SITE.name}`;
-const description = 'Turn any link into a small city at night. Tap it, the lights come on, and the rooftops are a QR code your phone can scan.';
+const title = `QR Istanbul — ${SITE.name}`;
+const description = 'Turn any link into a small Istanbul. Tap it and, from straight above, the rooftops are a QR code your phone can scan.';
 const url = 'https://erengun.dev/qr/';
 ---
 <!doctype html>
@@ -11,7 +11,7 @@ const url = 'https://erengun.dev/qr/';
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#08080a" />
+    <meta name="theme-color" content="#f3ead8" />
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={url} />
@@ -32,9 +32,9 @@ const url = 'https://erengun.dev/qr/';
     <main class="qr" data-qr data-state="city">
       <header class="qr__bar">
         <a class="qr__logo" href="/">{SITE.name}</a>
-        <span class="qr__tag">&gt; qr city</span>
+        <span class="qr__tag">&gt; qr istanbul</span>
       </header>
-      <canvas class="qr__canvas" aria-label="A city whose rooftops form a QR code for the link below"></canvas>
+      <canvas class="qr__canvas" aria-label="A small Istanbul whose rooftops form a QR code for the link below"></canvas>
       <div class="qr__panel" data-qr-panel>
         <button class="qr__toggle" type="button" data-qr-toggle aria-pressed="false">Tap the city to see the code</button>
         <div class="qr__row">
@@ -56,28 +56,28 @@ const url = 'https://erengun.dev/qr/';
 </html>
 
 <style is:global>
-  :root { --ink: #08080a; --paper: #f2f0ea; --accent: #ff5a1f; --line: rgb(255 255 255 / .14); --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace; --sans: "Space Grotesk", system-ui, sans-serif; }
+  :root { --ink: #1b1712; --page: #f3ead8; --accent: #ff5a1f; --line: rgb(27 23 18 / .16); --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace; --sans: "Space Grotesk", system-ui, sans-serif; }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
-  body { background: var(--ink); color: #fff; font-family: var(--sans); overflow: hidden; -webkit-font-smoothing: antialiased; }
-  .qr { position: fixed; inset: 0; background: radial-gradient(60% 45% at 50% 44%, rgb(70 84 140 / .16), transparent 70%); }
-  .qr__canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  body { background: var(--page); color: var(--ink); font-family: var(--sans); overflow: hidden; -webkit-font-smoothing: antialiased; }
+  .qr { position: fixed; inset: 0; }
+  .qr__canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; -webkit-tap-highlight-color: transparent; will-change: filter; }
   .qr[data-state="flat"] .qr__canvas { inset: auto; left: 50%; top: 42%; transform: translate(-50%, -50%); cursor: default; }
   .qr__bar { position: absolute; z-index: 2; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: calc(env(safe-area-inset-top, 0px) + 1.1rem) 1.25rem 0; pointer-events: none; }
-  .qr__logo { pointer-events: auto; color: #fff; text-decoration: none; font-weight: 700; letter-spacing: -.01em; }
+  .qr__logo { pointer-events: auto; color: var(--ink); text-decoration: none; font-weight: 700; letter-spacing: -.01em; }
   .qr__tag, .qr__toggle, .qr__note { font-family: var(--mono); font-size: .6875rem; text-transform: uppercase; letter-spacing: .08em; }
-  .qr__tag { color: rgb(255 255 255 / .55); }
+  .qr__tag { color: rgb(27 23 18 / .55); }
   .qr__panel { position: absolute; z-index: 2; left: 50%; bottom: 0; transform: translateX(-50%); width: min(100% - 2rem, 34rem); padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem); display: grid; gap: .7rem; justify-items: center; }
-  .qr__toggle { appearance: none; border: 1px solid var(--line); background: rgb(255 255 255 / .04); color: rgb(255 255 255 / .8); border-radius: 999px; padding: .55rem 1rem; cursor: pointer; transition: background-color .2s, color .2s; }
-  .qr__toggle:hover { background: rgb(255 255 255 / .1); color: #fff; }
+  .qr__toggle { appearance: none; border: 1px solid var(--line); background: rgb(255 255 255 / .5); color: rgb(27 23 18 / .75); border-radius: 999px; padding: .55rem 1rem; cursor: pointer; transition: background-color .2s, color .2s; }
+  .qr__toggle:hover { background: #fff; color: var(--ink); }
   .qr__row { display: flex; gap: .5rem; width: 100%; }
   .qr__field { flex: 1; min-width: 0; }
-  .qr__field input { width: 100%; height: 3rem; border-radius: .8rem; border: 1px solid var(--line); background: rgb(255 255 255 / .05); color: #fff; font: 400 1rem var(--mono); padding: 0 1rem; outline: none; transition: border-color .2s; }
-  .qr__field input::placeholder { color: rgb(255 255 255 / .4); }
+  .qr__field input { width: 100%; height: 3rem; border-radius: .8rem; border: 1px solid var(--line); background: rgb(255 255 255 / .65); color: var(--ink); font: 400 1rem var(--mono); padding: 0 1rem; outline: none; transition: border-color .2s; }
+  .qr__field input::placeholder { color: rgb(27 23 18 / .45); }
   .qr__field input:focus-visible { border-color: var(--accent); }
   .qr__share { flex: none; width: 3rem; height: 3rem; border-radius: .8rem; border: 0; background: var(--accent); color: #140700; display: grid; place-items: center; cursor: pointer; transition: filter .2s; }
-  .qr__share:hover { filter: brightness(1.1); }
+  .qr__share:hover { filter: brightness(1.08); }
   .qr__toggle:focus-visible, .qr__share:focus-visible, .qr__logo:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-  .qr__note { min-height: 1.1em; margin: 0; color: rgb(255 255 255 / .6); text-align: center; overflow-wrap: anywhere; text-transform: none; letter-spacing: 0; }
+  .qr__note { min-height: 1.1em; margin: 0; color: rgb(27 23 18 / .65); text-align: center; overflow-wrap: anywhere; text-transform: none; letter-spacing: 0; }
   .qr__sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 </style>
