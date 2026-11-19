@@ -1,0 +1,83 @@
+---
+// A link as a small city: every dark module of its QR code is a building, and from above the rooftops scan.
+// Standalone and light: none of the journey's renderer or assets load here.
+import { SITE } from '../lib/content';
+const title = `QR City — ${SITE.name}`;
+const description = 'Turn any link into a small city at night. Tap it, the lights come on, and the rooftops are a QR code your phone can scan.';
+const url = 'https://erengun.dev/qr/';
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#08080a" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={url} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={SITE.name} />
+    <meta property="og:url" content={url} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content="https://erengun.dev/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <main class="qr" data-qr data-state="city">
+      <header class="qr__bar">
+        <a class="qr__logo" href="/">{SITE.name}</a>
+        <span class="qr__tag">&gt; qr city</span>
+      </header>
+      <canvas class="qr__canvas" aria-label="A city whose rooftops form a QR code for the link below"></canvas>
+      <div class="qr__panel" data-qr-panel>
+        <button class="qr__toggle" type="button" data-qr-toggle aria-pressed="false">Tap the city to see the code</button>
+        <div class="qr__row">
+          <label class="qr__field">
+            <span class="qr__sr">Link to turn into a city</span>
+            <input data-qr-input type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="300" placeholder="https://erengun.dev" />
+          </label>
+          <button class="qr__share" type="button" data-qr-share aria-label="Share this city">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" /></svg>
+          </button>
+        </div>
+        <p class="qr__note" data-qr-note role="status" aria-live="polite"></p>
+      </div>
+    </main>
+    <script>
+      import '../scripts/qr-city.ts';
+    </script>
+  </body>
+</html>
+
+<style is:global>
+  :root { --ink: #08080a; --paper: #f2f0ea; --accent: #ff5a1f; --line: rgb(255 255 255 / .14); --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace; --sans: "Space Grotesk", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--ink); color: #fff; font-family: var(--sans); overflow: hidden; -webkit-font-smoothing: antialiased; }
+  .qr { position: fixed; inset: 0; background: radial-gradient(60% 45% at 50% 44%, rgb(70 84 140 / .16), transparent 70%); }
+  .qr__canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .qr[data-state="flat"] .qr__canvas { inset: auto; left: 50%; top: 42%; transform: translate(-50%, -50%); cursor: default; }
+  .qr__bar { position: absolute; z-index: 2; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: calc(env(safe-area-inset-top, 0px) + 1.1rem) 1.25rem 0; pointer-events: none; }
+  .qr__logo { pointer-events: auto; color: #fff; text-decoration: none; font-weight: 700; letter-spacing: -.01em; }
+  .qr__tag, .qr__toggle, .qr__note { font-family: var(--mono); font-size: .6875rem; text-transform: uppercase; letter-spacing: .08em; }
+  .qr__tag { color: rgb(255 255 255 / .55); }
+  .qr__panel { position: absolute; z-index: 2; left: 50%; bottom: 0; transform: translateX(-50%); width: min(100% - 2rem, 34rem); padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem); display: grid; gap: .7rem; justify-items: center; }
+  .qr__toggle { appearance: none; border: 1px solid var(--line); background: rgb(255 255 255 / .04); color: rgb(255 255 255 / .8); border-radius: 999px; padding: .55rem 1rem; cursor: pointer; transition: background-color .2s, color .2s; }
+  .qr__toggle:hover { background: rgb(255 255 255 / .1); color: #fff; }
+  .qr__row { display: flex; gap: .5rem; width: 100%; }
+  .qr__field { flex: 1; min-width: 0; }
+  .qr__field input { width: 100%; height: 3rem; border-radius: .8rem; border: 1px solid var(--line); background: rgb(255 255 255 / .05); color: #fff; font: 400 1rem var(--mono); padding: 0 1rem; outline: none; transition: border-color .2s; }
+  .qr__field input::placeholder { color: rgb(255 255 255 / .4); }
+  .qr__field input:focus-visible { border-color: var(--accent); }
+  .qr__share { flex: none; width: 3rem; height: 3rem; border-radius: .8rem; border: 0; background: var(--accent); color: #140700; display: grid; place-items: center; cursor: pointer; transition: filter .2s; }
+  .qr__share:hover { filter: brightness(1.1); }
+  .qr__toggle:focus-visible, .qr__share:focus-visible, .qr__logo:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .qr__note { min-height: 1.1em; margin: 0; color: rgb(255 255 255 / .6); text-align: center; overflow-wrap: anywhere; text-transform: none; letter-spacing: 0; }
+  .qr__sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>
