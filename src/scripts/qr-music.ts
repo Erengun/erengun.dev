@@ -3,7 +3,7 @@
  * copied here). On by default and very quiet. It never starts from the top: like a radio, the place in the recording
  * follows the clock, so everyone hears the same moment. Browsers only let sound start after a first tap or key.
  */
-const VIDEO = 'gr2OGRA96L8', LENGTH = 1635, VOLUME = 7;
+const VIDEO = 'gr2OGRA96L8', LENGTH = 1635, VOLUME = 3;
 const now = () => Math.floor(Date.now() / 1000) % LENGTH;
 
 const button = document.querySelector<HTMLButtonElement>('[data-qr-sound]');
