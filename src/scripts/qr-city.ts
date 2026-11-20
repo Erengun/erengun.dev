@@ -9,10 +9,10 @@
  */
 import qrcode from 'qrcode-generator';
 import {
-  AddEquation, BoxGeometry, BufferGeometry, Color, ConeGeometry, ConstantAlphaFactor, CustomBlending, CylinderGeometry,
-  DataTexture, DoubleSide, Float32BufferAttribute, Group, Matrix4, Mesh, MeshBasicMaterial, NearestFilter,
-  OneMinusConstantAlphaFactor, OrthographicCamera, PlaneGeometry, Quaternion, RGBAFormat, Scene, ShaderMaterial,
-  SphereGeometry, Vector3, WebGLRenderTarget, WebGLRenderer,
+  BoxGeometry, BufferGeometry, Color, ConeGeometry, CylinderGeometry,
+  DataTexture, DoubleSide, Float32BufferAttribute, LinearFilter, Group, Matrix4, Mesh, MeshBasicMaterial, NearestFilter,
+  NoBlending, OrthographicCamera, PlaneGeometry, Quaternion, RGBAFormat, Scene, ShaderMaterial,
+  SphereGeometry, Vector2, Vector3, Vector4, WebGLRenderTarget, WebGLRenderer,
 } from 'three';
 
 const DEFAULT = 'https://erengun.dev';
@@ -49,47 +49,57 @@ const hash = (a: number, b: number) => {
 };
 
 // ---------------------------------------------------------------------------------------------------------------
-// The map: central Istanbul, north up. Coastlines are simplified by hand from the real ones; landmarks sit at their
-// real coordinates (nudged apart a little where two would overlap at this scale).
+// The map: central Istanbul, north up, baked from real data by tools/qr-istanbul-map.py into /qr/istanbul.png
+// (coastline and parks © OpenStreetMap contributors, heights from SRTM). Landmarks sit at their OpenStreetMap
+// coordinates, nudged apart a little where two would overlap at this scale.
 const LON0 = 28.945, LON1 = 29.045, LAT0 = 40.987, LAT1 = 41.063;
+/** metres across the map, and how much taller than life the hills are drawn */
+const SPAN = 8400, RELIEF = 3.2;
 type LL = [number, number];
-const LAND: LL[][] = [
-  // Beyoğlu – Beşiktaş: north bank of the Golden Horn, then the European shore of the Bosphorus
-  [[28.93, 41.05], [28.95, 41.0368], [28.959, 41.03], [28.961, 41.0262], [28.9665, 41.025], [28.977, 41.0225], [28.984, 41.0265], [28.99, 41.031],
-    [28.9935, 41.0345], [29.001, 41.0385], [29.008, 41.0412], [29.017, 41.044], [29.027, 41.0475], [29.033, 41.056], [29.038, 41.064], [29.042, 41.08], [28.93, 41.08]],
-  // the historic peninsula: south bank of the Golden Horn, Sarayburnu, the Marmara shore
-  [[28.93, 41.042], [28.9475, 41.0325], [28.957, 41.025], [28.962, 41.021], [28.972, 41.0178], [28.979, 41.0172], [28.987, 41.0165], [28.988, 41.012],
-    [28.9845, 41.004], [28.976, 41.002], [28.964, 41.002], [28.953, 41.0035], [28.94, 41.0], [28.93, 40.999]],
-  // the Asian side: Beylerbeyi, Üsküdar, Salacak, Harem, Haydarpaşa, Kadıköy, Moda
-  [[29.07, 41.08], [29.056, 41.064], [29.05, 41.052], [29.041, 41.044], [29.03, 41.0365], [29.022, 41.032], [29.015, 41.0275], [29.009, 41.0205], [29.01, 41.012], [29.015, 40.999],
-    [29.023, 40.993], [29.025, 40.98], [29.03, 40.97], [29.06, 40.97]],
-];
-/** hills: lon, lat, height (modules at the smallest code), radius in degrees */
-const HILLS: [number, number, number, number][] = [
-  [28.9639, 41.0162, 1.2, 0.008], [28.9795, 41.0085, 0.85, 0.008], [28.952, 41.014, 1.2, 0.012],
-  [28.976, 41.033, 1.5, 0.011], [28.986, 41.038, 1.7, 0.012], [29.01, 41.053, 1.6, 0.013], [28.955, 41.045, 1.3, 0.014],
-  [29.036, 41.026, 2.0, 0.016], [29.03, 40.992, 0.7, 0.012],
-];
-/** parks: lon, lat, radius in degrees */
-const PARKS: [number, number, number][] = [[28.9812, 41.0138, 0.0028], [29.012, 41.0495, 0.005], [28.995, 41.0432, 0.0035], [29.026, 41.0312, 0.0035], [28.957, 41.0085, 0.002]];
-const FERRIES: [LL, LL, number][] = [
-  [[28.9748, 41.0196], [29.0118, 41.0262], 0.55], [[28.9795, 41.0212], [29.0155, 40.9935], 0.5], [[28.9958, 41.0332], [29.0122, 41.0288], 0.4],
-  [[28.9705, 41.0203], [28.9585, 41.0272], 0.3], [[29.02, 41.04], [29.0, 41.005], 0.7],
-];
-
-const inPoly = (lon: number, lat: number, poly: LL[]) => {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i], [xj, yj] = poly[j];
-    if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+type MapData = { px: Uint8Array; size: number };
+/** the map under a point of the city: distance to the shore in modules (+ on land), park 0…1, height in metres */
+function mapAt(map: MapData, x: number, z: number, n: number): [number, number, number] {
+  const S = map.size, u = Math.max(0, Math.min(S - 1.001, ((x + n / 2) / n) * S - 0.5)), v = Math.max(0, Math.min(S - 1.001, ((z + n / 2) / n) * S - 0.5));
+  const i = Math.floor(u), j = Math.floor(v), fu = u - i, fv = v - j, o = (j * S + i) * 4, d = map.px;
+  const lerp = (ch: number) => (d[o + ch] * (1 - fu) + d[o + 4 + ch] * fu) * (1 - fv) + (d[o + S * 4 + ch] * (1 - fu) + d[o + S * 4 + 4 + ch] * fu) * fv;
+  return [((lerp(0) - 128) / 2.5) * (n / S), lerp(1) / 255, lerp(2) / 2];
+}
+async function loadMap(): Promise<MapData> {
+  try {
+    const img = new Image();
+    img.src = '/qr/istanbul.png';
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = c.height = img.naturalWidth;
+    const ctx = c.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(img, 0, 0);
+    return { px: new Uint8Array(ctx.getImageData(0, 0, c.width, c.height).data.buffer), size: c.width };
+  } catch {
+    return { px: new Uint8Array(4 * 4 * 4).fill(255).map((v, i) => (i % 4 === 1 || i % 4 === 2 ? 0 : v)), size: 4 }; // no map: all land, flat
   }
-  return inside;
-};
+}
+/** ferry routes, pier to pier (kept off the land when the city is built) */
+const FERRIES: [LL[], number][] = [
+  [[[28.9765, 41.0185], [28.99, 41.0215], [29.0125, 41.0265]], 0.55],
+  [[[28.9785, 41.0212], [28.993, 41.016], [29.006, 41.003], [29.016, 40.9925]], 0.5],
+  [[[28.9945, 41.0325], [29.0125, 41.0278]], 0.4],
+  [[[28.9712, 41.0195], [28.962, 41.0235], [28.9545, 41.0295]], 0.3],
+  [[[29.0, 41.03], [29.02, 41.042], [29.038, 41.056]], 0.6],
+];
 
 const ROOFS = ['#c1502e', '#b5482c', '#cf6034', '#a84229', '#c9582f', '#bb4a2a'];
 const WALLS = ['#f2e3c6', '#e9b872', '#d98268', '#9cc0c4', '#efd9a7', '#c3d1a4', '#e6c2b0', '#f7efe0', '#d6a5a0', '#b7c7d9'];
-/** linear luminance of everything over a dark module in the straight-down view */
-const DARK = 0.055;
+/**
+ * the brightness of everything over a dark module in the straight-down view, measured as a scanner measures it (on
+ * the encoded values, 0…1): one value for every hue, or a paler dark module among darker ones reads as a light one
+ */
+const DARK = 0.27;
+function darkOf(hex: string, out = new Color()): Color {
+  out.set(hex).convertLinearToSRGB();
+  const s = DARK / Math.max(0.04, 0.2126 * out.r + 0.7152 * out.g + 0.0722 * out.b);
+  out.setRGB(Math.min(1, out.r * s), Math.min(1, out.g * s), Math.min(1, out.b * s));
+  return out.convertSRGBToLinear();
+}
 const SLATE = '#4f5b68', LEAD = '#6c7b88', STONE = '#dccfb4', ROCK = '#6a6156', GOLD = '#d2a646', GREEN = '#4f8a3f', CYPRESS = '#2f5c3a';
 const UP = new Vector3(0, 1, 0);
 
@@ -100,10 +110,12 @@ class Parts {
   private c = new Color();
   private f = new Color();
   private d = 0;
+  private y0 = 0;
   /** where the next pieces go: position, turn about the vertical, scale, and the delay of their rise */
   at(x: number, y: number, z: number, rot = 0, s = 1, d = 0) {
     this.base.compose(new Vector3(x, y, z), new Quaternion().setFromAxisAngle(UP, rot), new Vector3(s, s, s));
     this.d = d;
+    this.y0 = y;
     return this;
   }
   /**
@@ -114,10 +126,7 @@ class Parts {
     const g = geo.clone();
     g.applyMatrix4(this.m.makeScale(sx, sy, sz).setPosition(x, y, z).premultiply(this.base));
     this.c.set(color).multiplyScalar(tone);
-    // the tint it takes over a dark module in the code: its own hue at one lightness (scanners threshold locally, and
-    // a paler roof among darker ones would read as a light module)
-    this.f.set(color);
-    this.f.multiplyScalar(DARK / Math.max(0.02, 0.2126 * this.f.r + 0.7152 * this.f.g + 0.0722 * this.f.b));
+    darkOf(color, this.f); // the tint it takes over a dark module in the code: its own hue, at the one lightness
     const p = g.getAttribute('position'), nn = g.getAttribute('normal'), u = g.getAttribute('uv');
     for (let i = 0; i < p.count; i++) {
       this.pos.push(p.getX(i), p.getY(i), p.getZ(i));
@@ -125,7 +134,7 @@ class Parts {
       this.uv.push(u.getX(i), u.getY(i));
       this.col.push(this.c.r, this.c.g, this.c.b);
       this.flat.push(this.f.r, this.f.g, this.f.b);
-      this.misc.push(kind, this.d);
+      this.misc.push(kind, this.d, this.y0);
     }
     g.dispose();
   }
@@ -136,7 +145,7 @@ class Parts {
     g.setAttribute('uv', new Float32BufferAttribute(this.uv, 2));
     g.setAttribute('aCol', new Float32BufferAttribute(this.col, 3));
     g.setAttribute('aFlat', new Float32BufferAttribute(this.flat, 3));
-    g.setAttribute('aMisc', new Float32BufferAttribute(this.misc, 2));
+    g.setAttribute('aMisc', new Float32BufferAttribute(this.misc, 3));
     return g;
   }
 }
@@ -275,117 +284,125 @@ function bridge(P: Parts, S: Shapes, L: number, tall: boolean) {
   }
 }
 
-type Mark = { name: string; ll: LL; r: number; top: number; make: (P: Parts, S: Shapes) => void; rot?: number; x?: number; z?: number; y?: number };
+function tower(P: Parts, S: Shapes) { // Beyazıt fire tower
+  P.add(S.tube, 0, 0, 0, 0.3, 1.9, 0.3, '#efe6d2', 11);
+  P.add(S.tube, 0, 1.9, 0, 0.5, 0.08, 0.5, STONE, 11);
+  P.add(S.tube, 0, 1.98, 0, 0.36, 0.4, 0.36, '#efe6d2', 12);
+  P.add(S.cone, 0, 2.38, 0, 0.44, 0.5, 0.44, LEAD);
+}
+function barracks(P: Parts, S: Shapes) { // Selimiye: a great square with a tower on each corner
+  const W = '#ead9b0', T = '#b5482c';
+  for (const [x, z, sx, sz] of [[0, -0.75, 1.7, 0.26], [0, 0.75, 1.7, 0.26], [-0.75, 0, 0.26, 1.7], [0.75, 0, 0.26, 1.7]]) {
+    P.add(S.box, x, 0, z, sx, 0.4, sz, W, 12);
+    P.add(sx > sz ? S.gableX : S.gableZ, x, 0.4, z, sx + 0.04, 0.14, sz + 0.04, T);
+  }
+  for (const dx of [-1, 1]) for (const dz of [-1, 1]) {
+    P.add(S.box, dx * 0.78, 0, dz * 0.78, 0.34, 0.85, 0.34, W, 10);
+    P.add(S.roof, dx * 0.78, 0.85, dz * 0.78, 0.4, 0.4, 0.4, LEAD);
+  }
+}
+
+/** the direction of prayer from Istanbul (151° from north): mosques are built along it */
+const QIBLA = -2.636;
+type Mark = {
+  name: string; ll: LL; r: number; top: number; make: (P: Parts, S: Shapes) => void;
+  rot?: number; s?: number; sea?: boolean; shore?: boolean; x?: number; z?: number; y?: number;
+};
 const MARKS: Mark[] = [
-  { name: 'Galata Kulesi', ll: [28.9741, 41.0256], r: 0.7, top: 3.7, make: galata },
-  { name: 'Ayasofya', ll: [28.98, 41.0086], r: 1.05, top: 2.9, make: (P, S) => mosque(P, S, { wall: '#d58e75', dome: 1.12, minarets: 4, court: false, buttress: true }), rot: 0.6 },
-  { name: 'Sultanahmet', ll: [28.9768, 41.0054], r: 1.25, top: 2.9, make: (P, S) => mosque(P, S, { wall: '#d9d4c8', dome: 1.0, minarets: 6, court: true }), rot: -2.2 },
-  { name: 'Süleymaniye', ll: [28.9639, 41.0162], r: 1.2, top: 2.9, make: (P, S) => mosque(P, S, { wall: '#d8d0bd', dome: 1.08, minarets: 4, court: true }), rot: 2.4 },
-  { name: 'Topkapı Sarayı', ll: [28.984, 41.0128], r: 1.0, top: 1.9, make: topkapi, rot: 0.5 },
-  { name: 'Kız Kulesi', ll: [29.0041, 41.0211], r: 0.6, top: 2.0, make: maiden },
-  { name: 'Dolmabahçe', ll: [28.9992, 41.04], r: 1.2, top: 1.3, make: dolmabahce, rot: 0.55 + Math.PI },
-  { name: 'Haydarpaşa', ll: [29.0205, 40.9978], r: 0.95, top: 1.5, make: haydarpasa, rot: -0.9 },
-  { name: 'Ortaköy Camii', ll: [29.0262, 41.0462], r: 0.7, top: 2.3, make: (P, S) => mosque(P, S, { wall: '#f1e9da', dome: 0.9, minarets: 2, court: false }), rot: 2.2 },
+  { name: 'Galata Kulesi', ll: [28.9742, 41.0256], r: 0.62, top: 3.7, make: galata },
+  { name: 'Ayasofya', ll: [28.98, 41.0085], r: 1.0, top: 2.9, make: (P, S) => mosque(P, S, { wall: '#d58e75', dome: 1.12, minarets: 4, court: false, buttress: true }), rot: QIBLA + 0.5 },
+  { name: 'Sultanahmet', ll: [28.9766, 41.0054], r: 1.2, top: 2.9, make: (P, S) => mosque(P, S, { wall: '#d9d4c8', dome: 1.0, minarets: 6, court: true }), rot: QIBLA },
+  { name: 'Kız Kulesi', ll: [29.0041, 41.0211], r: 0.6, top: 2.0, make: maiden, sea: true },
+  { name: 'Süleymaniye', ll: [28.9638, 41.0162], r: 1.15, top: 2.9, make: (P, S) => mosque(P, S, { wall: '#d8d0bd', dome: 1.08, minarets: 4, court: true }), rot: QIBLA },
+  { name: 'Topkapı Sarayı', ll: [28.984, 41.0128], r: 0.95, top: 1.9, make: topkapi, rot: 0.5 },
+  { name: 'Dolmabahçe', ll: [28.9996, 41.039], r: 1.15, top: 1.3, make: dolmabahce, shore: true },
+  { name: 'Haydarpaşa', ll: [29.0193, 40.9965], r: 0.9, top: 1.5, make: haydarpasa, shore: true },
+  { name: 'Ortaköy Camii', ll: [29.0268, 41.0473], r: 0.62, top: 2.3, make: (P, S) => mosque(P, S, { wall: '#f1e9da', dome: 0.9, minarets: 2, court: false }), rot: QIBLA, s: 0.8 },
+  { name: 'Yeni Cami', ll: [28.9721, 41.0169], r: 0.7, top: 2.3, make: (P, S) => mosque(P, S, { wall: '#d6d0c2', dome: 0.95, minarets: 2, court: false }), rot: QIBLA, s: 0.85 },
+  { name: 'Selimiye Kışlası', ll: [29.0165, 41.0074], r: 1.0, top: 1.4, make: barracks, rot: 0.35 },
+  { name: 'Fatih Camii', ll: [28.9498, 41.0197], r: 0.9, top: 2.6, make: (P, S) => mosque(P, S, { wall: '#d8d0bd', dome: 1.0, minarets: 2, court: true }), rot: QIBLA, s: 0.9 },
+  { name: 'Beylerbeyi Sarayı', ll: [29.04, 41.0427], r: 0.85, top: 1.1, make: dolmabahce, shore: true, s: 0.7 },
+  { name: 'Çırağan Sarayı', ll: [29.0153, 41.0435], r: 0.85, top: 1.1, make: dolmabahce, shore: true, s: 0.7 },
+  { name: 'Beyazıt Kulesi', ll: [28.9649, 41.0128], r: 0.32, top: 3.0, make: tower },
+  { name: 'Mihrimah Sultan', ll: [29.016, 41.0268], r: 0.6, top: 2.2, make: (P, S) => mosque(P, S, { wall: '#d8d0bd', dome: 0.95, minarets: 2, court: false }), rot: QIBLA, s: 0.75 },
 ];
+/** bridges, shore to shore (from the OpenStreetMap ways) */
 const BRIDGES: { name: string; a: LL; b: LL; tall: boolean }[] = [
-  { name: 'Galata Köprüsü', a: [28.9722, 41.0176], b: [28.9748, 41.0228], tall: false },
-  { name: 'Atatürk Köprüsü', a: [28.9628, 41.0206], b: [28.9652, 41.0256], tall: false },
-  { name: 'Boğaziçi Köprüsü', a: [29.0262, 41.0478], b: [29.0418, 41.0428], tall: true },
+  { name: 'Galata Köprüsü', a: [28.972, 41.0177], b: [28.9743, 41.0223], tall: false },
+  { name: 'Atatürk Köprüsü', a: [28.9631, 41.0214], b: [28.9671, 41.027], tall: false },
+  { name: 'Boğaziçi Köprüsü', a: [29.0273, 41.0478], b: [29.0415, 41.0432], tall: true },
 ];
 
 type City = {
-  geo: BufferGeometry; land: BufferGeometry; tex: DataTexture; tallest: number; k: number;
+  geo: BufferGeometry; terrain: BufferGeometry; skirt: BufferGeometry; tex: DataTexture; tallest: number; k: number;
   chimneys: number[][]; labels: { name: string; x: number; y: number; z: number }[];
-  isLand: (r: number, c: number) => boolean; height: (r: number, c: number) => number;
+  open: (r: number, c: number) => boolean; height: (x: number, z: number) => number; sd: (x: number, z: number) => number;
   world: (ll: LL) => [number, number];
 };
 
-function buildCity(g: Grid, S: Shapes): City {
-  const n = g.n, P = new Parts(), G = new Parts();
+function buildCity(g: Grid, S: Shapes, map: MapData): City {
+  const n = g.n, P = new Parts();
   const k = 1.08 * Math.min(1.5, Math.sqrt(n / 25)); // landmarks are drawn large, as on a tourist map, and grow a little with the code
   const X = (c: number) => c - n / 2 + 0.5, Z = (r: number) => r - n / 2 + 0.5;
   const world = ([lon, lat]: LL): [number, number] => [((lon - LON0) / (LON1 - LON0)) * n - n / 2, ((LAT1 - lat) / (LAT1 - LAT0)) * n - n / 2];
-  const lonlat = (x: number, z: number): LL => [LON0 + ((x + n / 2) / n) * (LON1 - LON0), LAT1 - ((z + n / 2) / n) * (LAT1 - LAT0)];
-  const cellOf = (x: number, z: number): [number, number] => [Math.max(0, Math.min(n - 1, Math.floor(z + n / 2))), Math.max(0, Math.min(n - 1, Math.floor(x + n / 2)))];
+  const sd = (x: number, z: number) => mapAt(map, x, z, n)[0];
+  const ramp = (a: number, b: number, v: number) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const height = (x: number, z: number) => { const [d, , el] = mapAt(map, x, z, n); return ramp(0, 0.35, d) * (0.1 + (el * n / SPAN) * RELIEF); };
+  const inside = (r: number, c: number) => r >= 0 && c >= 0 && r < n && c < n;
 
-  // ---- land and sea, and how far each module is from the shore
-  const land = new Uint8Array(n * n), dist = new Float32Array(n * n).fill(99);
-  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
-    const [lon, lat] = lonlat(X(c), Z(r));
-    land[r * n + c] = LAND.some((p) => inPoly(lon, lat, p)) ? 1 : 0;
-  }
-  const isLand = (r: number, c: number) => r >= 0 && c >= 0 && r < n && c < n && land[r * n + c] === 1;
-  for (let pass = 0; pass < 2; pass++) { // two sweeps of a chamfer distance to the other kind of cell
-    const order = pass ? [...Array(n * n).keys()].reverse() : [...Array(n * n).keys()];
-    for (const i of order) {
-      const r = (i / n) | 0, c = i % n;
-      let d = 99;
-      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-        const rr = r + dr, cc = c + dc;
-        if ((!dr && !dc) || rr < 0 || cc < 0 || rr >= n || cc >= n) continue;
-        const step = dr && dc ? 1.4 : 1;
-        d = Math.min(d, land[rr * n + cc] !== land[i] ? step : dist[rr * n + cc] + step);
-      }
-      dist[i] = Math.min(dist[i], d);
+  // ---- landmarks: real positions; those meant to stand on land are moved off the water, and any two that would
+  // stand in each other are pushed apart
+  const marks = MARKS.map((m) => { const [x, z] = world(m.ll); return { ...m, x, z, s: (m.s ?? 1) * k }; });
+  const ashore = (m: { x: number; z: number }, want: number) => {
+    for (let i = 0; i < 40 && sd(m.x, m.z) < want; i++) {
+      const gx = sd(m.x + 0.1, m.z) - sd(m.x - 0.1, m.z), gz = sd(m.x, m.z + 0.1) - sd(m.x, m.z - 0.1), l = Math.hypot(gx, gz) || 1;
+      m.x += (gx / l) * 0.08; m.z += (gz / l) * 0.08;
     }
-  }
-
-  // ---- landmarks: real positions, pushed apart where two would stand in each other
-  const marks = MARKS.map((m) => { const [x, z] = world(m.ll); return { ...m, x, z }; });
+  };
   for (let it = 0; it < 12; it++) for (let i = 0; i < marks.length; i++) for (let j = i + 1; j < marks.length; j++) {
-    const a = marks[i], b = marks[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1e-3, want = (a.r + b.r) * k * 0.92;
+    const a = marks[i], b = marks[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1e-3, want = (a.r * a.s + b.r * b.s) * 0.9;
     if (d < want) { const push = (want - d) / 2 / d; a.x -= dx * push; a.z -= dz * push; b.x += dx * push; b.z += dz * push; }
   }
-
-  // ---- hills, in terraces a module wide; flat under each landmark
-  const STEP = 0.16, BASE = 0.14;
-  const h = new Float32Array(n * n);
-  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
-    if (!land[r * n + c]) continue;
-    const [lon, lat] = lonlat(X(c), Z(r));
-    let e = 0;
-    for (const [hl, ha, hh, hr] of HILLS) e += hh * Math.exp(-(((lon - hl) * 0.76) ** 2 + (lat - ha) ** 2) / (hr * hr));
-    e = Math.min(e * k, (dist[r * n + c] - 1) * 0.5);
-    h[r * n + c] = BASE + Math.max(0, Math.round(e / STEP)) * STEP;
-  }
   for (const m of marks) {
-    const [r0, c0] = cellOf(m.x, m.z);
-    m.y = land[r0 * n + c0] ? h[r0 * n + c0] : 0;
-    const R = Math.ceil(m.r * k);
-    for (let r = r0 - R; r <= r0 + R; r++) for (let c = c0 - R; c <= c0 + R; c++) {
-      if (isLand(r, c) && land[r0 * n + c0] && Math.hypot(X(c) - m.x, Z(r) - m.z) < m.r * k + 0.4) h[r * n + c] = m.y;
+    // inside the map, with room for its own footprint
+    const lim = n / 2 - m.r * m.s - 0.2;
+    m.x = Math.max(-lim, Math.min(lim, m.x)); m.z = Math.max(-lim, Math.min(lim, m.z));
+    if (!m.sea) ashore(m, m.shore ? 0.3 : 0.45);
+    m.y = m.sea ? 0.02 : height(m.x, m.z);
+    if (m.shore) { // palaces and stations face the water
+      const gx = sd(m.x + 0.3, m.z) - sd(m.x - 0.3, m.z), gz = sd(m.x, m.z + 0.3) - sd(m.x, m.z - 0.3);
+      m.rot = Math.atan2(-gx, -gz);
     }
   }
-  const height = (r: number, c: number) => (isLand(r, c) ? h[r * n + c] : 0);
-  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (land[r * n + c]) { G.at(X(c), 0, Z(r)); G.add(S.box, 0, -0.3, 0, 1, h[r * n + c] + 0.3, 1, STONE); }
+  const taken = (x: number, z: number) => marks.some((m) => Math.hypot(x - m.x, z - m.z) < m.r * m.s + 0.15);
 
-  const taken = (x: number, z: number) => marks.some((m) => Math.hypot(x - m.x, z - m.z) < m.r * k);
-  const inPark = (x: number, z: number) => { const [lon, lat] = lonlat(x, z); return PARKS.some(([pl, pa, pr]) => Math.hypot((lon - pl) * 0.76, lat - pa) < pr); };
   const pick = <T,>(list: T[], v: number) => list[Math.floor(v * list.length) % list.length];
   const tree = (x: number, z: number, v: number, s = 1) => {
     if (v < 0.4) P.add(S.cone, x, 0, z, 0.24 * s, (0.8 + v) * s, 0.24 * s, CYPRESS, 1, 0.9 + v * 0.4);
     else { P.add(S.tube, x, 0, z, 0.06 * s, 0.22 * s, 0.06 * s, '#6b4a33'); P.add(S.ball, x, 0.16 * s, z, 0.42 * s, 0.46 * s, 0.42 * s, v > 0.75 ? '#6aa04a' : GREEN, 1, 0.85 + v * 0.3); }
   };
   const chimneys: number[][] = [];
+  // per module, for the shaders and the traffic: 1 a street, 2 a building
+  const use = new Uint8Array(n * n);
 
   for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
-    if (!land[r * n + c]) continue;
-    const x = X(c), z = Z(r), y = h[r * n + c];
-    if (taken(x, z)) continue;
+    const x = X(c), z = Z(r), [d0, park] = mapAt(map, x, z, n);
+    if (d0 < 0.3 || taken(x, z)) continue; // sea, the shore itself, or a landmark's ground
+    const y = height(x, z);
     const h1 = hash(r, c), h2 = hash(c + 3, r + 7), h3 = hash(r + 13, c + 4), tone = 0.92 + 0.16 * h2;
     const d = Math.hypot(r - n / 2, c - n / 2) / n * 1.2 + hash(r, c + 11) * 0.25;
-    const park = inPark(x, z);
     P.at(x, y, z, 0, 1, d);
-    if (!g.dark(r, c)) { // a street or a square: trees along some of them, groves in the parks
-      if (park) { P.add(S.box, 0, 0, 0, 1, 0.03, 1, '#86b25c'); for (let i = 0; i < 3; i++) tree(hash(r + i, c) * 0.7 - 0.35, hash(r, c + i) * 0.7 - 0.35, hash(r + i * 3, c + 5)); }
-      else if (h1 < 0.22) { tree(0.3, 0.3, h2, 0.8); if (h3 < 0.5) tree(-0.3, 0.32, h3 * 2, 0.75); }
+    if (park > 0.5) { // a real park: a grove, denser on the dark modules
+      for (let i = 0; i < (g.dark(r, c) ? 5 : 3); i++) tree(hash(r + i, c + 2) * 0.76 - 0.38, hash(r + 2, c + i) * 0.76 - 0.38, hash(r + i * 5, c + 1), 1.05);
       continue;
     }
-    if (park || h1 < 0.07) { // a park
-      P.add(S.box, 0, 0, 0, 1, 0.06, 1, '#6f9a4c', 1, tone);
-      for (let i = 0; i < 4; i++) tree(hash(r + i, c + 2) * 0.66 - 0.33, hash(r + 2, c + i) * 0.66 - 0.33, hash(r + i * 5, c + 1), 1.1);
+    if (!g.dark(r, c)) { // a street or a square, some of them lined with trees
+      use[r * n + c] = 1;
+      if (h1 < 0.22) { tree(0.3, 0.3, h2, 0.8); if (h3 < 0.5) tree(-0.3, 0.32, h3 * 2, 0.75); }
       continue;
     }
+    use[r * n + c] = 2;
+    P.add(S.box, 0, -0.6, 0, 0.9, 0.6, 0.9, '#cdbf9f'); // footing, down into the slope
     if (h1 > 0.955) { // a neighbourhood mosque: one dome, one minaret
       P.add(S.box, 0, 0, 0, 0.8, 0.42, 0.8, '#e9e1cf', 12);
       P.add(S.box, 0, 0.42, 0, 1, 0.05, 1, LEAD, 1, tone);
@@ -420,29 +437,47 @@ function buildCity(g: Grid, S: Shapes): City {
 
   const labels: City['labels'] = [];
   for (const m of marks) {
-    P.at(m.x, m.y!, m.z, m.rot ?? 0, k, 0.55);
+    P.at(m.x, m.y!, m.z, m.rot ?? 0, m.s, 0.55);
+    if (!m.sea) P.add(S.tube, 0, -0.9, 0, m.r * 2, 0.92, m.r * 2, '#cdbf9f'); // a terrace to stand on
     m.make(P, S);
-    labels.push({ name: m.name, x: m.x, y: m.y! + m.top * k, z: m.z });
+    labels.push({ name: m.name, x: m.x, y: m.y! + m.top * m.s, z: m.z });
   }
   for (const b of BRIDGES) {
     const [ax, az] = world(b.a), [bx, bz] = world(b.b), L = Math.hypot(bx - ax, bz - az);
     P.at((ax + bx) / 2, 0.02, (az + bz) / 2, Math.atan2(-(bz - az), bx - ax), 1, 0.7);
-    bridge(P, S, L + 0.5, b.tall);
+    bridge(P, S, L + 0.4, b.tall);
     if (b.tall) labels.push({ name: b.name, x: (ax + bx) / 2, y: 2.4, z: (az + bz) / 2 });
   }
 
-  // ---- what the shaders need to know about each module: dark?, sea?, distance to the shore
+  // ---- the ground: one sheet following the real terrain, and a skirt around its edge
+  const SEG = Math.min(180, n * 5);
+  const terrain = new PlaneGeometry(n, n, SEG, SEG).rotateX(-Math.PI / 2);
+  const tp = terrain.getAttribute('position');
+  for (let i = 0; i < tp.count; i++) tp.setY(i, height(tp.getX(i), tp.getZ(i)));
+  terrain.computeVertexNormals();
+  const sp: number[] = [], sn: number[] = [];
+  for (const [ox, oz, dx, dz, nx, nz] of [[-1, -1, 1, 0, 0, -1], [-1, 1, 1, 0, 0, 1], [-1, -1, 0, 1, -1, 0], [1, -1, 0, 1, 1, 0]]) for (let i = 0; i < SEG; i++) {
+    const p = (j: number) => [ox * n / 2 + dx * n * j / SEG, oz * n / 2 + dz * n * j / SEG];
+    const [x0, z0] = p(i), [x1, z1] = p(i + 1), y0 = height(x0, z0), y1 = height(x1, z1), B = -0.7;
+    sp.push(x0, y0, z0, x1, y1, z1, x1, B, z1, x0, y0, z0, x1, B, z1, x0, B, z0);
+    for (let q = 0; q < 6; q++) sn.push(nx, 0, nz);
+  }
+  const skirt = new BufferGeometry();
+  skirt.setAttribute('position', new Float32BufferAttribute(sp, 3));
+  skirt.setAttribute('normal', new Float32BufferAttribute(sn, 3));
+
+  // ---- what the shaders need to know about each module: dark?, built on?
   const data = new Uint8Array(n * n * 4);
   for (let i = 0; i < n * n; i++) {
     data[i * 4] = g.dark((i / n) | 0, i % n) ? 255 : 0;
-    data[i * 4 + 1] = land[i] ? 0 : 255;
-    data[i * 4 + 2] = Math.min(255, dist[i] * 32);
+    data[i * 4 + 1] = use[i] === 2 ? 255 : 0;
     data[i * 4 + 3] = 255;
   }
   const tex = new DataTexture(data, n, n, RGBAFormat);
   tex.magFilter = tex.minFilter = NearestFilter;
   tex.needsUpdate = true;
-  return { geo: P.geometry(), land: G.geometry(), tex, tallest: 3.9 * k, k, chimneys, labels, isLand, height, world };
+  const open = (r: number, c: number) => inside(r, c) && use[r * n + c] === 1;
+  return { geo: P.geometry(), terrain, skirt, tex, tallest: 3.9 * k + 0.6, k, chimneys, labels, open, height, sd, world };
 }
 
 /** the things that move: lengthwise along x, origin at the middle of the keel / wheels */
@@ -474,10 +509,9 @@ function movers(S: Shapes) {
   return { ferry, boat, taxi, tram };
 }
 
-/** straight stretches of street (light modules on land), longest first */
-function streets(g: Grid, isLand: (r: number, c: number) => boolean): { r: number; c: number; len: number; across: boolean }[] {
-  const n = g.n, out: { r: number; c: number; len: number; across: boolean }[] = [];
-  const open = (r: number, c: number) => isLand(r, c) && !g.dark(r, c);
+/** straight stretches of street, longest first */
+function streets(n: number, open: (r: number, c: number) => boolean): { r: number; c: number; len: number; across: boolean }[] {
+  const out: { r: number; c: number; len: number; across: boolean }[] = [];
   for (const across of [true, false]) for (let i = 0; i < n; i++) {
     let start = -1;
     for (let j = 0; j <= n; j++) {
@@ -493,16 +527,18 @@ function streets(g: Grid, isLand: (r: number, c: number) => boolean): { r: numbe
 }
 
 const COMMON = /* glsl */ `
-uniform sampler2D uGrid;
+uniform sampler2D uGrid, uMap;
 uniform float uFlat, uNight, uTime, uN;
 uniform vec3 uSun, uStone, uSeaPale;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-/** the module under a point of the city (module coordinates): r dark, g sea, b distance to the shore */
+/** the module under a point of the city (module coordinates): r dark, g built on */
 vec4 cellAt(vec2 m) { return texture2D(uGrid, (floor(m) + 0.5) / uN); }
+/** the real map there: x distance to the shore in modules (+ on land), y park */
+vec2 mapAt(vec2 m) { vec3 t = texture2D(uMap, m / uN).rgb; return vec2((t.r * 255.0 - 128.0) / 2.5 * uN / 256.0, t.g); }
 `;
 const VERT = /* glsl */ `
 attribute vec3 aCol, aFlat;
-attribute vec2 aMisc; // kind, rise delay
+attribute vec3 aMisc; // kind, rise delay, the height it stands at
 uniform float uGrow, uFlat, uNight;
 uniform mat4 uInv; // world → city
 varying vec3 vN, vCol, vFlat; varying vec2 vUv, vM; varying float vY, vKind;
@@ -510,8 +546,8 @@ void main() {
   float g = clamp(uGrow * 2.0 - aMisc.y, 0.0, 1.0);
   g = 1.0 - pow(1.0 - g, 3.0);
   vec3 p = position;
-  vY = p.y;
-  p.y *= g;
+  vY = p.y - aMisc.z;
+  p.y = aMisc.z + (p.y - aMisc.z) * g;
   vN = normal; vUv = uv; vCol = aCol; vFlat = aFlat; vKind = aMisc.x;
   vec4 w = modelMatrix * vec4(p, 1.0);
   vM = (uInv * w).xz;
@@ -533,8 +569,8 @@ void main() {
     float cols = k > 1.5 ? 6.0 : 2.0;
     vec2 g = vec2(vUv.x * cols, vY * 3.4);
     vec2 f = fract(g), id = floor(g);
-    win = step(0.26, f.x) * step(f.x, 0.74) * step(0.3, f.y) * step(f.y, 0.78) * step(0.5, id.y + step(1.5, k));
-    float door = step(k, 0.5) * step(vY, 0.25) * step(abs(vUv.x - 0.5), 0.1);
+    win = step(0.26, f.x) * step(f.x, 0.74) * step(0.3, f.y) * step(f.y, 0.78) * step(0.5, id.y + step(1.5, k)) * step(0.0, vY);
+    float door = step(k, 0.5) * step(vY, 0.25) * step(0.0, vY) * step(abs(vUv.x - 0.5), 0.1);
     vec2 seed = id + vec2(vCol.r * 37.0 + n.x * 3.0, vCol.g * 91.0 + n.z * 5.0);
     // lights go on and off through the evening, each window in its own time
     lit = step(0.5, hash(seed + floor(uTime * 0.12 + hash(seed + 3.0) * 9.0)));
@@ -552,8 +588,9 @@ void main() {
   dark = mix(dark, uLit * tw, win * lit);
   if (abs(k - 5.0) < 0.1) dark = uLit * 1.25;
   // the code: whatever is here takes the lightness of the module under it
-  vec4 cell = cellAt(vM + uN * 0.5);
-  vec3 code = cell.r > 0.5 ? vFlat : (cell.g > 0.5 ? uSeaPale : uStone);
+  vec2 m = vM + uN * 0.5;
+  vec3 code = cellAt(m).r > 0.5 ? vFlat : mix(uSeaPale, uStone, smoothstep(-0.04, 0.04, mapAt(m).x));
+  if (m.x < 0.0 || m.y < 0.0 || m.x > uN || m.y > uN) code = uStone; // nothing may darken the quiet zone around the code
   gl_FragColor = vec4(mix(mix(day, dark, nf), code, uFlat), 1.0);
   #include <colorspace_fragment>
 }`;
@@ -561,55 +598,61 @@ const GROUND_VERT = /* glsl */ `
 varying vec3 vN; varying vec3 vP;
 void main() { vN = normal; vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 const GROUND_FRAG = COMMON + /* glsl */ `
-uniform vec3 uSide, uSea, uSeaDark, uRoofDark;
+uniform vec3 uSide, uSea, uSeaDark, uRoofDark, uGrassDark;
 varying vec3 vN; varying vec3 vP;
 void main() {
   float nf = uNight * (1.0 - uFlat);
   vec2 m = vP.xz + uN * 0.5;          // module coordinates: x column, y row
   vec2 cell = floor(m), f = fract(m) - 0.5;
   vec4 here = cellAt(m);
+  vec2 mp = mapAt(m);
+  float sd = mp.x, land = smoothstep(-0.04, 0.04, sd), park = smoothstep(0.35, 0.65, mp.y);
   vec3 col;
-  if (vN.y > 0.5 && vP.y > 0.05) {
-    // ---- land: paving, the shadows of the houses, street lamps at night
-    col = uStone * (0.95 + 0.07 * hash(cell));
+  if (vN.y > 0.2) {
+    // ---- land: paving (sand by the water, grass in the parks), the lie of the hills, house shadows, lamps at night
+    vec3 pave = uStone * (0.95 + 0.07 * hash(cell));
     vec2 a = abs(f), a4 = abs(fract(m * 4.0 + hash(cell) * 0.5) - 0.5);
-    col *= 1.0 - 0.07 * smoothstep(0.44, 0.5, max(a.x, a.y)) - 0.03 * smoothstep(0.4, 0.5, max(a4.x, a4.y));
+    pave *= 1.0 - 0.07 * smoothstep(0.44, 0.5, max(a.x, a.y)) - 0.03 * smoothstep(0.4, 0.5, max(a4.x, a4.y));
+    pave = mix(pave, vec3(0.9, 0.82, 0.62), smoothstep(0.13, 0.0, sd) * 0.8);
+    vec3 grass = vec3(0.4, 0.6, 0.27) * (0.88 + 0.24 * hash(floor(m * 5.0)));
+    vec3 ground = mix(pave, grass, park);
+    float lam = max(dot(normalize(vN), uSun), 0.0);
     vec2 s = normalize(uSun.xz);
-    vec4 c1 = cellAt(m + s * 0.42), c2 = cellAt(m + s * 0.84);
-    float shade = max(c1.r * (1.0 - c1.g), 0.6 * c2.r * (1.0 - c2.g));
-    vec3 day = col * mix(vec3(1.0), vec3(0.66, 0.7, 0.84), shade);
-    vec3 dusk = col * vec3(0.13, 0.16, 0.29);
+    float shade = max(cellAt(m + s * 0.42).g, 0.6 * cellAt(m + s * 0.84).g) * (1.0 - here.g);
+    vec3 landDay = ground * (0.74 + 0.42 * lam) * mix(vec3(1.0), vec3(0.66, 0.7, 0.84), shade);
+    vec3 landDusk = ground * vec3(0.13, 0.16, 0.29) * (0.8 + 0.3 * lam);
     vec2 q = fract(m * 0.5 + 0.25) - 0.5;
-    dusk += vec3(1.0, 0.7, 0.36) * exp(-dot(q, q) * 30.0) * step(0.4, hash(floor(m * 0.5 + 0.25))) * 0.42;
-    vec3 code = here.r > 0.5 ? uRoofDark : uStone * (0.975 + 0.03 * hash(cell));
-    col = mix(mix(day, dusk, nf), code, uFlat);
-  } else if (vN.y > 0.5) {
-    // ---- sea: turquoise by the shore, deeper further out, moving light, foam along the land
-    vec2 mb = m - 0.5, fb = fract(mb);
-    float d00 = cellAt(mb).b, d10 = cellAt(mb + vec2(1.0, 0.0)).b, d01 = cellAt(mb + vec2(0.0, 1.0)).b, d11 = cellAt(mb + vec2(1.0, 1.0)).b;
-    float depth = clamp(mix(mix(d00, d10, fb.x), mix(d01, d11, fb.x), fb.y) * 8.0 / 5.0, 0.0, 1.0);
-    depth = smoothstep(0.1, 1.0, depth);
+    landDusk += vec3(1.0, 0.7, 0.36) * exp(-dot(q, q) * 30.0) * step(0.4, hash(floor(m * 0.5 + 0.25))) * 0.42 * (1.0 - park);
+    // ---- sea: turquoise by the shore, deeper further out, moving light, foam and ripples along the real coast
+    float out_ = max(0.0, -sd), depth = smoothstep(0.0, 4.5, out_);
     float wave = sin(m.x * 7.0 + uTime * 1.3 + sin(m.y * 5.0 - uTime * 0.8) * 1.6) * 0.5 + 0.5;
     float glint = pow(sin(m.x * 23.0 - uTime * 2.1 + sin(m.y * 17.0 + uTime) * 2.0) * 0.5 + 0.5, 12.0);
-    vec3 day = mix(vec3(0.33, 0.74, 0.8), uSea, depth) * (0.94 + 0.1 * wave) * (here.r > 0.5 ? 0.93 : 1.04) + glint * 0.18;
-    float foam = 0.0;
-    for (int i = 0; i < 4; i++) {
-      vec2 d = i == 0 ? vec2(1.0, 0.0) : i == 1 ? vec2(-1.0, 0.0) : i == 2 ? vec2(0.0, 1.0) : vec2(0.0, -1.0);
-      vec2 mm = m + d;
-      float inside = step(0.0, mm.x) * step(mm.x, uN) * step(0.0, mm.y) * step(mm.y, uN);
-      float edge = smoothstep(0.3 + 0.06 * sin(uTime * 1.7 + dot(cell, vec2(3.0, 5.0))), 0.5, dot(f, d));
-      foam = max(foam, edge * (1.0 - cellAt(mm).g) * inside);
-    }
-    day = mix(day, vec3(0.92, 0.98, 0.98), foam * 0.6);
-    vec3 dusk = vec3(0.03, 0.07, 0.15) * (here.r > 0.5 ? 0.85 : 1.1) + vec3(0.9, 0.75, 0.5) * glint * 0.25 + vec3(0.2, 0.26, 0.4) * foam * 0.4;
-    vec3 code = here.r > 0.5 ? uSeaDark : uSeaPale * (0.985 + 0.02 * hash(cell));
-    col = mix(mix(day, dusk, nf), code, uFlat);
+    float foam = 1.0 - smoothstep(0.0, 0.2 + 0.05 * sin(uTime * 1.6 + m.x * 2.3 + m.y * 3.1), out_);
+    float ripple = smoothstep(0.55, 1.0, sin(out_ * 15.0 - uTime * 1.3)) * exp(-out_ * 2.2) * 0.35;
+    vec3 seaDay = mix(vec3(0.34, 0.76, 0.8), uSea, depth) * (0.95 + 0.09 * wave) * (here.r > 0.5 ? 0.95 : 1.03) + glint * 0.16;
+    seaDay = mix(seaDay, vec3(0.93, 0.98, 0.98), max(foam * 0.75, ripple));
+    vec3 seaDusk = vec3(0.03, 0.07, 0.15) * (here.r > 0.5 ? 0.88 : 1.08) + vec3(0.9, 0.75, 0.5) * glint * 0.22 + vec3(0.2, 0.26, 0.4) * max(foam, ripple) * 0.45;
+    // ---- the code: the lightness of the module, the hue of what is really there
+    vec3 code = here.r > 0.5 ? mix(uSeaDark, mix(uRoofDark, uGrassDark, park), land) : mix(uSeaPale, uStone, land) * (0.985 + 0.02 * hash(cell));
+    col = mix(mix(mix(seaDay, landDay, land), mix(seaDusk, landDusk, land), nf), code, uFlat);
   } else {
-    // ---- the sides: retaining walls on land, the cut edge of the sea below
-    vec3 wall = vP.y > 0.0 ? uSide * (abs(vN.x) > 0.5 ? 1.0 : 0.82) * (0.8 + 0.2 * smoothstep(-0.1, 0.5, vP.y)) : uSea * (abs(vN.x) > 0.5 ? 0.75 : 0.6);
+    // ---- the cut edge of the map: earth under the land, water under the sea
+    vec3 wall = mix(uSea * (abs(vN.x) > 0.5 ? 0.78 : 0.62), uSide * (abs(vN.x) > 0.5 ? 1.0 : 0.82) * (0.75 + 0.25 * smoothstep(-0.7, 0.3, vP.y)), land);
     col = mix(wall, wall * vec3(0.16, 0.2, 0.34), nf);
   }
   gl_FragColor = vec4(col, 1.0);
+  #include <colorspace_fragment>
+}`;
+/** the whip's motion blur: one drawing of the frame, smeared back along the way each point of the ground came */
+const BLUR_FRAG = /* glsl */ `
+uniform sampler2D t;
+uniform vec4 uM; uniform vec2 uT; // where a point of this frame was in the last one: prev = M · ndc + T
+varying vec2 v;
+void main() {
+  vec2 ndc = v * 2.0 - 1.0, prev = vec2(dot(uM.xy, ndc), dot(uM.zw, ndc)) + uT;
+  vec4 sum = vec4(0.0);
+  for (int i = 0; i < 12; i++) sum += texture2D(t, (mix(ndc, prev, float(i) / 11.0) * 0.5 + 0.5));
+  gl_FragColor = sum / 12.0;
   #include <colorspace_fragment>
 }`;
 
@@ -625,7 +668,7 @@ function draw2d(canvas: HTMLCanvasElement, g: Grid) {
   for (let r = 0; r < g.n; r++) for (let c = 0; c < g.n; c++) if (g.dark(r, c)) ctx.fillRect((c + QUIET) * px, (r + QUIET) * px, px, px);
 }
 
-function boot() {
+async function boot() {
   const root = document.querySelector<HTMLElement>('[data-qr]');
   if (!root) return;
   const canvas = root.querySelector<HTMLCanvasElement>('canvas')!;
@@ -679,6 +722,10 @@ function boot() {
     return;
   }
 
+  const map = await loadMap();
+  const mapTex = new DataTexture(map.px, map.size, map.size, RGBAFormat);
+  mapTex.magFilter = mapTex.minFilter = LinearFilter;
+  mapTex.needsUpdate = true;
   renderer.setClearColor(0x000000, 0);
   const scene = new Scene();
   const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
@@ -687,9 +734,9 @@ function boot() {
 
   const S = shapes(), M = movers(S);
   const uFlat = { value: flat }, uGrow = { value: calm ? 1 : 0 }, uNight = { value: night ? 1 : 0 }, uTime = { value: 0 };
-  const dark = (hex: string) => { const c = new Color(hex); return c.multiplyScalar(DARK / (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b)); };
+  const dark = (hex: string) => darkOf(hex);
   const shared = {
-    uFlat, uNight, uTime, uN: { value: 1 }, uGrid: { value: null as DataTexture | null },
+    uFlat, uNight, uTime, uN: { value: 1 }, uGrid: { value: null as DataTexture | null }, uMap: { value: mapTex },
     uSun: { value: new Vector3(-0.5, 0.62, 0.6).normalize() }, // a low sun in the south-west
     uStone: { value: new Color(PAPER) }, uSeaPale: { value: new Color('#dcebe8') },
   };
@@ -699,7 +746,8 @@ function boot() {
   });
   const groundMat = new ShaderMaterial({
     vertexShader: GROUND_VERT, fragmentShader: GROUND_FRAG,
-    uniforms: { ...shared, uSide: { value: new Color('#c4b392') }, uSea: { value: new Color('#2f86ad') }, uSeaDark: { value: dark('#1f4f7c') }, uRoofDark: { value: dark('#b5482c') } },
+    uniforms: { ...shared, uSide: { value: new Color('#c4b392') }, uSea: { value: new Color('#2f86ad') }, uSeaDark: { value: dark('#1f4f7c') }, uRoofDark: { value: dark('#b5482c') }, uGrassDark: { value: dark('#3f7a36') } },
+    side: DoubleSide,
   });
 
   let made: City | null = null;
@@ -730,14 +778,12 @@ function boot() {
     for (const m of [...statics.children] as Mesh[]) { statics.remove(m); m.geometry.dispose(); }
     made?.tex.dispose();
     const n = grid.n;
-    made = buildCity(grid, S);
+    made = buildCity(grid, S, map);
     tallest = made.tallest;
     plate = n;
     shared.uN.value = n;
     shared.uGrid.value = made.tex;
-    const slab = new BoxGeometry(n, 0.6, n);
-    slab.translate(0, -0.3, 0);
-    for (const [geo, mat] of [[made.geo, cityMat], [made.land, groundMat], [slab, groundMat]] as const) {
+    for (const [geo, mat] of [[made.geo, cityMat], [made.terrain, groundMat], [made.skirt, groundMat]] as const) {
       const m = new Mesh(geo, mat);
       m.frustumCulled = false;
       statics.add(m);
@@ -746,7 +792,7 @@ function boot() {
 
     // traffic: a tram on the longest street, taxis on the next ones
     traffic.clear();
-    streets(grid, made.isLand).slice(0, 16).forEach((st, i) => {
+    streets(n, made.open).slice(0, 16).forEach((st, i) => {
       const m = new Mesh(i === 0 ? M.tram : M.taxi, cityMat);
       m.frustumCulled = false;
       m.userData = { ...st, speed: i === 0 ? 0.55 : 0.8 + hash(i, 3) * 0.6, phase: hash(i, 9) * 10 };
@@ -754,10 +800,22 @@ function boot() {
     });
     // ferries on their real routes
     sea.clear();
-    FERRIES.forEach(([a, b, speed], i) => {
+    FERRIES.forEach(([route, speed], i) => {
+      // the route as a string of points, each eased off the land onto open water
+      const pts: number[][] = [];
+      for (let j = 0; j + 1 < route.length; j++) {
+        const a = made!.world(route[j]), b = made!.world(route[j + 1]);
+        for (let q = j ? 1 : 0; q <= 8; q++) pts.push([a[0] + (b[0] - a[0]) * q / 8, a[1] + (b[1] - a[1]) * q / 8]);
+      }
+      for (const pt of pts) for (let it = 0; it < 40 && made!.sd(pt[0], pt[1]) > -0.3; it++) {
+        const gx = made!.sd(pt[0] + 0.1, pt[1]) - made!.sd(pt[0] - 0.1, pt[1]), gz = made!.sd(pt[0], pt[1] + 0.1) - made!.sd(pt[0], pt[1] - 0.1), l = Math.hypot(gx, gz) || 1;
+        pt[0] -= (gx / l) * 0.06; pt[1] -= (gz / l) * 0.06;
+      }
+      const at = [0];
+      for (let j = 1; j < pts.length; j++) at.push(at[j - 1] + Math.hypot(pts[j][0] - pts[j - 1][0], pts[j][1] - pts[j - 1][1]));
       const m = new Mesh(i < 3 ? M.ferry : M.boat, cityMat);
       m.frustumCulled = false;
-      m.userData = { a: made!.world(a), b: made!.world(b), speed, phase: hash(i, 4) };
+      m.userData = { pts, at, speed, phase: hash(i, 4) };
       sea.add(m);
     });
     // smoke from a few chimneys
@@ -782,27 +840,33 @@ function boot() {
   // ---- view
   const ISO = 0.62; // camera elevation over the city, radians
   const TURN = 0.72; // seconds for the whip between city and code
-  let blurred = '';
   // north up, as on a map; left alone, the city sways a little around where it was put
   let az = flat ? 0 : -0.18, azBase = az, swayT = 0, azFrom = az, azTo = az, flatNow = flat, dirty = true, last = 0;
   let dragging = false, moved = 0, lastX = 0, idle = 0;
   const smooth = (x: number) => x * x * x * (x * (x * 6 - 15) + 10);
 
-  // motion blur for the whip: each frame is the average of several moments between the last frame and this one
-  const SHUTTER = 7;
-  const rt = new WebGLRenderTarget(2, 2);
-  const blit = new Mesh(new PlaneGeometry(2, 2), new ShaderMaterial({
-    uniforms: { t: { value: rt.texture } },
+  // motion blur for the whip: the frame is drawn once, then smeared back along the way the ground moved since the
+  // last frame (one extra pass, instead of drawing the city several times over)
+  const rt = new WebGLRenderTarget(2, 2, { samples: 4 });
+  const blur = new ShaderMaterial({
+    uniforms: { t: { value: rt.texture }, uM: { value: new Vector4(1, 0, 0, 1) }, uT: { value: new Vector2() } },
     vertexShader: 'varying vec2 v; void main() { v = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-    fragmentShader: 'uniform sampler2D t; varying vec2 v; void main() { gl_FragColor = texture2D(t, v);\n#include <colorspace_fragment>\n}',
-    depthTest: false, depthWrite: false,
-    blending: CustomBlending, blendEquation: AddEquation, blendSrc: ConstantAlphaFactor, blendDst: OneMinusConstantAlphaFactor,
-  }));
+    fragmentShader: BLUR_FRAG, depthTest: false, depthWrite: false, blending: NoBlending,
+  });
+  const blit = new Mesh(new PlaneGeometry(2, 2), blur);
   blit.frustumCulled = false;
   const blitScene = new Scene().add(blit), blitCam = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const view = new Matrix4(), ground = [new Vector3(0, 0, 0), new Vector3(8, 0, 0), new Vector3(0, 0, 8)];
+  /** where three points of the ground are on screen, for the pose just set */
+  const shot = () => {
+    view.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).multiply(city.matrixWorld);
+    return ground.map((g) => { const q = g.clone().applyMatrix4(view); return [q.x, q.y]; });
+  };
 
+  let sharp = false, warm = false;
   function fit() {
-    const w = innerWidth, h = innerHeight, dpr = Math.min(devicePixelRatio || 1, 3);
+    // the city moves all the time: two device pixels per pixel is plenty. The code stands still and must be crisp.
+    const w = innerWidth, h = innerHeight, dpr = Math.min(devicePixelRatio || 1, sharp ? 3 : 2);
     renderer!.setPixelRatio(dpr);
     renderer!.setSize(w, h, false);
     const s = Math.min(dpr, 1.5); // the blurred frames don't need every pixel
@@ -835,6 +899,7 @@ function boot() {
     camera.lookAt(0, lift, 0);
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
+    camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
     city.rotation.y = a;
     city.updateMatrixWorld(true);
     (cityMat.uniforms.uInv.value as Matrix4).copy(city.matrixWorld).invert();
@@ -854,19 +919,22 @@ function boot() {
     if (inCity) for (const m of traffic.children) {
       const d = m.userData, span = d.len - 1;
       const u = (t * d.speed * 0.5 + d.phase) % (span * 2), back = u > span, k = back ? span * 2 - u : u;
-      const lane = back ? -0.17 : 0.17, i0 = Math.floor(k), fr = k - i0;
-      // up and down the terraces with the street
-      const hAt = (i: number) => (d.across ? made!.height(d.r, d.c + Math.min(span, i)) : made!.height(d.r + Math.min(span, i), d.c));
-      const y = hAt(i0) + (hAt(i0 + 1) - hAt(i0)) * smooth(fr);
-      if (d.across) { m.position.set(d.c + k - n / 2 + 0.5, y, d.r - n / 2 + 0.5 + lane); m.rotation.y = back ? Math.PI : 0; }
-      else { m.position.set(d.c - n / 2 + 0.5 - lane, y, d.r + k - n / 2 + 0.5); m.rotation.y = back ? Math.PI / 2 : -Math.PI / 2; }
+      const lane = back ? -0.17 : 0.17;
+      // up and down the hills with the street
+      if (d.across) { m.position.set(d.c + k - n / 2 + 0.5, 0, d.r - n / 2 + 0.5 + lane); m.rotation.y = back ? Math.PI : 0; }
+      else { m.position.set(d.c - n / 2 + 0.5 - lane, 0, d.r + k - n / 2 + 0.5); m.rotation.y = back ? Math.PI / 2 : -Math.PI / 2; }
+      m.position.y = made.height(m.position.x, m.position.z) + 0.01;
     }
     // ferries shuttle between their piers, easing in and out of each
     for (const f of sea.children) {
-      const d = f.userData, len = Math.hypot(d.b[0] - d.a[0], d.b[1] - d.a[1]);
-      const u = (t * d.speed / len * 0.5 + d.phase) % 2, back = u > 1, k = smooth(back ? 2 - u : u);
-      f.position.set(d.a[0] + (d.b[0] - d.a[0]) * k, 0.02 + Math.sin(t * 1.4 + d.phase * 9) * 0.012, d.a[1] + (d.b[1] - d.a[1]) * k);
-      f.rotation.y = Math.atan2(-(d.b[1] - d.a[1]), d.b[0] - d.a[0]) + (back ? Math.PI : 0);
+      const d = f.userData, len = d.at[d.at.length - 1];
+      const u = (t * d.speed / len * 0.5 + d.phase) % 2, back = u > 1, k = smooth(back ? 2 - u : u) * len;
+      let j = 1;
+      while (j < d.at.length - 1 && d.at[j] < k) j++;
+      const a = d.pts[j - 1], b = d.pts[j], q = (k - d.at[j - 1]) / Math.max(1e-4, d.at[j] - d.at[j - 1]);
+      f.position.set(a[0] + (b[0] - a[0]) * q, 0.02 + Math.sin(t * 1.4 + d.phase * 9) * 0.012, a[1] + (b[1] - a[1]) * q);
+      const want = Math.atan2(-(b[1] - a[1]), b[0] - a[0]) + (back ? Math.PI : 0);
+      f.rotation.y += Math.atan2(Math.sin(want - f.rotation.y), Math.cos(want - f.rotation.y)) * 0.08;
       f.visible = grown;
     }
     smoke.visible = inCity;
@@ -902,7 +970,7 @@ function boot() {
     const put: number[][] = [];
     for (const t of tags) { // in order of importance: a name that would cover an earlier one is left out
       v.copy(t.at).applyMatrix4(city.matrixWorld).project(camera);
-      const x = (v.x + 1) / 2 * w, y = (1 - v.y) / 2 * h - 8;
+      const x = Math.max(t.w / 2 + 6, Math.min(w - t.w / 2 - 6, (v.x + 1) / 2 * w)), y = (1 - v.y) / 2 * h - 8;
       const clash = put.some(([px, py, pw]) => Math.abs(px - x) < (pw + t.w) / 2 + 4 && Math.abs(py - y) < 20);
       t.el.style.opacity = clash ? '0' : '1';
       if (clash) continue;
@@ -936,31 +1004,38 @@ function boot() {
     dirty = false;
     live(uTime.value);
     const turning = !calm && flatNow !== f0;
-    const soft = turning ? 1.6 * Math.sin(Math.PI * flatNow) : 0;
-    const b = soft > 0.3 ? `blur(${soft.toFixed(1)}px)` : '';
-    if (b !== blurred) { blurred = b; canvas.style.filter = b; }
+    if ((flatNow === 1) !== sharp) { sharp = flatNow === 1; fit(); dirty = false; }
     if (!turning) {
       pose(flatNow, az);
       place(flatNow === 0 && uGrow.value >= 1);
+      if (!warm) { // compile the blur's programs now, not in the middle of the first whip
+        warm = true;
+        renderer!.setRenderTarget(rt);
+        renderer!.render(scene, camera);
+        renderer!.setRenderTarget(null);
+        renderer!.render(blitScene, blitCam);
+      }
       renderer!.setRenderTarget(null);
       renderer!.render(scene, camera);
       return;
     }
     place(false);
-    renderer!.autoClear = false;
-    renderer!.setRenderTarget(null);
+    pose(f0, a0);
+    const was = shot();
+    pose(flatNow, az);
+    const now_ = shot();
+    // the affine map taking this frame's screen to the last one's, from the three ground points
+    const [c0, c1, c2] = now_, [p0, p1, p2] = was;
+    const ax = c1[0] - c0[0], ay = c1[1] - c0[1], bx = c2[0] - c0[0], by = c2[1] - c0[1], det = ax * by - ay * bx || 1e-6;
+    const ux = p1[0] - p0[0], uy = p1[1] - p0[1], vx = p2[0] - p0[0], vy = p2[1] - p0[1];
+    const m00 = (ux * by - vx * ay) / det, m01 = (vx * ax - ux * bx) / det, m10 = (uy * by - vy * ay) / det, m11 = (vy * ax - uy * bx) / det;
+    (blur.uniforms.uM.value as Vector4).set(m00, m01, m10, m11);
+    (blur.uniforms.uT.value as Vector2).set(p0[0] - (m00 * c0[0] + m01 * c0[1]), p0[1] - (m10 * c0[0] + m11 * c0[1]));
+    renderer!.setRenderTarget(rt);
     renderer!.clear();
-    for (let i = 0; i < SHUTTER; i++) {
-      const k = (i + 1) / SHUTTER;
-      pose(f0 + (flatNow - f0) * k, a0 + (az - a0) * k);
-      renderer!.setRenderTarget(rt);
-      renderer!.clear();
-      renderer!.render(scene, camera);
-      renderer!.setRenderTarget(null);
-      (blit.material as ShaderMaterial).blendAlpha = 1 / (i + 1);
-      renderer!.render(blitScene, blitCam);
-    }
-    renderer!.autoClear = true;
+    renderer!.render(scene, camera);
+    renderer!.setRenderTarget(null);
+    renderer!.render(blitScene, blitCam);
   }
 
   function setFlat(v: number) {
@@ -1035,4 +1110,4 @@ function boot() {
   }
 }
 
-boot();
+void boot();
