@@ -11,7 +11,7 @@ import qrcode from 'qrcode-generator';
 import {
   BoxGeometry, BufferGeometry, Color, ConeGeometry, CylinderGeometry,
   DataTexture, DoubleSide, Float32BufferAttribute, LinearFilter, Group, Matrix4, Mesh, MeshBasicMaterial, NearestFilter,
-  NoBlending, OrthographicCamera, PlaneGeometry, Quaternion, RGBAFormat, Scene, ShaderMaterial,
+  NoBlending, NormalBlending, OrthographicCamera, PlaneGeometry, Points, Quaternion, RGBAFormat, Scene, ShaderMaterial,
   SphereGeometry, Vector2, Vector3, Vector4, WebGLRenderTarget, WebGLRenderer,
 } from 'three';
 
@@ -121,7 +121,8 @@ class Parts {
   /**
    * one primitive: unit shape scaled to (sx, sy, sz), base at (x, y, z) in the current frame.
    * kind 0 house wall (windows, a door), 1 plain, 2 arcade (round arches), 3 lead (domes, spires), 4 coursed stone,
-   * 5 lamp (only at night), 6 round arcaded wall, 7 a hall's tall arched windows; +10 floodlit at night.
+   * 5 lamp (only at night), 6 round arcaded wall, 7 a hall's tall arched windows, 8 leaves (they turn with the
+   * seasons), 9 evergreen; +10 floodlit at night.
    */
   add(geo: BufferGeometry, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string, kind = 1, tone = 1) {
     const g = geo.clone();
@@ -314,8 +315,8 @@ function topkapi(P: Parts, S: Shapes) {
   P.add(S.cone, -0.2, 1.39, -0.3, 0.25, 0.5, 0.25, LEAD, 3);
   alem(P, S, -0.2, 1.87, -0.3, 0.7);
   for (const [x, z, v] of [[0.3, -0.3, 0.2], [0.05, -0.1, 0.8], [0.4, 0.45, 0.6], [-0.1, 0.42, 0.3], [-0.65, 0.3, 0.9], [0.3, -0.05, 0.5]]) {
-    if (v < 0.4) P.add(S.cone, x, 0.13, z, 0.14, 0.6, 0.14, CYPRESS);
-    else { P.add(S.tube, x, 0.13, z, 0.04, 0.14, 0.04, '#6b4a33'); P.add(S.ball, x, 0.22, z, 0.26, 0.28, 0.26, GREEN); }
+    if (v < 0.4) P.add(S.cone, x, 0.13, z, 0.14, 0.6, 0.14, CYPRESS, 9);
+    else { P.add(S.tube, x, 0.13, z, 0.04, 0.14, 0.04, '#6b4a33'); P.add(S.ball, x, 0.22, z, 0.26, 0.28, 0.26, GREEN, 8); }
   }
 }
 function dolmabahce(P: Parts, S: Shapes) {
@@ -339,7 +340,7 @@ function dolmabahce(P: Parts, S: Shapes) {
   P.add(S.box, 1.62, 0.26, 0.1, 0.14, 0.26, 0.14, W, 17);
   P.add(S.box, 1.62, 0.52, 0.1, 0.11, 0.24, 0.11, W, 14);
   P.add(S.cone, 1.62, 0.76, 0.1, 0.14, 0.2, 0.14, LEAD, 3);
-  for (let i = 0; i < 7; i++) { const x = -1.0 + i * 0.33; P.add(S.tube, x, 0, -0.34, 0.035, 0.12, 0.035, '#6b4a33'); P.add(S.ball, x, 0.08, -0.34, 0.22, 0.24, 0.22, i % 2 ? GREEN : '#6aa04a'); }
+  for (let i = 0; i < 7; i++) { const x = -1.0 + i * 0.33; P.add(S.tube, x, 0, -0.34, 0.035, 0.12, 0.035, '#6b4a33'); P.add(S.ball, x, 0.08, -0.34, 0.22, 0.24, 0.22, i % 2 ? GREEN : '#6aa04a', 8); }
 }
 function haydarpasa(P: Parts, S: Shapes) {
   const W = '#e3d0a6', D = '#c9b488';
@@ -510,8 +511,8 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
 
   const pick = <T,>(list: T[], v: number) => list[Math.floor(v * list.length) % list.length];
   const tree = (x: number, z: number, v: number, s = 1) => {
-    if (v < 0.4) P.add(S.cone, x, 0, z, 0.24 * s, (0.8 + v) * s, 0.24 * s, CYPRESS, 1, 0.9 + v * 0.4);
-    else { P.add(S.tube, x, 0, z, 0.06 * s, 0.22 * s, 0.06 * s, '#6b4a33'); P.add(S.ball, x, 0.16 * s, z, 0.42 * s, 0.46 * s, 0.42 * s, v > 0.75 ? '#6aa04a' : GREEN, 1, 0.85 + v * 0.3); }
+    if (v < 0.4) P.add(S.cone, x, 0, z, 0.24 * s, (0.8 + v) * s, 0.24 * s, CYPRESS, 9, 0.9 + v * 0.4);
+    else { P.add(S.tube, x, 0, z, 0.06 * s, 0.22 * s, 0.06 * s, '#6b4a33'); P.add(S.ball, x, 0.16 * s, z, 0.42 * s, 0.46 * s, 0.42 * s, v > 0.75 ? '#6aa04a' : GREEN, 8, 0.85 + v * 0.3); }
   };
   const chimneys: number[][] = [];
   // per module, for the shaders and the traffic: 1 a street, 2 a building
@@ -661,6 +662,7 @@ function streets(n: number, open: (r: number, c: number) => boolean): { r: numbe
 const COMMON = /* glsl */ `
 uniform sampler2D uGrid, uMap;
 uniform float uFlat, uNight, uTime, uN;
+uniform float uSpring, uAutumn, uSnow; // the season: how much of each (summer is none of them)
 uniform vec3 uSun, uStone, uSeaPale;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 /** the module under a point of the city (module coordinates): r dark, g built on */
@@ -698,6 +700,16 @@ void main() {
   float win = 0.0, lit = 0.0, tw = 1.0;
   bool house = k < 0.5, arcade = abs(k - 2.0) < 0.1, lead = abs(k - 3.0) < 0.1, stone = abs(k - 4.0) < 0.1, round_ = abs(k - 6.0) < 0.1, hall = abs(k - 7.0) < 0.1;
   bool upright = abs(n.y) < 0.5;
+  if (abs(k - 8.0) < 0.1) {
+    // leaves: Judas-tree pink among fresh green in spring, the turning colours in autumn, bare wood in winter
+    float h = hash(floor(vM * 2.3) + 0.5);
+    vec3 turned = h < 0.4 ? vec3(0.69, 0.22, 0.03) : h < 0.72 ? vec3(0.46, 0.04, 0.02) : vec3(0.76, 0.45, 0.04);
+    col = mix(col, turned * (0.8 + 0.4 * vCol.g), uAutumn);
+    col = mix(col, h > 0.68 ? vec3(0.72, 0.13, 0.36) : col * vec3(1.05, 1.3, 0.8), uSpring);
+    col = mix(col, vec3(0.13, 0.1, 0.08), uSnow * 0.85);
+  }
+  // snow lies on whatever faces the sky
+  if (abs(k - 5.0) > 0.1) col = mix(col, vec3(0.86, 0.9, 0.97), uSnow * smoothstep(0.3, 0.72, n.y) * 0.94);
   // stone: the courses of the masonry, and the joints breaking from one course to the next
   if (upright && (stone || round_ || arcade || hall)) {
     float course = floor(vY * 7.0);
@@ -768,7 +780,18 @@ void main() {
     pave *= 1.0 - 0.07 * smoothstep(0.44, 0.5, max(a.x, a.y)) - 0.03 * smoothstep(0.4, 0.5, max(a4.x, a4.y));
     pave = mix(pave, vec3(0.9, 0.82, 0.62), smoothstep(0.13, 0.0, sd) * 0.8);
     vec3 grass = vec3(0.4, 0.6, 0.27) * (0.88 + 0.24 * hash(floor(m * 5.0)));
+    grass = mix(grass, vec3(0.52, 0.47, 0.2) * (0.85 + 0.3 * hash(floor(m * 5.0))), uAutumn);
+    grass = mix(grass, vec3(0.36, 0.68, 0.24) * (0.9 + 0.2 * hash(floor(m * 5.0))), uSpring);
+    // tulips in the parks in spring, fallen leaves in autumn
+    vec2 bed = m * 13.0, bc = floor(bed);
+    float dot_ = 1.0 - smoothstep(0.16, 0.3, length(fract(bed) - 0.5)), pick = hash(bc);
+    vec3 tulip = pick > 0.93 ? vec3(0.8, 0.05, 0.06) : pick > 0.86 ? vec3(0.9, 0.62, 0.04) : vec3(0.8, 0.2, 0.45);
+    grass = mix(grass, tulip, dot_ * step(0.8, pick) * uSpring);
+    vec3 litter = pick > 0.9 ? vec3(0.6, 0.2, 0.03) : vec3(0.72, 0.42, 0.05);
+    grass = mix(grass, litter, dot_ * step(0.72, pick) * uAutumn);
+    pave = mix(pave, litter, dot_ * step(0.93, pick) * uAutumn * 0.8);
     vec3 ground = mix(pave, grass, park);
+    ground = mix(ground, vec3(0.86, 0.9, 0.97) * (0.93 + 0.07 * hash(floor(m * 9.0))), uSnow * (0.9 - 0.3 * (1.0 - park) * (1.0 - smoothstep(0.1, 0.42, max(a.x, a.y)))));
     float lam = max(dot(normalize(vN), uSun), 0.0);
     vec2 s = normalize(uSun.xz);
     float shade = max(cellAt(m + s * 0.42).g, 0.6 * cellAt(m + s * 0.84).g) * (1.0 - here.g);
@@ -783,6 +806,7 @@ void main() {
     float foam = 1.0 - smoothstep(0.0, 0.2 + 0.05 * sin(uTime * 1.6 + m.x * 2.3 + m.y * 3.1), out_);
     float ripple = smoothstep(0.55, 1.0, sin(out_ * 15.0 - uTime * 1.3)) * exp(-out_ * 2.2) * 0.35;
     vec3 seaDay = mix(vec3(0.34, 0.76, 0.8), uSea, depth) * (0.95 + 0.09 * wave) * (here.r > 0.5 ? 0.95 : 1.03) + glint * 0.16;
+    seaDay = mix(seaDay, vec3(dot(seaDay, vec3(0.3, 0.5, 0.2))) * vec3(0.78, 0.86, 0.95), uSnow * 0.6 + uAutumn * 0.22); // a greyer sea out of season
     seaDay = mix(seaDay, vec3(0.93, 0.98, 0.98), max(foam * 0.75, ripple));
     vec3 seaDusk = vec3(0.03, 0.07, 0.15) * (here.r > 0.5 ? 0.88 : 1.08) + vec3(0.9, 0.75, 0.5) * glint * 0.07 + vec3(0.2, 0.26, 0.4) * max(foam, ripple) * 0.4;
     // ---- the code: the lightness of the module, the hue of what is really there
@@ -794,6 +818,29 @@ void main() {
     col = mix(wall, wall * vec3(0.16, 0.2, 0.34), nf);
   }
   gl_FragColor = vec4(col, 1.0);
+  #include <colorspace_fragment>
+}`;
+/** what falls through the air: snow in winter, leaves in autumn, a few petals in spring */
+const FALL_VERT = /* glsl */ `
+attribute vec3 aSeed;
+uniform float uTime, uSpan, uTop, uPx, uAmount, uKind;
+varying vec3 vTint;
+void main() {
+  float speed = uKind > 0.5 ? mix(0.7, 1.3, aSeed.y) : mix(0.35, 0.7, aSeed.y);
+  float fall = fract(aSeed.y * 7.3 + uTime * speed / uTop);
+  vec3 p = vec3((aSeed.x - 0.5) * uSpan, uTop * (1.0 - fall), (aSeed.z - 0.5) * uSpan);
+  p.xz += vec2(sin(uTime * (0.6 + aSeed.z) + aSeed.y * 30.0), cos(uTime * (0.5 + aSeed.x) + aSeed.z * 20.0)) * (uKind > 0.5 ? 0.25 : 0.7);
+  vTint = uKind > 0.5 ? vec3(1.0) : uKind > -0.5 ? (aSeed.x < 0.4 ? vec3(0.85, 0.4, 0.08) : aSeed.x < 0.75 ? vec3(0.7, 0.16, 0.06) : vec3(0.9, 0.68, 0.12)) : vec3(0.92, 0.5, 0.7);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+  gl_PointSize = uPx * (uKind > 0.5 ? 2.2 + 2.2 * aSeed.z : 3.0 + 2.5 * aSeed.z) * smoothstep(0.0, 0.06, fall) * smoothstep(1.0, 0.94, fall);
+  if (fract(aSeed.x * 13.7 + aSeed.z * 5.1) > uAmount) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+}`;
+const FALL_FRAG = /* glsl */ `
+varying vec3 vTint;
+void main() {
+  float d = length(gl_PointCoord - 0.5);
+  if (d > 0.5) discard;
+  gl_FragColor = vec4(vTint, 1.0) * (1.0 - smoothstep(0.3, 0.5, d)) * 0.9;
   #include <colorspace_fragment>
 }`;
 /** the whip's motion blur: one drawing of the frame, smeared back along the way each point of the ground came */
@@ -854,7 +901,13 @@ async function boot() {
 
   let flat = params.has('code') ? 1 : 0; // target: 0 city, 1 code
   // day or night
-  const skies = [...root.querySelectorAll<HTMLButtonElement>('[data-qr-sky]')];
+  const skyButton = root.querySelector<HTMLButtonElement>('[data-qr-sky]');
+  // the season: the one it is in Istanbul now (`?s=winter` in a link fixes it; a button press holds for this visit)
+  const SEASONS = ['spring', 'summer', 'autumn', 'winter'] as const;
+  const seasonButtons = [...root.querySelectorAll<HTMLButtonElement>('[data-qr-season]')];
+  const month = Number(new Intl.DateTimeFormat('en', { month: 'numeric', timeZone: 'Europe/Istanbul' }).format(new Date()));
+  let season: (typeof SEASONS)[number] = SEASONS[(Math.floor((month % 12) / 3) + 3) % 4];
+  if (SEASONS.includes(params.get('s') as any)) season = params.get('s') as (typeof SEASONS)[number];
   // it is night here when it is night in Istanbul: the sun's real height over the city, from the clock
   // (a button press holds for this visit; `?t=day|night` in a link fixes it)
   let chosen = params.get('t');
@@ -863,7 +916,10 @@ async function boot() {
     toggle.textContent = flat ? 'Back to the city' : 'Tap the city to see the code';
     toggle.setAttribute('aria-pressed', String(!!flat));
     root.dataset.state = flat ? 'code' : 'city';
-    for (const b of skies) b.setAttribute('aria-pressed', String((b.dataset.qrSky === 'night') === night));
+    skyButton?.setAttribute('aria-pressed', String(night));
+    skyButton?.setAttribute('aria-label', night ? 'Night. Switch to day' : 'Day. Switch to night');
+    for (const b of seasonButtons) b.setAttribute('aria-pressed', String(b.dataset.qrSeason === season));
+    root.dataset.season = season;
     // the code is always read on a pale page: the night sky is only behind the city
     document.documentElement.dataset.sky = night && !flat ? 'night' : 'day';
   };
@@ -882,7 +938,8 @@ async function boot() {
   if (!renderer) {
     root.dataset.state = 'flat';
     toggle.hidden = true;
-    for (const b of skies) b.parentElement!.hidden = true;
+    if (skyButton) skyButton.hidden = true;
+    for (const b of seasonButtons) b.parentElement!.hidden = true;
     const redraw = () => draw2d(canvas, grid);
     redraw();
     addEventListener('resize', redraw);
@@ -902,9 +959,10 @@ async function boot() {
 
   const S = shapes(), M = movers(S);
   const uFlat = { value: flat }, uGrow = { value: calm ? 1 : 0 }, uNight = { value: night ? 1 : 0 }, uTime = { value: 0 };
+  const uSpring = { value: season === 'spring' ? 1 : 0 }, uAutumn = { value: season === 'autumn' ? 1 : 0 }, uSnow = { value: season === 'winter' ? 1 : 0 };
   const dark = (hex: string) => darkOf(hex);
   const shared = {
-    uFlat, uNight, uTime, uN: { value: 1 }, uGrid: { value: null as DataTexture | null }, uMap: { value: mapTex },
+    uFlat, uNight, uTime, uSpring, uAutumn, uSnow, uN: { value: 1 }, uGrid: { value: null as DataTexture | null }, uMap: { value: mapTex },
     uSun: { value: new Vector3(-0.5, 0.62, 0.6).normalize() }, // a low sun in the south-west
     uStone: { value: new Color(PAPER) }, uSeaPale: { value: new Color('#dcebe8') },
   };
@@ -935,6 +993,22 @@ async function boot() {
       clouds.add(c);
     }
   }
+  // snow, leaves, petals
+  const fallGeo = new BufferGeometry();
+  {
+    const seeds = new Float32Array(700 * 3);
+    for (let i = 0; i < seeds.length; i++) seeds[i] = hash(i, 17 + (i % 3));
+    fallGeo.setAttribute('position', new Float32BufferAttribute(new Float32Array(700 * 3), 3));
+    fallGeo.setAttribute('aSeed', new Float32BufferAttribute(seeds, 3));
+  }
+  const fallMat = new ShaderMaterial({
+    vertexShader: FALL_VERT, fragmentShader: FALL_FRAG, transparent: true, depthWrite: false, blending: NormalBlending, premultipliedAlpha: true,
+    uniforms: { uTime, uSpan: { value: 1 }, uTop: { value: 1 }, uPx: { value: 1 }, uAmount: { value: 0 }, uKind: { value: 1 } },
+  });
+  const falling = new Points(fallGeo, fallMat);
+  falling.frustumCulled = false;
+  city.add(falling);
+
   // names over the landmarks, as on a map (in the city view only)
   const names = document.createElement('div');
   names.className = 'qr__names';
@@ -1113,6 +1187,15 @@ async function boot() {
       (m.material as MeshBasicMaterial).opacity = (1 - u) * (0.6 - 0.3 * uNight.value);
       (m.material as MeshBasicMaterial).color.setScalar(1 - 0.5 * uNight.value);
     }
+    // what is in the air: the strongest season decides, and how much of it
+    const air = Math.max(uSnow.value, uAutumn.value * 0.999, uSpring.value * 0.998);
+    falling.visible = inCity && !calm && air > 0.02;
+    if (falling.visible) {
+      const f = fallMat.uniforms;
+      f.uKind.value = air === uSnow.value ? 1 : air === uAutumn.value * 0.999 ? 0 : -1;
+      f.uAmount.value = air * (f.uKind.value > 0.5 ? 1 : f.uKind.value > -0.5 ? 0.16 : 0.07);
+      f.uSpan.value = plate * 1.15; f.uTop.value = tallest * 1.7; f.uPx.value = renderer!.getPixelRatio();
+    }
     gulls.visible = inCity && uNight.value < 0.5;
     if (gulls.visible) {
       const R = plate * 0.3;
@@ -1162,6 +1245,10 @@ async function boot() {
     if (uGrow.value < 1) { uGrow.value = Math.min(1, uGrow.value + dt / 1.6); dirty = true; }
     const sky = night ? 1 : 0;
     if (uNight.value !== sky) { uNight.value = calm ? sky : Math.max(0, Math.min(1, uNight.value + Math.sign(sky - uNight.value) * dt / 0.5)); dirty = true; }
+    for (const [u, name] of [[uSpring, 'spring'], [uAutumn, 'autumn'], [uSnow, 'winter']] as const) {
+      const want = season === name ? 1 : 0;
+      if (u.value !== want) { u.value = calm ? want : Math.max(0, Math.min(1, u.value + Math.sign(want - u.value) * dt / 0.9)); dirty = true; }
+    }
     if (!flat && flatNow === 0 && !dragging && !calm) {
       idle += dt;
       if (idle > 1.2) { swayT += dt; az = azBase + 0.16 * Math.sin(swayT * 0.28); }
@@ -1224,9 +1311,14 @@ async function boot() {
   canvas.addEventListener('pointerup', () => up(true));
   canvas.addEventListener('pointercancel', () => up(false));
   toggle.addEventListener('click', () => setFlat(flat ? 0 : 1));
-  for (const b of skies) b.addEventListener('click', () => {
-    night = b.dataset.qrSky === 'night';
+  skyButton?.addEventListener('click', () => {
+    night = !night;
     chosen = night ? 'night' : 'day';
+    label();
+    dirty = true;
+  });
+  for (const b of seasonButtons) b.addEventListener('click', () => {
+    season = b.dataset.qrSeason as (typeof SEASONS)[number];
     label();
     dirty = true;
   });
@@ -1246,7 +1338,7 @@ async function boot() {
   measure();
   requestAnimationFrame(frame);
   wire(build);
-  (window as any).__qr = { get settled() { return flatNow === flat && uGrow.value >= 1 && uNight.value === (night ? 1 : 0) && (!dirty || flatNow < 1); }, get text() { return text; } };
+  (window as any).__qr = { get settled() { return flatNow === flat && uGrow.value >= 1 && uNight.value === (night ? 1 : 0) && uSnow.value === (season === 'winter' ? 1 : 0) && uAutumn.value === (season === 'autumn' ? 1 : 0) && uSpring.value === (season === 'spring' ? 1 : 0) && (!dirty || flatNow < 1); }, get text() { return text; } };
 
   /** the link field and the share button (shared by the 3D and the flat version) */
   function wire(rebuild: () => void) {
