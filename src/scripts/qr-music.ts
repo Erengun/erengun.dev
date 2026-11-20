@@ -1,9 +1,9 @@
 /**
- * Music for /qr/: a YouTube video played through YouTube's own small player (their audio, their terms; nothing is
- * copied here). On by default and quiet. It does not start from the top: like a radio, the place in the recording
+ * Music for /qr/: a YouTube video played through YouTube's own player, kept out of sight (their audio; nothing is
+ * copied here). On by default and very quiet. It never starts from the top: like a radio, the place in the recording
  * follows the clock, so everyone hears the same moment. Browsers only let sound start after a first tap or key.
  */
-const VIDEO = 'gr2OGRA96L8', LENGTH = 1635, VOLUME = 16;
+const VIDEO = 'gr2OGRA96L8', LENGTH = 1635, VOLUME = 7;
 const now = () => Math.floor(Date.now() / 1000) % LENGTH;
 
 const button = document.querySelector<HTMLButtonElement>('[data-qr-sound]');
@@ -23,8 +23,8 @@ if (button && card) {
     if (!ready) { wanted = true; return; }
     player.setVolume(VOLUME);
     player.unMute();
-    player.seekTo(now(), true);
-    player.playVideo();
+    // load at the clock's place (a seek before the first play is sometimes dropped, and it would start from 0:00)
+    player.loadVideoById({ videoId: VIDEO, startSeconds: now() });
   };
   const load = () => {
     if (loading) return;
@@ -35,8 +35,14 @@ if (button && card) {
         playerVars: { controls: 0, disablekb: 1, playsinline: 1, rel: 0, start: now() },
         events: {
           onReady: () => { ready = true; player.setVolume(VOLUME); if (wanted) play(); },
-          // at the end, round again
-          onStateChange: (e: { data: number }) => { if (e.data === 0 && on) { player.seekTo(now(), true); player.playVideo(); } },
+          onStateChange: (e: { data: number }) => {
+            if (e.data === 0 && on) play(); // at the end, round again
+            if (e.data === 1) { // playing: if it is not where the clock says (it began from the top after all), go there
+              player.setVolume(VOLUME);
+              const off = Math.abs(player.getCurrentTime() - now());
+              if (off > 8 && off < LENGTH - 8) player.seekTo(now(), true);
+            }
+          },
         },
       });
     };
