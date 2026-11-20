@@ -691,6 +691,11 @@ async function boot() {
   const params = new URLSearchParams(location.search);
 
   let text = normalize(params.get('u') ?? '');
+  // arrived from a chapter of this site: the name in the corner leads back to that chapter
+  try {
+    const from = new URL(text), logo = root.querySelector<HTMLAnchorElement>('.qr__logo');
+    if (logo && from.origin === location.origin && from.pathname === '/') logo.href = from.pathname + from.hash;
+  } catch { /* not a link */ }
   let grid = encode(text) ?? encode(DEFAULT)!;
   input.value = text === DEFAULT && !params.has('u') ? '' : text;
 

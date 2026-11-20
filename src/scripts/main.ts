@@ -453,6 +453,10 @@ function hashFor(route: Route, slide: number): string {
   if (!m) return '';
   return `#${PROJECTS[Number(m[1])].id}${slide > 0 ? `/${slide + 1}` : ''}`;
 }
+// "Share" opens the QR page for the chapter on screen (the plain page before the first chapter)
+document.querySelector<HTMLAnchorElement>('[data-share]')?.addEventListener('click', (e) => {
+  (e.currentTarget as HTMLAnchorElement).href = location.hash ? `/qr/?u=${encodeURIComponent(location.origin + '/' + location.hash)}` : '/qr/';
+});
 let linksLive = false;
 let pendingSlide: { project: number; slide: number } | null = null;
 $route.subscribe(({ route, slide, overlay }) => {
