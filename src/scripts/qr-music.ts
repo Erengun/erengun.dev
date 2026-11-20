@@ -15,7 +15,7 @@ const VIDEOS: { id: string; len: number; pieces: [number, string][] }[] = [
     [701, 'Qari Navo · Traditional Turkic Instrument'], [810, 'Nice Bir · Civilization 6 OST'], [930, 'Yelkenler Biçilecek · Civilization 6 OST'],
     [1192, 'Rast Nakış Beste · Civilization 6 OST'], [1321, 'Hicaz Hümâyun Peşrevi · Civilization 6 OST'], [1428, 'Rondo Alla Turca · Mozart'],
   ] },
-  { id: 'CnyLI7pl9Ys', len: 90, pieces: [[0, 'Turkey’s Most Stereotypical Music · Victor Lopez']] },
+  { id: 'CnyLI7pl9Ys', len: 90, pieces: [[0, 'Saniye’m · Selim Sesler & İdil Üner (REAPER remix)']] },
 ];
 /** the programme: every piece, one after the other, round and round */
 const TRACKS = VIDEOS.flatMap((v) => v.pieces.map(([start, title], i) => ({ id: v.id, start, len: (v.pieces[i + 1]?.[0] ?? v.len) - start, title })));

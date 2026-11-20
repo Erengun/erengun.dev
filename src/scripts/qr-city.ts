@@ -56,7 +56,8 @@ const LON0 = 28.945, LON1 = 29.045, LAT0 = 40.987, LAT1 = 41.063;
 /** metres across the map, and how much taller than life the hills are drawn */
 const SPAN = 8400, RELIEF = 3.2;
 type LL = [number, number];
-type MapData = { px: Uint8Array; size: number };
+type Lines = { roads: LL[][]; tram: LL[]; ferries: LL[][] };
+type MapData = { px: Uint8Array; size: number; roads: Uint8Array; roadSize: number; lines: Lines };
 /** the map under a point of the city: distance to the shore in modules (+ on land), park 0…1, height in metres */
 function mapAt(map: MapData, x: number, z: number, n: number): [number, number, number] {
   const S = map.size, u = Math.max(0, Math.min(S - 1.001, ((x + n / 2) / n) * S - 0.5)), v = Math.max(0, Math.min(S - 1.001, ((z + n / 2) / n) * S - 0.5));
@@ -64,28 +65,31 @@ function mapAt(map: MapData, x: number, z: number, n: number): [number, number, 
   const lerp = (ch: number) => (d[o + ch] * (1 - fu) + d[o + 4 + ch] * fu) * (1 - fv) + (d[o + S * 4 + ch] * (1 - fu) + d[o + S * 4 + 4 + ch] * fu) * fv;
   return [((lerp(0) - 128) / 2.5) * (n / S), lerp(1) / 255, lerp(2) / 2];
 }
+/** how much of a main road or a square is under a point of the city, 0…1 (from tools/qr-istanbul-lines.py) */
+function roadAt(map: MapData, x: number, z: number, n: number): number {
+  const S = map.roadSize, i = Math.max(0, Math.min(S - 1, Math.floor(((x + n / 2) / n) * S))), j = Math.max(0, Math.min(S - 1, Math.floor(((z + n / 2) / n) * S)));
+  return map.roads[(j * S + i) * 4] / 255;
+}
 async function loadMap(): Promise<MapData> {
-  try {
+  const pixels = async (src: string) => {
     const img = new Image();
-    img.src = '/qr/istanbul.png';
+    img.src = src;
     await img.decode();
     const c = document.createElement('canvas');
     c.width = c.height = img.naturalWidth;
     const ctx = c.getContext('2d', { willReadFrequently: true })!;
     ctx.drawImage(img, 0, 0);
     return { px: new Uint8Array(ctx.getImageData(0, 0, c.width, c.height).data.buffer), size: c.width };
-  } catch {
-    return { px: new Uint8Array(4 * 4 * 4).fill(255).map((v, i) => (i % 4 === 1 || i % 4 === 2 ? 0 : v)), size: 4 }; // no map: all land, flat
-  }
+  };
+  const none = { px: new Uint8Array(4 * 4 * 4), size: 4 };
+  // (each on its own: without the roads there is still a city, without the map still a code)
+  const [land, roads, lines] = await Promise.all([
+    pixels('/qr/istanbul.png').catch(() => ({ px: new Uint8Array(4 * 4 * 4).fill(255).map((v, i) => (i % 4 === 1 || i % 4 === 2 ? 0 : v)), size: 4 })), // no map: all land, flat
+    pixels('/qr/istanbul-roads.png').catch(() => none),
+    fetch('/qr/istanbul-lines.json').then((r) => (r.ok ? r.json() : Promise.reject())).catch(() => ({ roads: [], tram: [], ferries: [] })) as Promise<Lines>,
+  ]);
+  return { ...land, roads: roads.px, roadSize: roads.size, lines };
 }
-/** ferry routes, pier to pier (kept off the land when the city is built) */
-const FERRIES: [LL[], number][] = [
-  [[[28.9765, 41.0185], [28.99, 41.0215], [29.0125, 41.0265]], 0.55],
-  [[[28.9785, 41.0212], [28.993, 41.016], [29.006, 41.003], [29.016, 40.9925]], 0.5],
-  [[[28.9945, 41.0325], [29.0125, 41.0278]], 0.4],
-  [[[28.9712, 41.0195], [28.962, 41.0235], [28.9545, 41.0295]], 0.3],
-  [[[29.0, 41.03], [29.02, 41.042], [29.038, 41.056]], 0.6],
-];
 
 const ROOFS = ['#c1502e', '#b5482c', '#cf6034', '#a84229', '#c9582f', '#bb4a2a'];
 const WALLS = ['#f2e3c6', '#e9b872', '#d98268', '#9cc0c4', '#efd9a7', '#c3d1a4', '#e6c2b0', '#f7efe0', '#d6a5a0', '#b7c7d9'];
@@ -472,7 +476,8 @@ const BRIDGES: { name: string; a: LL; b: LL; tall: boolean }[] = [
 type City = {
   geo: BufferGeometry; terrain: BufferGeometry; skirt: BufferGeometry; tex: DataTexture; tallest: number; k: number;
   chimneys: number[][]; labels: { name: string; x: number; y: number; z: number }[];
-  open: (r: number, c: number) => boolean; height: (x: number, z: number) => number; sd: (x: number, z: number) => number;
+  height: (x: number, z: number) => number; sd: (x: number, z: number) => number;
+  marks: { name: string; x: number; z: number; at: [number, number] }[];
   world: (ll: LL) => [number, number];
 };
 
@@ -484,7 +489,6 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
   const sd = (x: number, z: number) => mapAt(map, x, z, n)[0];
   const ramp = (a: number, b: number, v: number) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
   const height = (x: number, z: number) => { const [d, , el] = mapAt(map, x, z, n); return ramp(0, 0.35, d) * (0.1 + (el * n / SPAN) * RELIEF); };
-  const inside = (r: number, c: number) => r >= 0 && c >= 0 && r < n && c < n;
 
   // ---- landmarks: real positions; those meant to stand on land are moved off the water, and any two that would
   // stand in each other are pushed apart
@@ -566,7 +570,20 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
       }
       continue;
     }
+    // a building: smaller than its module, and stood where it is least in the way of the real roads and squares
+    // (from above the ground under it is as dark as its roof, so the code does not need it to fill the square)
+    const SC = 0.8;
+    let hx = 0, hz = 0, least = 9;
+    for (const [ox, oz] of [[0, 0], [0.11, 0], [-0.11, 0], [0, 0.11], [0, -0.11], [0.1, 0.1], [-0.1, 0.1], [0.1, -0.1], [-0.1, -0.1]]) {
+      let cover = 0;
+      for (const sx of [-0.3, 0, 0.3]) for (const sz of [-0.3, 0, 0.3]) cover += roadAt(map, x + ox + sx, z + oz + sz, n);
+      cover = cover / 9 + (ox || oz ? 0.02 : 0);
+      if (cover < least) { least = cover; hx = ox; hz = oz; }
+    }
+    if (least > 0.42) { use[r * n + c] = 1; continue; } // a road junction or a square: left open
     use[r * n + c] = 2;
+    const bx = x + hx + (h3 - 0.5) * 0.04, bz = z + hz + (h1 - 0.5) * 0.04, by = height(bx, bz);
+    P.at(bx, by, bz, 0, SC, d);
     P.add(S.box, 0, -0.6, 0, 0.9, 0.6, 0.9, '#cdbf9f'); // footing, down into the slope
     if (h1 > 0.955) { // a neighbourhood mosque: one dome, one minaret
       P.add(S.box, 0, 0, 0, 0.8, 0.42, 0.8, '#e9e1cf', 12);
@@ -592,7 +609,7 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
     if (hash(r + 21, c + 2) < 0.55) {
       const cx = (h3 - 0.5) * 0.3, cz = (h2 - 0.5) * 0.3;
       P.add(S.box, cx, hh + rh * 0.3, cz, 0.12, 0.32, 0.12, '#7a4a3a');
-      chimneys.push([x + cx, y + hh + rh * 0.3 + 0.36, z + cz]);
+      chimneys.push([bx + cx * SC, by + (hh + rh * 0.3 + 0.36) * SC, bz + cz * SC]);
     }
     if (hh > 0.7 && hash(r + 8, c + 17) < 0.4) { // a bay window over the street
       if (h3 < 0.5) P.add(S.box, 0, hh * 0.46, 0.465, 0.46, hh * 0.38, 0.07, wall, 0, 1.08);
@@ -642,8 +659,10 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
   const tex = new DataTexture(data, n, n, RGBAFormat);
   tex.magFilter = tex.minFilter = NearestFilter;
   tex.needsUpdate = true;
-  const open = (r: number, c: number) => inside(r, c) && use[r * n + c] === 1;
-  return { geo: P.geometry(), terrain, skirt, tex, tallest: 3.9 * k + 0.6, k, chimneys, labels, open, height, sd, world };
+  return {
+    geo: P.geometry(), terrain, skirt, tex, tallest: 3.9 * k + 0.6, k, chimneys, labels, height, sd, world,
+    marks: marks.map((m) => ({ name: m.name, x: m.x, z: m.z, at: world(m.ll) })),
+  };
 }
 
 /** the things that move: lengthwise along x, origin at the middle of the keel / wheels */
@@ -675,25 +694,8 @@ function movers(S: Shapes) {
   return { ferry, boat, taxi, tram };
 }
 
-/** straight stretches of street, longest first */
-function streets(n: number, open: (r: number, c: number) => boolean): { r: number; c: number; len: number; across: boolean }[] {
-  const out: { r: number; c: number; len: number; across: boolean }[] = [];
-  for (const across of [true, false]) for (let i = 0; i < n; i++) {
-    let start = -1;
-    for (let j = 0; j <= n; j++) {
-      const ok = j < n && (across ? open(i, j) : open(j, i));
-      if (ok && start < 0) start = j;
-      if (!ok && start >= 0) {
-        if (j - start >= 3) out.push(across ? { r: i, c: start, len: j - start, across } : { r: start, c: i, len: j - start, across });
-        start = -1;
-      }
-    }
-  }
-  return out.sort((a, b) => b.len - a.len);
-}
-
 const COMMON = /* glsl */ `
-uniform sampler2D uGrid, uMap;
+uniform sampler2D uGrid, uMap, uRoads;
 uniform float uFlat, uNight, uTime, uN;
 uniform float uSpring, uAutumn, uSnow; // the season: how much of each (summer is none of them)
 uniform vec3 uSun, uStone, uSeaPale;
@@ -821,6 +823,10 @@ void main() {
     vec2 a = abs(f), a4 = abs(fract(m * 4.0 + hash(cell) * 0.5) - 0.5);
     pave *= 1.0 - 0.07 * smoothstep(0.44, 0.5, max(a.x, a.y)) - 0.03 * smoothstep(0.4, 0.5, max(a4.x, a4.y));
     pave = mix(pave, vec3(0.9, 0.82, 0.62), smoothstep(0.13, 0.0, sd) * 0.8);
+    // the real main roads and squares, a shade greyer than the paving, a pale line down the middle of the widest
+    float road = texture2D(uRoads, m / uN).r;
+    pave = mix(pave, vec3(0.6, 0.57, 0.53), smoothstep(0.26, 0.6, road) * 0.85);
+    pave = mix(pave, vec3(0.93, 0.9, 0.82), smoothstep(0.93, 0.99, road) * 0.5);
     vec3 grass = vec3(0.4, 0.6, 0.27) * (0.88 + 0.24 * hash(floor(m * 5.0)));
     grass = mix(grass, vec3(0.52, 0.47, 0.2) * (0.85 + 0.3 * hash(floor(m * 5.0))), uAutumn);
     grass = mix(grass, vec3(0.34, 0.74, 0.2) * (0.9 + 0.2 * hash(floor(m * 5.0))), uSpring);
@@ -842,7 +848,8 @@ void main() {
     landDay *= 1.0 + 0.05 * summer;
     vec3 landDusk = ground * vec3(0.13, 0.16, 0.29) * (0.8 + 0.3 * lam);
     vec2 q = fract(m * 0.5 + 0.25) - 0.5;
-    landDusk += vec3(1.0, 0.7, 0.36) * exp(-dot(q, q) * 30.0) * step(0.4, hash(floor(m * 0.5 + 0.25))) * 0.42 * (1.0 - park);
+    landDusk += vec3(1.0, 0.7, 0.36) * exp(-dot(q, q) * 30.0) * step(0.55, hash(floor(m * 0.5 + 0.25))) * 0.36 * (1.0 - park);
+    landDusk += vec3(1.0, 0.72, 0.38) * smoothstep(0.25, 0.8, road) * 0.2 * (1.0 - park * 0.6); // the lit roads
     // ---- sea: turquoise by the shore, deeper further out, moving light, foam and ripples along the real coast
     float out_ = max(0.0, -sd), depth = smoothstep(0.0, 4.5, out_);
     float wave = sin(m.x * 7.0 + uTime * 1.3 + sin(m.y * 5.0 - uTime * 0.8) * 1.6) * 0.5 + 0.5;
@@ -997,6 +1004,9 @@ async function boot() {
   const mapTex = new DataTexture(map.px, map.size, map.size, RGBAFormat);
   mapTex.magFilter = mapTex.minFilter = LinearFilter;
   mapTex.needsUpdate = true;
+  const roadTex = new DataTexture(map.roads, map.roadSize, map.roadSize, RGBAFormat);
+  roadTex.magFilter = roadTex.minFilter = LinearFilter;
+  roadTex.needsUpdate = true;
   renderer.setClearColor(0x000000, 0);
   const scene = new Scene();
   const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
@@ -1008,7 +1018,7 @@ async function boot() {
   const uSpring = { value: season === 'spring' ? 1 : 0 }, uAutumn = { value: season === 'autumn' ? 1 : 0 }, uSnow = { value: season === 'winter' ? 1 : 0 };
   const dark = (hex: string) => darkOf(hex);
   const shared = {
-    uFlat, uNight, uTime, uSpring, uAutumn, uSnow, uN: { value: 1 }, uGrid: { value: null as DataTexture | null }, uMap: { value: mapTex },
+    uFlat, uNight, uTime, uSpring, uAutumn, uSnow, uN: { value: 1 }, uGrid: { value: null as DataTexture | null }, uMap: { value: mapTex }, uRoads: { value: roadTex },
     uSun: { value: new Vector3(-0.5, 0.62, 0.6).normalize() }, // a low sun in the south-west
     uStone: { value: new Color(PAPER) }, uSeaPale: { value: new Color('#dcebe8') },
   };
@@ -1078,34 +1088,33 @@ async function boot() {
     }
     if (!calm) uGrow.value = 0;
 
-    // traffic: a tram on the longest street, taxis on the next ones
-    traffic.clear();
-    streets(n, made.open).slice(0, 16).forEach((st, i) => {
-      const m = new Mesh(i === 0 ? M.tram : M.taxi, cityMat);
-      m.frustumCulled = false;
-      m.userData = { ...st, speed: i === 0 ? 0.55 : 0.8 + hash(i, 3) * 0.6, phase: hash(i, 9) * 10 };
-      traffic.add(m);
-    });
-    // ferries on their real routes
-    sea.clear();
-    FERRIES.forEach(([route, speed], i) => {
-      // the route as a string of points, each eased off the land onto open water
+    // everything that travels follows a real line: taxis the main roads, trams the T1 line, ferries their routes
+    const path = (line: LL[], atSea: boolean) => {
       const pts: number[][] = [];
-      for (let j = 0; j + 1 < route.length; j++) {
-        const a = made!.world(route[j]), b = made!.world(route[j + 1]);
-        for (let q = j ? 1 : 0; q <= 8; q++) pts.push([a[0] + (b[0] - a[0]) * q / 8, a[1] + (b[1] - a[1]) * q / 8]);
+      for (let j = 0; j + 1 < line.length; j++) {
+        const a = made!.world(line[j]), b = made!.world(line[j + 1]), steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.35));
+        for (let q = j ? 1 : 0; q <= steps; q++) pts.push([a[0] + (b[0] - a[0]) * q / steps, a[1] + (b[1] - a[1]) * q / steps]);
       }
-      for (const pt of pts) for (let it = 0; it < 40 && made!.sd(pt[0], pt[1]) > -0.3; it++) {
+      // ferries keep to open water (the drawn shore is a little simpler than the surveyed one)
+      if (atSea) for (const pt of pts) for (let it = 0; it < 40 && made!.sd(pt[0], pt[1]) > -0.25; it++) {
         const gx = made!.sd(pt[0] + 0.1, pt[1]) - made!.sd(pt[0] - 0.1, pt[1]), gz = made!.sd(pt[0], pt[1] + 0.1) - made!.sd(pt[0], pt[1] - 0.1), l = Math.hypot(gx, gz) || 1;
         pt[0] -= (gx / l) * 0.06; pt[1] -= (gz / l) * 0.06;
       }
       const at = [0];
       for (let j = 1; j < pts.length; j++) at.push(at[j - 1] + Math.hypot(pts[j][0] - pts[j - 1][0], pts[j][1] - pts[j - 1][1]));
-      const m = new Mesh(i < 3 ? M.ferry : M.boat, cityMat);
+      return { pts, at };
+    };
+    const mover = (geo: BufferGeometry, line: LL[], speed: number, phase: number, atSea = false) => {
+      const m = new Mesh(geo, cityMat);
       m.frustumCulled = false;
-      m.userData = { pts, at, speed, phase: hash(i, 4) };
-      sea.add(m);
-    });
+      m.userData = { ...path(line, atSea), speed, phase, atSea };
+      return m;
+    };
+    traffic.clear();
+    sea.clear();
+    if (map.lines.tram.length > 1) for (let i = 0; i < 3; i++) traffic.add(mover(M.tram, map.lines.tram, 0.5, i * 0.66));
+    map.lines.roads.forEach((road, i) => { for (let q = 0; q < (i < 5 ? 2 : 1); q++) traffic.add(mover(M.taxi, road, 0.75 + hash(i, 3 + q) * 0.5, hash(i, 9 + q) * 2)); });
+    map.lines.ferries.forEach((route, i) => sea.add(mover(i % 3 === 2 ? M.boat : M.ferry, route, 0.42 + hash(i, 6) * 0.25, hash(i, 4) * 2, true)));
     // smoke from a few chimneys
     for (const m of smoke.children as Mesh[]) (m.material as MeshBasicMaterial).dispose();
     smoke.clear();
@@ -1203,28 +1212,23 @@ async function boot() {
     if (!made) return;
     const grown = uGrow.value >= 1, inCity = flatNow < 0.25 && grown;
     const n = grid.n;
-    traffic.visible = inCity;
-    if (inCity) for (const m of traffic.children) {
-      const d = m.userData, span = d.len - 1;
-      const u = (t * d.speed * 0.5 + d.phase) % (span * 2), back = u > span, k = back ? span * 2 - u : u;
-      const lane = back ? -0.17 : 0.17;
-      // up and down the hills with the street
-      if (d.across) { m.position.set(d.c + k - n / 2 + 0.5, 0, d.r - n / 2 + 0.5 + lane); m.rotation.y = back ? Math.PI : 0; }
-      else { m.position.set(d.c - n / 2 + 0.5 - lane, 0, d.r + k - n / 2 + 0.5); m.rotation.y = back ? Math.PI / 2 : -Math.PI / 2; }
-      m.position.y = made.height(m.position.x, m.position.z) + 0.01;
-    }
-    // ferries shuttle between their piers, easing in and out of each
-    for (const f of sea.children) {
-      const d = f.userData, len = d.at[d.at.length - 1];
+    // along its line and back, easing in and out of each end; on land it follows the hills
+    const along = (f: Mesh['userData'] & object, obj: { position: Vector3; rotation: { y: number } }, lane: number) => {
+      const d = f as any, len = d.at[d.at.length - 1];
+      if (!len) return;
       const u = (t * d.speed / len * 0.5 + d.phase) % 2, back = u > 1, k = smooth(back ? 2 - u : u) * len;
       let j = 1;
       while (j < d.at.length - 1 && d.at[j] < k) j++;
       const a = d.pts[j - 1], b = d.pts[j], q = (k - d.at[j - 1]) / Math.max(1e-4, d.at[j] - d.at[j - 1]);
-      f.position.set(a[0] + (b[0] - a[0]) * q, 0.02 + Math.sin(t * 1.4 + d.phase * 9) * 0.012, a[1] + (b[1] - a[1]) * q);
-      const want = Math.atan2(-(b[1] - a[1]), b[0] - a[0]) + (back ? Math.PI : 0);
-      f.rotation.y += Math.atan2(Math.sin(want - f.rotation.y), Math.cos(want - f.rotation.y)) * 0.08;
-      f.visible = grown;
-    }
+      const dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1, side = (back ? -1 : 1) * lane;
+      const x = a[0] + dx * q - (dz / l) * side, z = a[1] + dz * q + (dx / l) * side;
+      obj.position.set(x, d.atSea ? 0.02 + Math.sin(t * 1.4 + d.phase * 9) * 0.012 : made!.height(x, z) + 0.012, z);
+      const want = Math.atan2(-dz, dx) + (back ? Math.PI : 0);
+      obj.rotation.y += Math.atan2(Math.sin(want - obj.rotation.y), Math.cos(want - obj.rotation.y)) * 0.12;
+    };
+    traffic.visible = inCity;
+    if (inCity) for (const m of traffic.children) along(m.userData, m, 0.05);
+    for (const f of sea.children) { along(f.userData, f, 0); f.visible = grown; }
     smoke.visible = inCity;
     if (inCity) for (const m of smoke.children as Mesh[]) {
       const u = (t * 0.22 + m.userData.phase) % 1, c = m.userData.at;
@@ -1384,7 +1388,7 @@ async function boot() {
   measure();
   requestAnimationFrame(frame);
   wire(build);
-  (window as any).__qr = { get settled() { return flatNow === flat && uGrow.value >= 1 && uNight.value === (night ? 1 : 0) && uSnow.value === (season === 'winter' ? 1 : 0) && uAutumn.value === (season === 'autumn' ? 1 : 0) && uSpring.value === (season === 'spring' ? 1 : 0) && (!dirty || flatNow < 1); }, get text() { return text; } };
+  (window as any).__qr = { get settled() { return flatNow === flat && uGrow.value >= 1 && uNight.value === (night ? 1 : 0) && uSnow.value === (season === 'winter' ? 1 : 0) && uAutumn.value === (season === 'autumn' ? 1 : 0) && uSpring.value === (season === 'spring' ? 1 : 0) && (!dirty || flatNow < 1); }, get text() { return text; }, get marks() { return made ? made.marks.map((m) => ({ name: m.name, off: Math.round(Math.hypot(m.x - m.at[0], m.z - m.at[1]) * (SPAN / grid.n)) })) : []; } };
 
   /** the link field and the share button (shared by the 3D and the flat version) */
   function wire(rebuild: () => void) {
