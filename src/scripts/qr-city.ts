@@ -656,6 +656,16 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+/** the sun's height over Istanbul right now, in degrees (below about −0.83 it has set) */
+function sunOverIstanbul(at = Date.now()): number {
+  const R = Math.PI / 180, d = at / 864e5 - 10957.5; // days since 2000-01-01 12:00 UTC
+  const g = (357.529 + 0.98560028 * d) * R, L = (280.459 + 0.98564736 * d + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)) * R;
+  const e = (23.439 - 0.00000036 * d) * R;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L)), ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L));
+  const ha = ((18.697374558 + 24.06570982441908 * d) * 15 + 28.98) * R - ra, lat = 41.01 * R;
+  return Math.asin(Math.sin(lat) * Math.sin(dec) + Math.cos(lat) * Math.cos(dec) * Math.cos(ha)) / R;
+}
+
 function draw2d(canvas: HTMLCanvasElement, g: Grid) {
   const size = g.n + QUIET * 2;
   const px = Math.max(4, Math.floor(Math.min(innerWidth - 32, innerHeight * 0.55) / size));
@@ -685,12 +695,12 @@ async function boot() {
   input.value = text === DEFAULT && !params.has('u') ? '' : text;
 
   let flat = params.has('code') ? 1 : 0; // target: 0 city, 1 code
-  // day or night: the link says, else the last choice, else the visitor's own clock
+  // day or night
   const skies = [...root.querySelectorAll<HTMLButtonElement>('[data-qr-sky]')];
-  let stored: string | null = null;
-  try { stored = localStorage.getItem('qr-sky'); } catch { /* no storage */ }
-  const hour = new Date().getHours();
-  let night = (params.get('t') ?? stored ?? (hour >= 19 || hour < 6 ? 'night' : 'day')) === 'night';
+  // it is night here when it is night in Istanbul: the sun's real height over the city, from the clock
+  // (a button press holds for this visit; `?t=day|night` in a link fixes it)
+  let chosen = params.get('t');
+  let night = (chosen ?? (sunOverIstanbul() < -0.83 ? 'night' : 'day')) === 'night';
   const label = () => {
     toggle.textContent = flat ? 'Back to the city' : 'Tap the city to see the code';
     toggle.setAttribute('aria-pressed', String(!!flat));
@@ -1058,13 +1068,16 @@ async function boot() {
   toggle.addEventListener('click', () => setFlat(flat ? 0 : 1));
   for (const b of skies) b.addEventListener('click', () => {
     night = b.dataset.qrSky === 'night';
-    try { localStorage.setItem('qr-sky', night ? 'night' : 'day'); } catch { /* no storage */ }
-    const u = new URL(location.href);
-    u.searchParams.set('t', night ? 'night' : 'day');
-    history.replaceState(null, '', u);
+    chosen = night ? 'night' : 'day';
     label();
     dirty = true;
   });
+  // dusk and dawn arrive by themselves
+  setInterval(() => {
+    if (chosen) return;
+    const n = sunOverIstanbul() < -0.83;
+    if (n !== night) { night = n; label(); dirty = true; }
+  }, 60_000);
   addEventListener('resize', fit);
   renderer.domElement.addEventListener('webglcontextlost', (e) => e.preventDefault());
   renderer.domElement.addEventListener('webglcontextrestored', () => { dirty = true; });
@@ -1098,8 +1111,6 @@ async function boot() {
     share.addEventListener('click', async () => {
       const u = new URL(location.origin + location.pathname);
       if (text !== DEFAULT) u.searchParams.set('u', text);
-      const t = new URLSearchParams(location.search).get('t');
-      if (t) u.searchParams.set('t', t);
       try {
         if (navigator.share) await navigator.share({ title: document.title, url: u.href });
         else { await navigator.clipboard.writeText(u.href); say('Link to this city copied.'); }
