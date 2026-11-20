@@ -120,7 +120,8 @@ class Parts {
   }
   /**
    * one primitive: unit shape scaled to (sx, sy, sz), base at (x, y, z) in the current frame.
-   * kind 0 wall with windows and a door, 1 plain, 2 long wall (arches), 5 lamp (only at night); +10 floodlit at night.
+   * kind 0 house wall (windows, a door), 1 plain, 2 arcade (round arches), 3 lead (domes, spires), 4 coursed stone,
+   * 5 lamp (only at night), 6 round arcaded wall, 7 a hall's tall arched windows; +10 floodlit at night.
    */
   add(geo: BufferGeometry, x: number, y: number, z: number, sx: number, sy: number, sz: number, color: string, kind = 1, tone = 1) {
     const g = geo.clone();
@@ -159,6 +160,7 @@ function shapes() {
   const cone = flatten(new ConeGeometry(0.5, 1, 14).translate(0, 0.5, 0));
   const dome = new SphereGeometry(0.5, 16, 7, 0, Math.PI * 2, 0, Math.PI / 2).toNonIndexed(); // smooth
   const ball = new SphereGeometry(0.5, 10, 7).translate(0, 0.5, 0).toNonIndexed();
+  const oct = flatten(new CylinderGeometry(0.5, 0.5, 1, 8).translate(0, 0.5, 0));
   // a gable roof: base 1 × 1, ridge along x
   const A = [-0.5, 0, -0.5], B = [0.5, 0, -0.5], C = [0.5, 0, 0.5], D = [-0.5, 0, 0.5], E = [-0.5, 1, 0], F = [0.5, 1, 0];
   const tris = [D, C, F, D, F, E, B, A, E, B, E, F, A, D, E, C, B, F].flat();
@@ -167,138 +169,262 @@ function shapes() {
   gableX.setAttribute('uv', new Float32BufferAttribute(new Float32Array(tris.length / 3 * 2), 2));
   gableX.computeVertexNormals();
   const gableZ = gableX.clone().rotateY(Math.PI / 2);
-  return { box, roof, tube, cone, dome, ball, gableX, gableZ };
+  return { box, roof, tube, cone, dome, ball, oct, gableX, gableZ };
 }
 type Shapes = ReturnType<typeof shapes>;
 
-// ---- landmarks, modelled around their own origin; one unit is about a module of the smallest code
-function minaret(P: Parts, S: Shapes, x: number, z: number, h = 2.5) {
-  P.add(S.tube, x, 0, z, 0.12, h, 0.12, '#f1e8d4', 11);
-  for (const by of [h * 0.52, h * 0.76]) {
-    P.add(S.tube, x, by, z, 0.21, 0.05, 0.21, STONE, 11);
-    P.add(S.tube, x, by + 0.05, z, 0.23, 0.025, 0.23, '#ffd9a0', 5);
-  }
-  P.add(S.cone, x, h, z, 0.17, 0.5, 0.17, LEAD);
-  P.add(S.cone, x, h + 0.48, z, 0.03, 0.14, 0.03, GOLD);
+// ---- landmarks, modelled around their own origin; one unit is about a module of the smallest code.
+// Mosques lie along z: the prayer wall at −z, the entrance and the courtyard at +z.
+const PALE = '#ece2cb', MARBLE = '#f3ecdc';
+/** the gilded finial on every dome and spire */
+function alem(P: Parts, S: Shapes, x: number, y: number, z: number, s = 1) {
+  P.add(S.tube, x, y, z, 0.022 * s, 0.17 * s, 0.022 * s, GOLD);
+  P.add(S.ball, x, y + 0.1 * s, z, 0.065 * s, 0.065 * s, 0.065 * s, GOLD);
 }
-function mosque(P: Parts, S: Shapes, o: { wall: string; dome: number; minarets: 2 | 4 | 6; court: boolean; buttress?: boolean }) {
-  const W = o.wall;
-  P.add(S.box, 0, 0, 0, 1.3, 0.72, 1.3, W, 12);
-  P.add(S.box, 0, 0.72, 0, 1.36, 0.06, 1.36, LEAD);
-  P.add(S.tube, 0, 0.78, 0, 1.0 * o.dome, 0.17, 1.0 * o.dome, W, 12);
-  P.add(S.dome, 0, 0.95, 0, 0.98 * o.dome, 0.92 * o.dome, 0.98 * o.dome, LEAD);
-  P.add(S.cone, 0, 0.95 + 0.45 * o.dome, 0, 0.045, 0.24, 0.045, GOLD);
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) P.add(S.dome, dx * 0.44, 0.78, dz * 0.44, 0.62, 0.52, 0.62, LEAD);
-  for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) P.add(S.dome, dx * 0.5, 0.78, dz * 0.5, 0.3, 0.3, 0.3, LEAD);
-  if (o.buttress) for (const dx of [-1, 1]) for (const dz of [-0.35, 0.35]) P.add(S.box, dx * 0.72, 0, dz, 0.2, 0.6, 0.22, W, 11);
-  const pts = o.minarets === 2 ? [[-0.8, 0.8], [0.8, 0.8]] : [[-0.8, -0.8], [0.8, -0.8], [-0.8, 0.8], [0.8, 0.8]];
-  for (const [mx, mz] of pts) minaret(P, S, mx, mz, o.minarets === 2 ? 2.1 : 2.6);
-  if (o.court) { // the arcaded courtyard in front, with its fountain
+/** a lead dome d wide and h high, on a windowed drum if one is asked for */
+function domed(P: Parts, S: Shapes, x: number, y: number, z: number, d: number, h = d * 0.48, drum = 0, wall = STONE, finial = true) {
+  if (drum) P.add(S.tube, x, y, z, d * 1.04, drum, d * 1.04, wall, 16);
+  P.add(S.dome, x, y + drum, z, d, h * 2, d, LEAD, 3);
+  if (finial) alem(P, S, x, y + drum + h * 0.96, z, Math.min(1, d * 1.2));
+}
+function minaret(P: Parts, S: Shapes, x: number, z: number, h = 2.5, balconies = 2, shaft = '#f4ecd9') {
+  P.add(S.oct, x, 0, z, 0.24, 0.34, 0.24, STONE, 14);
+  P.add(S.tube, x, 0.34, z, 0.115, h - 0.34, 0.115, shaft, 14);
+  for (let i = 0; i < balconies; i++) {
+    const by = h * (balconies === 1 ? 0.7 : 0.5 + (0.34 * i) / (balconies - 1));
+    P.add(S.tube, x, by - 0.06, z, 0.16, 0.06, 0.16, STONE, 14); // the corbelling under the gallery
+    P.add(S.tube, x, by, z, 0.22, 0.03, 0.22, STONE, 14);
+    P.add(S.tube, x, by + 0.03, z, 0.2, 0.045, 0.2, '#cfc3a8', 16);
+    P.add(S.tube, x, by + 0.075, z, 0.23, 0.02, 0.23, '#ffd9a0', 5);
+  }
+  P.add(S.cone, x, h, z, 0.165, 0.52, 0.165, LEAD, 3);
+  alem(P, S, x, h + 0.5, z, 0.7);
+}
+/**
+ * an imperial mosque: a hall stepping up in tiers to the great dome, half-domes leaning on it, domed turrets at the
+ * corners; in front an arcaded courtyard roofed with small domes, a fountain in the middle
+ */
+function mosque(P: Parts, S: Shapes, o: { wall: string; w?: number; dome?: number; semis?: 2 | 4; minarets: [number, number, number, number][]; court?: boolean }) {
+  const W = o.wall, w = o.w ?? 1.3, d = (o.dome ?? 1) * 0.74 * w, semis = o.semis ?? 4;
+  P.add(S.box, 0, 0, 0, w, 0.55, w, W, 12);
+  P.add(S.box, 0, 0.55, 0, w + 0.06, 0.04, w + 0.06, LEAD, 3);
+  P.add(S.box, 0, 0.59, 0, w * 0.76, 0.32, w * 0.76, W, 17);
+  P.add(S.box, 0, 0.91, 0, w * 0.76 + 0.05, 0.035, w * 0.76 + 0.05, LEAD, 3);
+  domed(P, S, 0, 0.945, 0, d, d * 0.5, 0.15, W);
+  const sides = semis === 4 ? [[1, 0], [-1, 0], [0, 1], [0, -1]] : [[0, 1], [0, -1]];
+  for (const [dx, dz] of sides) { // half-domes, each with two smaller ones at its feet
+    domed(P, S, dx * w * 0.36, 0.59, dz * w * 0.36, d * 0.74, d * 0.36, 0, W, false);
+    for (const t of [-1, 1]) domed(P, S, dx * w * 0.43 + dz * t * w * 0.22, 0.59, dz * w * 0.43 + dx * t * w * 0.22, d * 0.3, d * 0.15, 0, W, false);
+  }
+  if (semis === 2) for (const dx of [-1, 1]) for (let i = -1; i <= 1; i++) domed(P, S, dx * w * 0.42, 0.59, i * w * 0.27, d * 0.26, d * 0.13, 0, W, false); // side galleries
+  for (const dx of [-1, 1]) for (const dz of [-1, 1]) { // the weight turrets at the dome's corners
+    P.add(S.oct, dx * w * 0.36, 0.59, dz * w * 0.36, 0.17, 0.5, 0.17, W, 14);
+    domed(P, S, dx * w * 0.36, 1.09, dz * w * 0.36, 0.19, 0.11);
+  }
+  if (o.court ?? true) {
+    const c0 = w / 2, cl = w * 0.92, cw = w * 0.96, zc = c0 + cl / 2;
+    P.add(S.box, 0, 0, zc, cw, 0.02, cl, MARBLE, 11);
     for (const dx of [-1, 1]) {
-      P.add(S.box, dx * 0.74, 0, 1.36, 0.14, 0.3, 1.28, STONE, 12);
-      P.add(S.box, dx * 0.74, 0.3, 1.36, 0.18, 0.04, 1.32, LEAD);
+      P.add(S.box, dx * (cw / 2 - 0.08), 0, zc, 0.17, 0.3, cl, STONE, 12);
+      for (let i = 0; i < 5; i++) domed(P, S, dx * (cw / 2 - 0.08), 0.3, c0 + (i + 0.5) * cl / 5, 0.17, 0.08, 0, STONE, false);
     }
-    P.add(S.box, 0, 0, 1.96, 1.62, 0.3, 0.14, STONE, 12);
-    P.add(S.box, 0, 0.3, 1.96, 1.66, 0.04, 0.18, LEAD);
-    for (let i = -3; i <= 3; i++) P.add(S.dome, i * 0.22, 0.34, 1.96, 0.16, 0.12, 0.16, LEAD);
-    P.add(S.tube, 0, 0, 1.3, 0.26, 0.2, 0.26, STONE, 11);
-    P.add(S.dome, 0, 0.2, 1.3, 0.3, 0.2, 0.3, LEAD);
+    P.add(S.box, 0, 0, c0 + cl - 0.08, cw, 0.3, 0.17, STONE, 12);
+    for (let i = 0; i < 6; i++) domed(P, S, -cw / 2 + (i + 0.5) * cw / 6, 0.3, c0 + cl - 0.08, 0.17, 0.08, 0, STONE, false);
+    P.add(S.box, 0, 0, c0 + cl - 0.06, 0.32, 0.44, 0.24, W, 12); // the gate
+    domed(P, S, 0, 0.44, c0 + cl - 0.06, 0.24, 0.12);
+    P.add(S.oct, 0, 0.02, zc, 0.3, 0.16, 0.3, MARBLE, 16); // the fountain
+    domed(P, S, 0, 0.18, zc, 0.34, 0.12, 0, STONE, false);
   }
-  if (o.minarets === 6) {
-    minaret(P, S, -0.8, 2.0, 2.0); minaret(P, S, 0.8, 2.0, 2.0);
-    for (let i = 1; i < 11; i++) { const t = i / 11; P.add(S.box, -0.8 + t * 1.6, 1.85 - Math.sin(t * Math.PI) * 0.32, 0.8, 0.05, 0.05, 0.05, '#ffd9a0', 5); }
+  for (const [mx, mz, h, b] of o.minarets) minaret(P, S, mx, mz, h, b);
+}
+function ayasofya(P: Parts, S: Shapes) {
+  const W = '#dc957c', R = '#c97862';
+  P.add(S.box, 0, 0, 0, 1.5, 0.5, 1.35, W, 12);
+  P.add(S.box, 0, 0.5, 0, 1.56, 0.04, 1.41, LEAD, 3);
+  P.add(S.box, 0, 0, 0.78, 1.3, 0.34, 0.24, W, 12); P.add(S.box, 0, 0.34, 0.78, 1.34, 0.03, 0.28, LEAD, 3); // the narthex
+  P.add(S.box, 0, 0.54, 0, 0.98, 0.42, 0.98, W, 17);
+  P.add(S.box, 0, 0.96, 0, 1.03, 0.035, 1.03, LEAD, 3);
+  domed(P, S, 0, 0.995, 0, 1.0, 0.36, 0.13, '#e2b9a2'); // the great shallow dome on its ring of windows
+  for (const dz of [-1, 1]) {
+    domed(P, S, 0, 0.54, dz * 0.5, 0.92, 0.4, 0, W, false);
+    for (const dx of [-1, 1]) domed(P, S, dx * 0.34, 0.5, dz * 0.62, 0.42, 0.2, 0, W, false);
   }
+  for (const dx of [-1, 1]) for (const dz of [-0.3, 0.3]) { // the four great buttresses
+    P.add(S.box, dx * 0.66, 0, dz, 0.3, 0.98, 0.26, R, 14);
+    P.add(dx > 0 ? S.gableZ : S.gableZ, dx * 0.66, 0.98, dz, 0.34, 0.12, 0.3, LEAD, 3);
+  }
+  for (const [tx, tz] of [[-1.0, -0.2], [-1.05, 0.25], [-0.95, 0.62]]) { P.add(S.oct, tx, 0, tz, 0.3, 0.22, 0.3, STONE, 14); domed(P, S, tx, 0.22, tz, 0.3, 0.16); } // the sultans' tombs
+  minaret(P, S, 0.92, 0.82, 2.5, 1, '#c97862'); minaret(P, S, -0.92, 0.82, 2.5, 1);
+  minaret(P, S, 0.92, -0.78, 2.5, 1); minaret(P, S, -0.92, -0.78, 2.5, 1);
 }
 function galata(P: Parts, S: Shapes) {
-  P.add(S.tube, 0, 0, 0, 1.0, 0.14, 1.0, ROCK);
-  P.add(S.tube, 0, 0.14, 0, 0.86, 1.75, 0.86, '#d3c3a4', 12);
-  P.add(S.tube, 0, 1.89, 0, 1.06, 0.1, 1.06, '#8c7f6a');
-  P.add(S.tube, 0, 1.99, 0, 1.1, 0.03, 1.1, '#ffd9a0', 5);
-  P.add(S.tube, 0, 1.99, 0, 0.76, 0.38, 0.76, '#ddceb0', 12);
-  P.add(S.tube, 0, 2.37, 0, 0.9, 0.06, 0.9, '#8c7f6a');
-  P.add(S.cone, 0, 2.43, 0, 0.94, 0.9, 0.94, SLATE);
-  P.add(S.cone, 0, 3.3, 0, 0.05, 0.3, 0.05, GOLD);
+  const W = '#d8c8a8';
+  P.add(S.oct, 0, 0, 0, 1.14, 0.12, 1.14, ROCK, 4);
+  P.add(S.tube, 0, 0.12, 0, 0.9, 0.3, 0.9, '#c9b996', 14);
+  P.add(S.tube, 0, 0.42, 0, 0.84, 1.36, 0.84, W, 16);
+  P.add(S.tube, 0, 1.78, 0, 0.9, 0.05, 0.9, '#a39678', 14);
+  P.add(S.tube, 0, 1.83, 0, 0.84, 0.3, 0.84, W, 16); // the storey of round arches
+  P.add(S.cone, 0, 2.06, 0, 1.08, 0.07, 1.08, '#a39678', 14);
+  P.add(S.tube, 0, 2.13, 0, 1.08, 0.03, 1.08, '#8c7f6a', 14); // the gallery and its rail
+  P.add(S.tube, 0, 2.16, 0, 1.06, 0.06, 1.06, '#6f6657', 16);
+  P.add(S.tube, 0, 2.22, 0, 1.1, 0.02, 1.1, '#ffd9a0', 5);
+  P.add(S.tube, 0, 2.16, 0, 0.72, 0.36, 0.72, '#e0d2b4', 16);
+  P.add(S.tube, 0, 2.52, 0, 0.86, 0.05, 0.86, '#8c7f6a', 14);
+  P.add(S.cone, 0, 2.57, 0, 0.88, 0.92, 0.88, SLATE, 3);
+  P.add(S.cone, 0, 3.3, 0, 0.16, 0.24, 0.16, SLATE, 3);
+  alem(P, S, 0, 3.5, 0, 1.1);
 }
 function maiden(P: Parts, S: Shapes) {
-  const W = '#f3ebd9', T = '#b5482c';
-  P.add(S.tube, 0, -0.1, 0, 1.05, 0.2, 1.05, ROCK);
-  P.add(S.box, -0.13, 0.1, 0.08, 0.56, 0.3, 0.5, W, 10);
-  P.add(S.roof, -0.13, 0.4, 0.08, 0.64, 0.2, 0.58, T);
-  P.add(S.box, 0.24, 0.1, -0.18, 0.3, 0.86, 0.3, W, 10);
-  P.add(S.box, 0.24, 0.96, -0.18, 0.4, 0.05, 0.4, STONE);
-  P.add(S.tube, 0.24, 1.01, -0.18, 0.22, 0.18, 0.22, W, 11);
-  P.add(S.dome, 0.24, 1.19, -0.18, 0.27, 0.32, 0.27, LEAD);
-  P.add(S.cone, 0.24, 1.32, -0.18, 0.025, 0.46, 0.025, GOLD);
-  P.add(S.box, 0.32, 1.64, -0.18, 0.15, 0.09, 0.012, '#d1202a');
-  for (const [dx, dz] of [[-0.4, -0.3], [0.42, 0.2], [-0.2, 0.42], [0, -0.45]]) P.add(S.box, dx, 0.12, dz, 0.06, 0.06, 0.06, '#ffd9a0', 5);
+  const W = '#f6efdf', T = '#b5482c';
+  P.add(S.oct, 0, -0.12, 0, 1.16, 0.18, 1.16, ROCK, 4);
+  P.add(S.oct, 0, 0.06, 0, 1.0, 0.06, 1.0, '#cfc3a8', 14); // the quay
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; P.add(S.box, Math.cos(a) * 0.46, 0.12, Math.sin(a) * 0.46, 0.04, 0.05, 0.04, '#ffd9a0', 5); }
+  P.add(S.box, -0.12, 0.12, 0.1, 0.56, 0.3, 0.44, W, 10); P.add(S.roof, -0.12, 0.42, 0.1, 0.64, 0.2, 0.52, T);
+  P.add(S.box, -0.2, 0.12, -0.24, 0.34, 0.22, 0.26, W, 10); P.add(S.gableX, -0.2, 0.34, -0.24, 0.4, 0.13, 0.3, T);
+  P.add(S.box, 0.24, 0.12, -0.14, 0.32, 0.8, 0.32, W, 10); // the tower
+  P.add(S.box, 0.24, 0.92, -0.14, 0.44, 0.04, 0.44, STONE, 14);
+  P.add(S.box, 0.24, 0.96, -0.14, 0.4, 0.05, 0.4, '#6f6657', 12);
+  P.add(S.oct, 0.24, 0.96, -0.14, 0.24, 0.22, 0.24, W, 16);
+  P.add(S.dome, 0.24, 1.18, -0.14, 0.3, 0.3, 0.3, LEAD, 3);
+  P.add(S.tube, 0.24, 1.3, -0.14, 0.09, 0.12, 0.09, W, 14);
+  P.add(S.cone, 0.24, 1.42, -0.14, 0.13, 0.2, 0.13, LEAD, 3);
+  P.add(S.tube, 0.24, 1.6, -0.14, 0.014, 0.5, 0.014, GOLD);
+  P.add(S.box, 0.33, 1.94, -0.14, 0.16, 0.1, 0.012, '#d1202a');
 }
 function topkapi(P: Parts, S: Shapes) {
-  const W = '#efe5d0';
-  P.add(S.box, 0, 0, 0, 1.6, 0.16, 1.2, STONE, 12);
-  P.add(S.box, -0.42, 0.16, -0.25, 0.55, 0.3, 0.42, W, 10); P.add(S.roof, -0.42, 0.46, -0.25, 0.62, 0.2, 0.5, LEAD);
-  P.add(S.box, 0.32, 0.16, 0.28, 0.66, 0.28, 0.36, W, 10); P.add(S.roof, 0.32, 0.44, 0.28, 0.74, 0.18, 0.44, LEAD);
-  for (let i = 0; i < 5; i++) { P.add(S.box, -0.62 + i * 0.2, 0.16, 0.44, 0.2, 0.2, 0.2, W, 10); P.add(S.dome, -0.62 + i * 0.2, 0.36, 0.44, 0.2, 0.16, 0.2, LEAD); }
-  P.add(S.box, 0.4, 0.16, -0.3, 0.2, 1.15, 0.2, W, 11);
-  P.add(S.cone, 0.4, 1.31, -0.3, 0.28, 0.55, 0.28, LEAD);
-  for (const [dx, dz] of [[-0.05, -0.05], [0.6, -0.1], [-0.6, 0.1]]) { P.add(S.tube, dx, 0.16, dz, 0.05, 0.2, 0.05, '#6b4a33'); P.add(S.ball, dx, 0.3, dz, 0.3, 0.34, 0.3, GREEN); }
+  const W = '#f1e7d2';
+  P.add(S.box, 0, 0, 0, 1.7, 0.13, 1.3, STONE, 14); // the terrace and its walls
+  for (const [x, z, sx, sz] of [[0, -0.62, 1.7, 0.06], [0, 0.62, 1.7, 0.06], [-0.82, 0, 0.06, 1.3], [0.82, 0, 0.06, 1.3]]) P.add(S.box, x, 0.13, z, sx, 0.14, sz, STONE, 14);
+  for (const dx of [-1, 1]) { // the Gate of Salutation: two pointed towers
+    P.add(S.oct, dx * 0.14 - 0.4, 0.13, 0.62, 0.17, 0.52, 0.17, W, 14);
+    P.add(S.cone, dx * 0.14 - 0.4, 0.65, 0.62, 0.2, 0.34, 0.2, LEAD, 3);
+  }
+  P.add(S.box, -0.4, 0.13, 0.62, 0.16, 0.34, 0.1, W, 12);
+  for (let i = 0; i < 8; i++) { // the kitchens: a row of domes, each with its chimney
+    P.add(S.box, 0.68, 0.13, -0.5 + i * 0.14, 0.2, 0.2, 0.13, W, 10);
+    P.add(S.dome, 0.68, 0.33, -0.5 + i * 0.14, 0.14, 0.12, 0.14, LEAD, 3);
+    P.add(S.tube, 0.74, 0.33, -0.5 + i * 0.14, 0.035, 0.2, 0.035, '#cdbf9f');
+  }
+  P.add(S.box, -0.45, 0.13, -0.28, 0.5, 0.26, 0.4, W, 10); P.add(S.roof, -0.45, 0.39, -0.28, 0.58, 0.16, 0.48, LEAD, 3); // the harem
+  for (const [x, z] of [[-0.6, -0.36], [-0.34, -0.36], [-0.6, -0.16], [-0.34, -0.16]]) P.add(S.dome, x, 0.42, z, 0.18, 0.16, 0.18, LEAD, 3);
+  P.add(S.box, 0.12, 0.13, 0.2, 0.5, 0.22, 0.26, W, 12); P.add(S.roof, 0.12, 0.35, 0.2, 0.62, 0.14, 0.38, LEAD, 3); // the audience hall, wide eaves
+  P.add(S.box, -0.2, 0.13, -0.3, 0.2, 1.0, 0.2, W, 14); // the Tower of Justice
+  P.add(S.box, -0.2, 1.13, -0.3, 0.26, 0.04, 0.26, STONE, 14);
+  P.add(S.oct, -0.2, 1.17, -0.3, 0.18, 0.22, 0.18, W, 16);
+  P.add(S.cone, -0.2, 1.39, -0.3, 0.25, 0.5, 0.25, LEAD, 3);
+  alem(P, S, -0.2, 1.87, -0.3, 0.7);
+  for (const [x, z, v] of [[0.3, -0.3, 0.2], [0.05, -0.1, 0.8], [0.4, 0.45, 0.6], [-0.1, 0.42, 0.3], [-0.65, 0.3, 0.9], [0.3, -0.05, 0.5]]) {
+    if (v < 0.4) P.add(S.cone, x, 0.13, z, 0.14, 0.6, 0.14, CYPRESS);
+    else { P.add(S.tube, x, 0.13, z, 0.04, 0.14, 0.04, '#6b4a33'); P.add(S.ball, x, 0.22, z, 0.26, 0.28, 0.26, GREEN); }
+  }
 }
 function dolmabahce(P: Parts, S: Shapes) {
-  const W = '#f1e9da';
-  P.add(S.box, 0, 0, 0, 2.3, 0.4, 0.42, W, 12); P.add(S.box, 0, 0.4, 0, 2.36, 0.05, 0.48, LEAD);
-  P.add(S.box, 0, 0, 0, 0.62, 0.62, 0.54, W, 12); P.add(S.box, 0, 0.62, 0, 0.68, 0.05, 0.6, LEAD); P.add(S.dome, 0, 0.67, 0, 0.36, 0.26, 0.36, LEAD);
-  for (const dx of [-1, 1]) { P.add(S.box, dx * 1.0, 0, 0, 0.34, 0.52, 0.5, W, 12); P.add(S.roof, dx * 1.0, 0.52, 0, 0.4, 0.14, 0.56, LEAD); }
-  P.add(S.box, -1.55, 0, 0.1, 0.16, 0.95, 0.16, W, 11); P.add(S.cone, -1.55, 0.95, 0.1, 0.2, 0.26, 0.2, LEAD);
-  P.add(S.box, 0, 0, 0.3, 2.4, 0.06, 0.14, STONE); // the quay
+  const W = '#f5eee0';
+  P.add(S.box, 0, 0, 0.36, 2.7, 0.07, 0.2, MARBLE, 14); // the quay and its white railing
+  P.add(S.box, 0, 0.07, 0.44, 2.7, 0.05, 0.02, '#ffffff', 12);
+  P.add(S.box, 0, 0, 0, 2.3, 0.38, 0.42, W, 12); P.add(S.box, 0, 0.38, 0, 2.36, 0.04, 0.48, STONE, 14);
+  P.add(S.gableX, 0, 0.42, 0, 2.3, 0.1, 0.42, LEAD, 3);
+  P.add(S.box, 0, 0, 0, 0.66, 0.66, 0.56, W, 17); // the ceremonial hall, taller, with its pediment
+  P.add(S.box, 0, 0.66, 0, 0.72, 0.04, 0.62, STONE, 14);
+  P.add(S.gableX, 0, 0.7, 0, 0.72, 0.16, 0.62, LEAD, 3);
+  P.add(S.gableZ, 0, 0.66, 0.26, 0.4, 0.14, 0.14, W, 14);
+  for (const dx of [-1, 1]) {
+    P.add(S.box, dx * 1.02, 0, 0, 0.34, 0.5, 0.5, W, 17); P.add(S.box, dx * 1.02, 0.5, 0, 0.38, 0.035, 0.54, STONE, 14);
+    P.add(S.roof, dx * 1.02, 0.535, 0, 0.36, 0.14, 0.52, LEAD, 3);
+    P.add(S.box, dx * 0.52, 0, 0.02, 0.12, 0.44, 0.46, W, 14);
+  }
+  P.add(S.box, -1.6, 0, -0.1, 0.34, 0.3, 0.1, W, 12); // the ornate gate
+  P.add(S.gableX, -1.6, 0.3, -0.1, 0.38, 0.1, 0.12, STONE, 14);
+  P.add(S.box, 1.62, 0, 0.1, 0.17, 0.26, 0.17, W, 14); // the clock tower, in four stages
+  P.add(S.box, 1.62, 0.26, 0.1, 0.14, 0.26, 0.14, W, 17);
+  P.add(S.box, 1.62, 0.52, 0.1, 0.11, 0.24, 0.11, W, 14);
+  P.add(S.cone, 1.62, 0.76, 0.1, 0.14, 0.2, 0.14, LEAD, 3);
+  for (let i = 0; i < 7; i++) { const x = -1.0 + i * 0.33; P.add(S.tube, x, 0, -0.34, 0.035, 0.12, 0.035, '#6b4a33'); P.add(S.ball, x, 0.08, -0.34, 0.22, 0.24, 0.22, i % 2 ? GREEN : '#6aa04a'); }
 }
 function haydarpasa(P: Parts, S: Shapes) {
-  const W = '#dfcda8';
-  P.add(S.box, 0, 0, 0, 1.4, 0.6, 0.5, W, 12); P.add(S.gableX, 0, 0.6, 0, 1.46, 0.3, 0.56, SLATE);
+  const W = '#e3d0a6', D = '#c9b488';
+  P.add(S.box, 0, 0, 0.42, 1.9, 0.05, 0.3, STONE, 14); // the steps down to the water
+  P.add(S.box, 0, 0, 0, 1.5, 0.2, 0.52, D, 12);
+  P.add(S.box, 0, 0.2, 0, 1.46, 0.42, 0.5, W, 10);
+  P.add(S.box, 0, 0.62, 0, 1.52, 0.035, 0.56, STONE, 14);
+  P.add(S.gableX, 0, 0.655, 0, 1.5, 0.3, 0.54, SLATE, 3);
+  for (let i = -2; i <= 2; i++) if (i) { P.add(S.box, i * 0.26, 0.7, 0.2, 0.09, 0.1, 0.1, W, 10); P.add(S.gableZ, i * 0.26, 0.8, 0.2, 0.11, 0.07, 0.12, SLATE, 3); } // dormers
+  P.add(S.box, 0, 0.2, 0.24, 0.34, 0.6, 0.1, W, 17); P.add(S.gableX, 0, 0.8, 0.24, 0.36, 0.16, 0.12, SLATE, 3); // the clock gable
+  P.add(S.tube, 0, 0.6, 0.3, 0.1, 0.012, 0.1, GOLD);
   for (const dx of [-1, 1]) {
-    P.add(S.box, dx * 0.58, 0, -0.45, 0.32, 0.5, 0.62, W, 12); P.add(S.gableZ, dx * 0.58, 0.5, -0.45, 0.38, 0.24, 0.66, SLATE);
-    P.add(S.tube, dx * 0.64, 0, 0.26, 0.22, 0.86, 0.22, W, 11); P.add(S.cone, dx * 0.64, 0.86, 0.26, 0.27, 0.42, 0.27, SLATE);
+    P.add(S.tube, dx * 0.7, 0, 0.24, 0.24, 0.84, 0.24, W, 16); // the two turrets
+    P.add(S.tube, dx * 0.7, 0.84, 0.24, 0.28, 0.035, 0.28, STONE, 14);
+    P.add(S.cone, dx * 0.7, 0.875, 0.24, 0.27, 0.44, 0.27, SLATE, 3);
+    alem(P, S, dx * 0.7, 1.3, 0.24, 0.6);
+    P.add(S.box, dx * 0.6, 0, -0.5, 0.3, 0.5, 0.56, W, 10); P.add(S.gableZ, dx * 0.6, 0.5, -0.5, 0.34, 0.22, 0.6, SLATE, 3); // the wings
+  }
+  for (const x of [-0.24, 0, 0.24]) P.add(S.box, x, 0.02, -0.75, 0.12, 0.18, 0.9, '#8d949c', 1); // the platform roofs behind
+}
+function tower(P: Parts, S: Shapes) { // Beyazıt fire tower
+  P.add(S.oct, 0, 0, 0, 0.4, 0.16, 0.4, STONE, 14);
+  P.add(S.tube, 0, 0.16, 0, 0.28, 1.7, 0.28, MARBLE, 16);
+  P.add(S.cone, 0, 1.8, 0, 0.5, 0.07, 0.5, STONE, 14);
+  P.add(S.tube, 0, 1.87, 0, 0.5, 0.03, 0.5, STONE, 14);
+  P.add(S.tube, 0, 1.9, 0, 0.36, 0.3, 0.36, MARBLE, 16);
+  P.add(S.tube, 0, 2.2, 0, 0.3, 0.2, 0.3, MARBLE, 16);
+  P.add(S.tube, 0, 2.2, 0, 0.42, 0.02, 0.42, '#ffd9a0', 5);
+  P.add(S.cone, 0, 2.4, 0, 0.36, 0.5, 0.36, LEAD, 3);
+  alem(P, S, 0, 2.88, 0, 0.7);
+}
+function barracks(P: Parts, S: Shapes) { // Selimiye: a great square around a parade ground, a tower on each corner
+  const W = '#efdfb8', T = '#b5482c';
+  P.add(S.box, 0, 0, 0, 1.3, 0.02, 1.3, '#86b25c');
+  for (const [x, z, sx, sz] of [[0, -0.75, 1.7, 0.26], [0, 0.75, 1.7, 0.26], [-0.75, 0, 0.26, 1.7], [0.75, 0, 0.26, 1.7]]) {
+    P.add(S.box, x, 0, z, sx, 0.42, sz, W, 10);
+    P.add(S.box, x, 0.42, z, sx + 0.05, 0.03, sz + 0.05, STONE, 14);
+    P.add(sx > sz ? S.gableX : S.gableZ, x, 0.45, z, sx + 0.04, 0.14, sz + 0.04, T);
+  }
+  for (const dx of [-1, 1]) for (const dz of [-1, 1]) {
+    P.add(S.box, dx * 0.78, 0, dz * 0.78, 0.34, 0.8, 0.34, W, 10);
+    P.add(S.box, dx * 0.78, 0.8, dz * 0.78, 0.4, 0.035, 0.4, STONE, 14);
+    P.add(S.box, dx * 0.78, 0.835, dz * 0.78, 0.22, 0.2, 0.22, W, 17);
+    P.add(S.roof, dx * 0.78, 1.035, dz * 0.78, 0.3, 0.42, 0.3, LEAD, 3);
+    alem(P, S, dx * 0.78, 1.42, dz * 0.78, 0.6);
   }
 }
+function ortakoy(P: Parts, S: Shapes) { // a single dome on a tall cube of windows, on its own quay
+  const W = '#f6f0e3';
+  P.add(S.box, 0, -0.1, 0, 1.5, 0.14, 1.3, MARBLE, 14);
+  P.add(S.box, 0, 0.04, 0, 0.92, 0.78, 0.92, W, 17);
+  for (const dx of [-1, 1]) for (const dz of [-1, 1]) { P.add(S.box, dx * 0.46, 0.04, dz * 0.46, 0.16, 0.9, 0.16, W, 14); P.add(S.roof, dx * 0.46, 0.94, dz * 0.46, 0.18, 0.14, 0.18, LEAD, 3); }
+  P.add(S.box, 0, 0.82, 0, 0.98, 0.04, 0.98, STONE, 14);
+  domed(P, S, 0, 0.86, 0, 0.86, 0.42, 0.08, W);
+  P.add(S.box, 0, 0.04, 0.62, 0.9, 0.36, 0.34, W, 12); P.add(S.box, 0, 0.4, 0.62, 0.94, 0.03, 0.38, LEAD, 3); // the sultan's lodge
+  minaret(P, S, -0.42, 0.84, 2.0, 2); minaret(P, S, 0.42, 0.84, 2.0, 2);
+}
 function bridge(P: Parts, S: Shapes, L: number, tall: boolean) {
-  if (!tall) { // a low bridge on piers
-    P.add(S.box, 0, 0.2, 0, L, 0.05, 0.28, '#9c978e');
-    for (let x = -L / 2 + 0.3; x < L / 2; x += 0.6) P.add(S.box, x, -0.1, 0, 0.1, 0.3, 0.22, '#7d786f');
-    for (const dz of [-0.14, 0.14]) P.add(S.box, 0, 0.25, dz, L, 0.04, 0.015, '#6f6a62');
-    for (let x = -L / 2 + 0.2; x < L / 2; x += 0.45) P.add(S.box, x, 0.3, 0.14, 0.04, 0.04, 0.04, '#ffd9a0', 5);
+  if (!tall) { // a low bridge on piers: the roadway above, the row of restaurants below, towers where it opens
+    P.add(S.box, 0, 0.22, 0, L, 0.05, 0.3, '#9c978e');
+    P.add(S.box, 0, 0.08, 0, L * 0.9, 0.09, 0.26, '#6f6a62', 2);
+    for (let x = -L / 2 + 0.3; x < L / 2; x += 0.5) P.add(S.box, x, -0.12, 0, 0.1, 0.2, 0.24, '#7d786f');
+    for (const dz of [-0.15, 0.15]) P.add(S.box, 0, 0.27, dz, L, 0.035, 0.015, '#5f5a52');
+    for (const sx of [-1, 1]) for (const dz of [-1, 1]) { P.add(S.box, sx * 0.3, 0.27, dz * 0.17, 0.1, 0.24, 0.07, '#b9b2a4', 14); P.add(S.roof, sx * 0.3, 0.51, dz * 0.17, 0.12, 0.07, 0.09, LEAD, 3); }
+    for (let x = -L / 2 + 0.2; x < L / 2; x += 0.4) for (const dz of [-0.15, 0.15]) P.add(S.box, x, 0.31, dz, 0.035, 0.035, 0.035, '#ffd9a0', 5);
     return;
   }
-  const H = 2.1, D = 0.8, T = 0.3 * L; // a suspension bridge: towers, the main cables, hangers
-  P.add(S.box, 0, D, 0, L, 0.06, 0.26, '#a6acb4');
+  const H = 2.1, D = 0.8, T = 0.3 * L, C = '#c9ced5'; // a suspension bridge: towers, the main cables, hangers
+  P.add(S.box, 0, D, 0, L, 0.05, 0.28, '#a6acb4');
+  P.add(S.box, 0, D - 0.06, 0, L, 0.06, 0.2, '#868d96');
+  for (const dz of [-0.14, 0.14]) P.add(S.box, 0, D + 0.05, dz, L, 0.03, 0.012, C);
   for (const sx of [-1, 1]) {
-    for (const dz of [-0.13, 0.13]) P.add(S.box, sx * T, -0.1, dz, 0.07, H + 0.1, 0.07, '#c3c8cf', 11);
-    for (const y of [D - 0.12, H - 0.25, H * 0.72]) P.add(S.box, sx * T, y, 0, 0.06, 0.06, 0.3, '#c3c8cf', 11);
+    for (const dz of [-0.14, 0.14]) { P.add(S.box, sx * T, -0.1, dz, 0.08, H + 0.1, 0.08, C, 11); P.add(S.box, sx * T, -0.1, dz, 0.16, 0.24, 0.16, '#8d949c'); }
+    for (const y of [D - 0.14, H - 0.22, H * 0.7]) P.add(S.box, sx * T, y, 0, 0.07, 0.07, 0.3, C, 11);
+    P.add(S.box, sx * (L / 2 - 0.12), 0, 0, 0.24, D, 0.3, '#b9b2a4', 14); // the anchorages
   }
-  const N = 34;
+  const N = 40;
   for (let i = 0; i <= N; i++) {
     const x = -L / 2 + (i / N) * L, u = Math.abs(x) / T;
     const y = u <= 1 ? D + 0.12 + (H - D - 0.12) * u * u : H - (H - D) * Math.min(1, (u - 1) / (L / 2 / T - 1));
-    for (const dz of [-0.13, 0.13]) {
-      P.add(S.box, x, y, dz, L / N + 0.02, 0.035, 0.035, '#c3c8cf');
-      if (i % 2 === 0 && y > D + 0.1) P.add(S.box, x, D, dz, 0.012, y - D, 0.012, '#c3c8cf');
+    for (const dz of [-0.14, 0.14]) {
+      P.add(S.box, x, y, dz, L / N + 0.02, 0.035, 0.035, C);
+      if (y > D + 0.1) P.add(S.box, x, D, dz, 0.01, y - D, 0.01, C);
     }
-    if (i % 2 === 0) P.add(S.box, x, y + 0.04, 0.13, 0.05, 0.05, 0.05, '#ffd9a0', 5);
-  }
-}
-
-function tower(P: Parts, S: Shapes) { // Beyazıt fire tower
-  P.add(S.tube, 0, 0, 0, 0.3, 1.9, 0.3, '#efe6d2', 11);
-  P.add(S.tube, 0, 1.9, 0, 0.5, 0.08, 0.5, STONE, 11);
-  P.add(S.tube, 0, 1.98, 0, 0.36, 0.4, 0.36, '#efe6d2', 12);
-  P.add(S.cone, 0, 2.38, 0, 0.44, 0.5, 0.44, LEAD);
-}
-function barracks(P: Parts, S: Shapes) { // Selimiye: a great square with a tower on each corner
-  const W = '#ead9b0', T = '#b5482c';
-  for (const [x, z, sx, sz] of [[0, -0.75, 1.7, 0.26], [0, 0.75, 1.7, 0.26], [-0.75, 0, 0.26, 1.7], [0.75, 0, 0.26, 1.7]]) {
-    P.add(S.box, x, 0, z, sx, 0.4, sz, W, 12);
-    P.add(sx > sz ? S.gableX : S.gableZ, x, 0.4, z, sx + 0.04, 0.14, sz + 0.04, T);
-  }
-  for (const dx of [-1, 1]) for (const dz of [-1, 1]) {
-    P.add(S.box, dx * 0.78, 0, dz * 0.78, 0.34, 0.85, 0.34, W, 10);
-    P.add(S.roof, dx * 0.78, 0.85, dz * 0.78, 0.4, 0.4, 0.4, LEAD);
+    if (i % 2 === 0) P.add(S.box, x, y + 0.04, 0.14, 0.05, 0.05, 0.05, '#ffd9a0', 5);
   }
 }
 
@@ -309,22 +435,28 @@ type Mark = {
   rot?: number; s?: number; sea?: boolean; shore?: boolean; x?: number; z?: number; y?: number;
 };
 const MARKS: Mark[] = [
-  { name: 'Galata Kulesi', ll: [28.9742, 41.0256], r: 0.62, top: 3.7, make: galata },
-  { name: 'Ayasofya', ll: [28.98, 41.0085], r: 1.0, top: 2.9, make: (P, S) => mosque(P, S, { wall: '#d58e75', dome: 1.12, minarets: 4, court: false, buttress: true }), rot: QIBLA + 0.5 },
-  { name: 'Sultanahmet', ll: [28.9766, 41.0054], r: 1.2, top: 2.9, make: (P, S) => mosque(P, S, { wall: '#d9d4c8', dome: 1.0, minarets: 6, court: true }), rot: QIBLA },
-  { name: 'Kız Kulesi', ll: [29.0041, 41.0211], r: 0.6, top: 2.0, make: maiden, sea: true },
-  { name: 'Süleymaniye', ll: [28.9638, 41.0162], r: 1.15, top: 2.9, make: (P, S) => mosque(P, S, { wall: '#d8d0bd', dome: 1.08, minarets: 4, court: true }), rot: QIBLA },
-  { name: 'Topkapı Sarayı', ll: [28.984, 41.0128], r: 0.95, top: 1.9, make: topkapi, rot: 0.5 },
-  { name: 'Dolmabahçe', ll: [28.9996, 41.039], r: 1.15, top: 1.3, make: dolmabahce, shore: true },
-  { name: 'Haydarpaşa', ll: [29.0193, 40.9965], r: 0.9, top: 1.5, make: haydarpasa, shore: true },
-  { name: 'Ortaköy Camii', ll: [29.0268, 41.0473], r: 0.62, top: 2.3, make: (P, S) => mosque(P, S, { wall: '#f1e9da', dome: 0.9, minarets: 2, court: false }), rot: QIBLA, s: 0.8 },
-  { name: 'Yeni Cami', ll: [28.9721, 41.0169], r: 0.7, top: 2.3, make: (P, S) => mosque(P, S, { wall: '#d6d0c2', dome: 0.95, minarets: 2, court: false }), rot: QIBLA, s: 0.85 },
+  { name: 'Galata Kulesi', ll: [28.9742, 41.0256], r: 0.65, top: 3.9, make: galata },
+  { name: 'Ayasofya', ll: [28.98, 41.0085], r: 1.15, top: 3.1, make: ayasofya, rot: QIBLA + 0.5 },
+  { name: 'Sultanahmet', ll: [28.9766, 41.0054], r: 1.25, top: 3.1, make: (P, S) => { // six minarets, and at night the lights strung between two of them
+    mosque(P, S, { wall: '#dedad0', minarets: [[-0.72, -0.72, 2.7, 3], [0.72, -0.72, 2.7, 3], [-0.72, 0.72, 2.7, 3], [0.72, 0.72, 2.7, 3], [-0.6, 1.84, 2.1, 2], [0.6, 1.84, 2.1, 2]] });
+    for (let i = 1; i < 11; i++) { const t = i / 11; P.add(S.box, -0.72 + t * 1.44, 1.9 - Math.sin(t * Math.PI) * 0.3, 0.72, 0.05, 0.05, 0.05, '#ffd9a0', 5); }
+  }, rot: QIBLA },
+  { name: 'Kız Kulesi', ll: [29.0041, 41.0211], r: 0.6, top: 2.3, make: maiden, sea: true },
+  { name: 'Süleymaniye', ll: [28.9638, 41.0162], r: 1.25, top: 3.1, make: (P, S) => { // two half-domes, taller minarets by the hall, the tombs behind
+    mosque(P, S, { wall: '#dbd3c0', dome: 1.06, semis: 2, minarets: [[-0.72, 0.68, 2.8, 3], [0.72, 0.68, 2.8, 3], [-0.6, 1.84, 2.1, 2], [0.6, 1.84, 2.1, 2]] });
+    for (const dx of [-0.3, 0.32]) { P.add(S.oct, dx, 0, -0.98, 0.34, 0.26, 0.34, STONE, 16); domed(P, S, dx, 0.26, -0.98, 0.34, 0.18); }
+  }, rot: QIBLA },
+  { name: 'Topkapı Sarayı', ll: [28.984, 41.0128], r: 1.05, top: 2.1, make: topkapi, rot: 0.5 },
+  { name: 'Dolmabahçe', ll: [28.9996, 41.039], r: 1.25, top: 1.3, make: dolmabahce, shore: true },
+  { name: 'Haydarpaşa', ll: [29.0193, 40.9965], r: 0.95, top: 1.6, make: haydarpasa, shore: true },
+  { name: 'Ortaköy Camii', ll: [29.0268, 41.0473], r: 0.7, top: 2.5, make: ortakoy, shore: true, s: 0.8 },
+  { name: 'Yeni Cami', ll: [28.9721, 41.0169], r: 0.95, top: 2.6, make: (P, S) => mosque(P, S, { wall: '#d6d0c2', minarets: [[-0.72, 0.7, 2.4, 3], [0.72, 0.7, 2.4, 3]] }), rot: QIBLA, s: 0.72 },
   { name: 'Selimiye Kışlası', ll: [29.0165, 41.0074], r: 1.0, top: 1.4, make: barracks, rot: 0.35 },
-  { name: 'Fatih Camii', ll: [28.9498, 41.0197], r: 0.9, top: 2.6, make: (P, S) => mosque(P, S, { wall: '#d8d0bd', dome: 1.0, minarets: 2, court: true }), rot: QIBLA, s: 0.9 },
+  { name: 'Fatih Camii', ll: [28.9498, 41.0197], r: 1.1, top: 2.6, make: (P, S) => mosque(P, S, { wall: '#dbd3c0', minarets: [[-0.72, 0.7, 2.4, 2], [0.72, 0.7, 2.4, 2]] }), rot: QIBLA, s: 0.8 },
   { name: 'Beylerbeyi Sarayı', ll: [29.04, 41.0427], r: 0.85, top: 1.1, make: dolmabahce, shore: true, s: 0.7 },
   { name: 'Çırağan Sarayı', ll: [29.0153, 41.0435], r: 0.85, top: 1.1, make: dolmabahce, shore: true, s: 0.7 },
   { name: 'Beyazıt Kulesi', ll: [28.9649, 41.0128], r: 0.32, top: 3.0, make: tower },
-  { name: 'Mihrimah Sultan', ll: [29.016, 41.0268], r: 0.6, top: 2.2, make: (P, S) => mosque(P, S, { wall: '#d8d0bd', dome: 0.95, minarets: 2, court: false }), rot: QIBLA, s: 0.75 },
+  { name: 'Mihrimah Sultan', ll: [29.016, 41.0268], r: 0.75, top: 2.4, make: (P, S) => mosque(P, S, { wall: '#dbd3c0', semis: 2, court: false, minarets: [[-0.72, 0.7, 2.2, 1], [0.72, 0.7, 2.2, 1]] }), rot: QIBLA, s: 0.72 },
 ];
 /** bridges, shore to shore (from the OpenStreetMap ways) */
 const BRIDGES: { name: string; a: LL; b: LL; tall: boolean }[] = [
@@ -342,7 +474,7 @@ type City = {
 
 function buildCity(g: Grid, S: Shapes, map: MapData): City {
   const n = g.n, P = new Parts();
-  const k = 1.08 * Math.min(1.5, Math.sqrt(n / 25)); // landmarks are drawn large, as on a tourist map, and grow a little with the code
+  const k = 1.14 * Math.min(1.5, Math.sqrt(n / 25)); // landmarks are drawn large, as on a tourist map, and grow a little with the code
   const X = (c: number) => c - n / 2 + 0.5, Z = (r: number) => r - n / 2 + 0.5;
   const world = ([lon, lat]: LL): [number, number] => [((lon - LON0) / (LON1 - LON0)) * n - n / 2, ((LAT1 - lat) / (LAT1 - LAT0)) * n - n / 2];
   const sd = (x: number, z: number) => mapAt(map, x, z, n)[0];
@@ -406,10 +538,10 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
     if (h1 > 0.955) { // a neighbourhood mosque: one dome, one minaret
       P.add(S.box, 0, 0, 0, 0.8, 0.42, 0.8, '#e9e1cf', 12);
       P.add(S.box, 0, 0.42, 0, 1, 0.05, 1, LEAD, 1, tone);
-      P.add(S.dome, 0, 0.47, 0, 0.7, 0.5, 0.7, LEAD);
-      P.add(S.tube, 0.38, 0, 0.38, 0.09, 1.5, 0.09, '#f1e8d4', 11);
+      P.add(S.dome, 0, 0.47, 0, 0.7, 0.5, 0.7, LEAD, 3);
+      P.add(S.tube, 0.38, 0, 0.38, 0.09, 1.5, 0.09, '#f1e8d4', 14);
       P.add(S.tube, 0.38, 1.05, 0.38, 0.17, 0.04, 0.17, '#ffd9a0', 5);
-      P.add(S.cone, 0.38, 1.5, 0.38, 0.13, 0.36, 0.13, LEAD);
+      P.add(S.cone, 0.38, 1.5, 0.38, 0.13, 0.36, 0.13, LEAD, 3);
       continue;
     }
     const roofC = pick(ROOFS, h1 * 7.3);
@@ -438,7 +570,7 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
   const labels: City['labels'] = [];
   for (const m of marks) {
     P.at(m.x, m.y!, m.z, m.rot ?? 0, m.s, 0.55);
-    if (!m.sea) P.add(S.tube, 0, -0.9, 0, m.r * 2, 0.92, m.r * 2, '#cdbf9f'); // a terrace to stand on
+    if (!m.sea && !m.shore) P.add(S.oct, 0, -0.9, 0, m.r * 1.75, 0.9, m.r * 1.75, '#e6dcc5', 4); // a low terrace, level on the slope
     m.make(P, S);
     labels.push({ name: m.name, x: m.x, y: m.y! + m.top * m.s, z: m.z });
   }
@@ -564,28 +696,49 @@ void main() {
   float nf = uNight * (1.0 - uFlat);
   vec3 col = vCol;
   float win = 0.0, lit = 0.0, tw = 1.0;
-  if (k != 1.0 && k < 4.5 && abs(n.y) < 0.5) {
-    // windows (arches on the long walls), and a door on a house's ground floor
-    float cols = k > 1.5 ? 6.0 : 2.0;
-    vec2 g = vec2(vUv.x * cols, vY * 3.4);
+  bool house = k < 0.5, arcade = abs(k - 2.0) < 0.1, lead = abs(k - 3.0) < 0.1, stone = abs(k - 4.0) < 0.1, round_ = abs(k - 6.0) < 0.1, hall = abs(k - 7.0) < 0.1;
+  bool upright = abs(n.y) < 0.5;
+  // stone: the courses of the masonry, and the joints breaking from one course to the next
+  if (upright && (stone || round_ || arcade || hall)) {
+    float course = floor(vY * 7.0);
+    col *= 1.0 - 0.055 * mod(course, 2.0) - 0.04 * step(0.9, fract(vUv.x * (round_ ? 18.0 : 9.0) + course * 0.5));
+  }
+  if (upright && (house || arcade || round_ || hall)) {
+    float cols = house ? 2.0 : arcade ? 6.0 : round_ ? 14.0 : 5.0;
+    vec2 g = vec2(vUv.x * cols, vY * (hall ? 1.9 : 3.4));
     vec2 f = fract(g), id = floor(g);
-    win = step(0.26, f.x) * step(f.x, 0.74) * step(0.3, f.y) * step(f.y, 0.78) * step(0.5, id.y + step(1.5, k)) * step(0.0, vY);
-    float door = step(k, 0.5) * step(vY, 0.25) * step(0.0, vY) * step(abs(vUv.x - 0.5), 0.1);
+    float dx = f.x - 0.5;
+    if (house) {
+      win = step(0.26, f.x) * step(f.x, 0.74) * step(0.3, f.y) * step(f.y, 0.78) * step(0.5, id.y) * step(0.0, vY);
+      col = mix(col, vec3(0.11, 0.06, 0.035), step(vY, 0.25) * step(0.0, vY) * step(abs(vUv.x - 0.5), 0.1)); // the door
+    } else {
+      // round-headed openings; a hall's are tall, with a pale surround
+      float hw = hall ? 0.22 : 0.27, spring = hall ? 0.62 : 0.46;
+      float head = spring + sqrt(max(0.0, hw * hw - dx * dx));
+      win = step(abs(dx), hw) * step(0.12, f.y) * step(f.y, head) * step(0.0, vY);
+      float hw2 = hw + 0.07, head2 = spring + sqrt(max(0.0, hw2 * hw2 - dx * dx));
+      col = mix(col, col * 1.12 + 0.03, step(abs(dx), hw2) * step(0.08, f.y) * step(f.y, head2 + 0.0) * (1.0 - win) * 0.7);
+    }
     vec2 seed = id + vec2(vCol.r * 37.0 + n.x * 3.0, vCol.g * 91.0 + n.z * 5.0);
     // lights go on and off through the evening, each window in its own time
-    lit = step(0.5, hash(seed + floor(uTime * 0.12 + hash(seed + 3.0) * 9.0)));
+    lit = step(house ? 0.5 : 0.25, hash(seed + floor(uTime * 0.12 + hash(seed + 3.0) * 9.0)));
     tw = 0.75 + 0.5 * hash(seed + 7.0);
-    col = mix(col, uGlass, win * 0.8);
-    col = mix(col, vec3(0.11, 0.06, 0.035), door);
+    col = mix(col, uGlass, win * (house ? 0.8 : 0.72));
   }
   // day: a warm low sun, cool sky in the shade, a little darker towards the street
   float lam = max(dot(n, uSun), 0.0);
   vec3 day = col * (vec3(0.5, 0.56, 0.68) * (0.92 + 0.3 * n.y) + vec3(1.08, 0.98, 0.82) * lam * 0.78);
-  if (k != 5.0 && abs(n.y) < 0.5) day *= 0.86 + 0.14 * smoothstep(0.0, 0.3, vY);
+  if (abs(k - 5.0) > 0.1 && upright) day *= 0.86 + 0.14 * smoothstep(0.0, 0.3, vY);
+  if (lead) {
+    // lead: the seams of the sheets running down the dome, a soft shine where the sun sits on it
+    float seam = 1.0 - 0.07 * smoothstep(0.75, 1.0, sin(atan(n.z, n.x) * 14.0)) * (1.0 - n.y * n.y);
+    day = day * seam + vec3(1.0, 0.97, 0.9) * pow(max(dot(n, normalize(uSun + vec3(0.0, 0.55, 0.0))), 0.0), 26.0) * 0.3;
+  }
   // night: moonlight, lit windows, floodlit landmarks, lamps
   vec3 dark = col * vec3(0.13, 0.17, 0.31) * (0.75 + 0.55 * lam + 0.15 * n.y);
   dark = mix(dark, vCol * vec3(1.0, 0.78, 0.5) * (1.0 - 0.4 * clamp(vY / 4.0, 0.0, 1.0)), glow * 0.82);
   dark = mix(dark, uLit * tw, win * lit);
+  if (lead) dark += vec3(0.1, 0.13, 0.2) * pow(max(n.y, 0.0), 3.0) * 0.5; // moonlight on the domes
   if (abs(k - 5.0) < 0.1) dark = uLit * 1.25;
   // the code: whatever is here takes the lightness of the module under it
   vec2 m = vM + uN * 0.5;
@@ -631,7 +784,7 @@ void main() {
     float ripple = smoothstep(0.55, 1.0, sin(out_ * 15.0 - uTime * 1.3)) * exp(-out_ * 2.2) * 0.35;
     vec3 seaDay = mix(vec3(0.34, 0.76, 0.8), uSea, depth) * (0.95 + 0.09 * wave) * (here.r > 0.5 ? 0.95 : 1.03) + glint * 0.16;
     seaDay = mix(seaDay, vec3(0.93, 0.98, 0.98), max(foam * 0.75, ripple));
-    vec3 seaDusk = vec3(0.03, 0.07, 0.15) * (here.r > 0.5 ? 0.88 : 1.08) + vec3(0.9, 0.75, 0.5) * glint * 0.22 + vec3(0.2, 0.26, 0.4) * max(foam, ripple) * 0.45;
+    vec3 seaDusk = vec3(0.03, 0.07, 0.15) * (here.r > 0.5 ? 0.88 : 1.08) + vec3(0.9, 0.75, 0.5) * glint * 0.07 + vec3(0.2, 0.26, 0.4) * max(foam, ripple) * 0.4;
     // ---- the code: the lightness of the module, the hue of what is really there
     vec3 code = here.r > 0.5 ? mix(uSeaDark, mix(uRoofDark, uGrassDark, park), land) : mix(uSeaPale, uStone, land) * (0.985 + 0.02 * hash(cell));
     col = mix(mix(mix(seaDay, landDay, land), mix(seaDusk, landDusk, land), nf), code, uFlat);
