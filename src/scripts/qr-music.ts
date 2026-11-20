@@ -8,18 +8,26 @@
  * the list of recordings; choosing one plays it from its beginning, and the list carries on from there.
  */
 const VOLUME = 3;
-/** the programme: one after the other, round and round */
-const TRACKS: { id: string; len: number; title: string; by: string }[] = [
-  { id: 'gr2OGRA96L8', len: 1635, title: 'Old Anatolian Turkish Traditional', by: 'Nezak Huns' },
-  { id: 'CnyLI7pl9Ys', len: 90, title: 'Turkey’s Most Stereotypical Music', by: 'Victor Lopez' },
+/** the recordings (YouTube id, length in seconds) and the pieces in each (where it starts, its name) */
+const VIDEOS: { id: string; len: number; pieces: [number, string][] }[] = [
+  { id: 'gr2OGRA96L8', len: 1635, pieces: [
+    [0, 'Hoca Dehhâni Gazel · Old Anatolian Turkish'], [232, 'Güzel Âşık · Ottoman Turkish'], [512, 'Yürürün · Hacivat Karagöz Neden Öldürüldü'],
+    [701, 'Qari Navo · Traditional Turkic Instrument'], [810, 'Nice Bir · Civilization 6 OST'], [930, 'Yelkenler Biçilecek · Civilization 6 OST'],
+    [1192, 'Rast Nakış Beste · Civilization 6 OST'], [1321, 'Hicaz Hümâyun Peşrevi · Civilization 6 OST'], [1428, 'Rondo Alla Turca · Mozart'],
+  ] },
+  { id: 'CnyLI7pl9Ys', len: 90, pieces: [[0, 'Turkey’s Most Stereotypical Music · Victor Lopez']] },
 ];
-const TOTAL = TRACKS.reduce((a, t) => a + t.len, 0);
+/** the programme: every piece, one after the other, round and round */
+const TRACKS = VIDEOS.flatMap((v) => v.pieces.map(([start, title], i) => ({ id: v.id, start, len: (v.pieces[i + 1]?.[0] ?? v.len) - start, title })));
+const TOTAL = VIDEOS.reduce((a, v) => a + v.len, 0);
 /** what the clock says is on now: which recording, and how far into it */
 const now = (): { id: string; at: number } => {
   let t = Math.floor(Date.now() / 1000) % TOTAL;
-  for (const tr of TRACKS) { if (t < tr.len) return { id: tr.id, at: t }; t -= tr.len; }
-  return { id: TRACKS[0].id, at: 0 };
+  for (const v of VIDEOS) { if (t < v.len) return { id: v.id, at: t }; t -= v.len; }
+  return { id: VIDEOS[0].id, at: 0 };
 };
+/** the piece that is at second `at` of recording `id` */
+const pieceAt = (id: string, at: number) => Math.max(0, TRACKS.findIndex((t) => t.id === id && at >= t.start && at < t.start + t.len));
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 const root = document.querySelector<HTMLElement>('[data-qr-music]');
@@ -31,19 +39,19 @@ if (root && button && card) {
   let on = true;
   try { on = localStorage.getItem('qr-sound') !== 'off'; } catch { /* no storage: on */ }
   let player: any = null, ready = false, wanted = false, loading = false;
-  /** a recording chosen from the list (then the clock no longer decides) */
-  let chosen: string | null = null;
-  let current = now().id, sounding = false;
+  /** a piece chosen from the list (then the clock no longer decides) */
+  let chosen = -1, manual = false;
+  let current = pieceAt(now().id, now().at), sounding = false;
 
-  const rows = TRACKS.map((t) => {
+  const rows = TRACKS.map((t, index) => {
     const li = document.createElement('li');
     const b = document.createElement('button');
     b.type = 'button';
     b.innerHTML = '<span class="qr__eq" aria-hidden="true"><i></i><i></i><i></i></span><span class="t"></span><span class="d"></span>';
-    b.querySelector('.t')!.textContent = `${t.title} · ${t.by}`;
+    b.querySelector('.t')!.textContent = t.title;
     b.querySelector('.d')!.textContent = clock(t.len);
     b.addEventListener('click', () => {
-      chosen = t.id;
+      chosen = index; manual = true;
       if (!on) { on = true; try { localStorage.setItem('qr-sound', 'on'); } catch { /* no storage */ } }
       load();
       play();
@@ -51,7 +59,7 @@ if (root && button && card) {
     });
     li.appendChild(b);
     list.appendChild(li);
-    return { id: t.id, b };
+    return { b };
   });
 
   const show = () => {
@@ -60,10 +68,9 @@ if (root && button && card) {
     button.setAttribute('aria-expanded', String(open));
     button.setAttribute('aria-label', !open ? 'Music' : on ? 'Music on. Turn it off' : 'Music off. Turn it on');
     card.hidden = !on;
-    const tr = TRACKS.find((t) => t.id === (chosen ?? current)) ?? TRACKS[0];
-    title.textContent = on ? tr.title : 'Music off';
+    title.textContent = on ? TRACKS[current].title.split(' · ')[0] : 'Music off';
     root.dataset.playing = String(on && sounding);
-    for (const r of rows) r.b.setAttribute('aria-current', String(on && r.id === tr.id));
+    rows.forEach((r, i) => r.b.setAttribute('aria-current', String(on && i === current)));
   };
   const play = () => {
     if (!on) return;
@@ -72,8 +79,9 @@ if (root && button && card) {
     player.unMute();
     // load at the clock's place (a seek before the first play is sometimes dropped, and it would start from 0:00);
     // a recording picked from the list starts at its beginning
-    const what = chosen ? { id: chosen, at: 0 } : now();
-    current = what.id;
+    const what = chosen >= 0 ? { id: TRACKS[chosen].id, at: TRACKS[chosen].start } : now();
+    chosen = -1;
+    current = pieceAt(what.id, what.at);
     player.loadVideoById({ videoId: what.id, startSeconds: what.at });
   };
   const load = () => {
@@ -87,18 +95,17 @@ if (root && button && card) {
           onReady: () => { ready = true; player.setVolume(VOLUME); if (wanted) play(); },
           onStateChange: (e: { data: number }) => {
             sounding = e.data === 1;
-            if (e.data === 0 && on) { // at the end: the next on the list after a chosen one, else whatever the clock says
-              if (chosen) chosen = TRACKS[(TRACKS.findIndex((t) => t.id === chosen) + 1) % TRACKS.length].id;
+            if (e.data === 0 && on) { // at the end of a recording: the next piece on the list, or whatever the clock says
+              if (manual) chosen = (TRACKS.map((t) => t.id).lastIndexOf(TRACKS[current].id) + 1) % TRACKS.length;
               play();
             }
             if (e.data === 1) {
               player.setVolume(VOLUME);
               const playing = player.getVideoData?.().video_id;
-              if (playing) current = playing;
-              if (!chosen) { // if it is not where the clock says (it began from the top after all), go there
+              if (!manual) { // if it is not where the clock says (it began from the top after all), go there
                 const want = now();
                 if (playing && playing !== want.id) return void play();
-                const len = TRACKS.find((t) => t.id === want.id)!.len, off = Math.abs(player.getCurrentTime() - want.at);
+                const len = VIDEOS.find((v) => v.id === want.id)!.len, off = Math.abs(player.getCurrentTime() - want.at);
                 if (off > 8 && off < len - 8) player.seekTo(want.at, true);
               }
             }
@@ -114,6 +121,12 @@ if (root && button && card) {
   };
 
   show();
+  // the name follows the music from piece to piece
+  setInterval(() => {
+    if (!ready || !sounding) return;
+    const id = player.getVideoData?.().video_id, i = id ? pieceAt(id, player.getCurrentTime()) : current;
+    if (i !== current) { current = i; show(); }
+  }, 1000);
   if (on) load(); // ahead of the first tap, so that tap can start it
   const first = (e: Event) => {
     if (root.contains(e.target as Node)) return;
