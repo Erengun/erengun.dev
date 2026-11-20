@@ -400,7 +400,7 @@ function ortakoy(P: Parts, S: Shapes) { // a single dome on a tall cube of windo
 }
 function bridge(P: Parts, S: Shapes, L: number, tall: boolean) {
   if (!tall) { // a low bridge on piers: the roadway above, the row of restaurants below, towers where it opens
-    P.add(S.box, 0, 0.22, 0, L, 0.05, 0.3, '#9c978e');
+    P.add(S.box, 0, 0.22, 0, L, 0.05, 0.3, '#9c978e', 11);
     P.add(S.box, 0, 0.08, 0, L * 0.9, 0.09, 0.26, '#6f6a62', 2);
     for (let x = -L / 2 + 0.3; x < L / 2; x += 0.5) P.add(S.box, x, -0.12, 0, 0.1, 0.2, 0.24, '#7d786f');
     for (const dz of [-0.15, 0.15]) P.add(S.box, 0, 0.27, dz, L, 0.035, 0.015, '#5f5a52');
@@ -409,8 +409,8 @@ function bridge(P: Parts, S: Shapes, L: number, tall: boolean) {
     return;
   }
   const H = 2.1, D = 0.8, T = 0.3 * L, C = '#c9ced5'; // a suspension bridge: towers, the main cables, hangers
-  P.add(S.box, 0, D, 0, L, 0.05, 0.28, '#a6acb4');
-  P.add(S.box, 0, D - 0.06, 0, L, 0.06, 0.2, '#868d96');
+  P.add(S.box, 0, D, 0, L, 0.05, 0.28, '#a6acb4', 11);
+  P.add(S.box, 0, D - 0.06, 0, L, 0.06, 0.2, '#868d96', 11);
   for (const dz of [-0.14, 0.14]) P.add(S.box, 0, D + 0.05, dz, L, 0.03, 0.012, C);
   for (const sx of [-1, 1]) {
     for (const dz of [-0.14, 0.14]) { P.add(S.box, sx * T, -0.1, dz, 0.08, H + 0.1, 0.08, C, 11); P.add(S.box, sx * T, -0.1, dz, 0.16, 0.24, 0.16, '#8d949c'); }
@@ -422,10 +422,11 @@ function bridge(P: Parts, S: Shapes, L: number, tall: boolean) {
     const x = -L / 2 + (i / N) * L, u = Math.abs(x) / T;
     const y = u <= 1 ? D + 0.12 + (H - D - 0.12) * u * u : H - (H - D) * Math.min(1, (u - 1) / (L / 2 / T - 1));
     for (const dz of [-0.14, 0.14]) {
-      P.add(S.box, x, y, dz, L / N + 0.02, 0.035, 0.035, C);
-      if (y > D + 0.1) P.add(S.box, x, D, dz, 0.01, y - D, 0.01, C);
+      P.add(S.box, x, y, dz, L / N + 0.02, 0.035, 0.035, C, 11);
+      if (y > D + 0.1) P.add(S.box, x, D, dz, 0.01, y - D, 0.01, C, 11);
     }
-    if (i % 2 === 0) P.add(S.box, x, y + 0.04, 0.14, 0.05, 0.05, 0.05, '#ffd9a0', 5);
+    for (const dz of [-0.14, 0.14]) P.add(S.box, x, y + 0.04, dz, 0.07, 0.07, 0.07, '#ffd9a0', 5);
+    if (i % 2 === 0) for (const dz of [-0.15, 0.15]) P.add(S.box, x, D + 0.08, dz, 0.05, 0.05, 0.05, '#ffd9a0', 5);
   }
 }
 
@@ -434,16 +435,18 @@ const QIBLA = -2.636;
 type Mark = {
   name: string; ll: LL; r: number; top: number; make: (P: Parts, S: Shapes) => void;
   rot?: number; s?: number; sea?: boolean; shore?: boolean; x?: number; z?: number; y?: number;
+  /** how far along its own length the model is slid, so that hall and courtyard together sit on the spot */
+  oz?: number;
 };
 const MARKS: Mark[] = [
   { name: 'Galata Kulesi', ll: [28.9742, 41.0256], r: 0.65, top: 3.9, make: galata },
   { name: 'Ayasofya', ll: [28.98, 41.0085], r: 1.15, top: 3.1, make: ayasofya, rot: QIBLA + 0.5 },
-  { name: 'Sultanahmet', ll: [28.9766, 41.0054], r: 1.25, top: 3.1, make: (P, S) => { // six minarets, and at night the lights strung between two of them
+  { name: 'Sultanahmet', ll: [28.9766, 41.0054], r: 1.42, oz: -0.6, top: 3.1, make: (P, S) => { // six minarets, and at night the lights strung between two of them
     mosque(P, S, { wall: '#dedad0', minarets: [[-0.72, -0.72, 2.7, 3], [0.72, -0.72, 2.7, 3], [-0.72, 0.72, 2.7, 3], [0.72, 0.72, 2.7, 3], [-0.6, 1.84, 2.1, 2], [0.6, 1.84, 2.1, 2]] });
     for (let i = 1; i < 11; i++) { const t = i / 11; P.add(S.box, -0.72 + t * 1.44, 1.9 - Math.sin(t * Math.PI) * 0.3, 0.72, 0.05, 0.05, 0.05, '#ffd9a0', 5); }
   }, rot: QIBLA },
   { name: 'Kız Kulesi', ll: [29.0041, 41.0211], r: 0.6, top: 2.3, make: maiden, sea: true },
-  { name: 'Süleymaniye', ll: [28.9638, 41.0162], r: 1.25, top: 3.1, make: (P, S) => { // two half-domes, taller minarets by the hall, the tombs behind
+  { name: 'Süleymaniye', ll: [28.9638, 41.0162], r: 1.42, oz: -0.5, top: 3.1, make: (P, S) => { // two half-domes, taller minarets by the hall, the tombs behind
     mosque(P, S, { wall: '#dbd3c0', dome: 1.06, semis: 2, minarets: [[-0.72, 0.68, 2.8, 3], [0.72, 0.68, 2.8, 3], [-0.6, 1.84, 2.1, 2], [0.6, 1.84, 2.1, 2]] });
     for (const dx of [-0.3, 0.32]) { P.add(S.oct, dx, 0, -0.98, 0.34, 0.26, 0.34, STONE, 16); domed(P, S, dx, 0.26, -0.98, 0.34, 0.18); }
   }, rot: QIBLA },
@@ -451,12 +454,12 @@ const MARKS: Mark[] = [
   { name: 'Dolmabahçe', ll: [28.9996, 41.039], r: 1.25, top: 1.3, make: dolmabahce, shore: true },
   { name: 'Haydarpaşa', ll: [29.0193, 40.9965], r: 0.95, top: 1.6, make: haydarpasa, shore: true },
   { name: 'Ortaköy Camii', ll: [29.0268, 41.0473], r: 0.7, top: 2.5, make: ortakoy, shore: true, s: 0.8 },
-  { name: 'Yeni Cami', ll: [28.9721, 41.0169], r: 0.95, top: 2.6, make: (P, S) => mosque(P, S, { wall: '#d6d0c2', minarets: [[-0.72, 0.7, 2.4, 3], [0.72, 0.7, 2.4, 3]] }), rot: QIBLA, s: 0.72 },
+  { name: 'Yeni Cami', ll: [28.9721, 41.0169], r: 0.95, top: 2.6, make: (P, S) => mosque(P, S, { wall: '#d6d0c2', court: false, minarets: [[-0.72, 0.7, 2.4, 3], [0.72, 0.7, 2.4, 3]] }), rot: QIBLA, s: 0.6 },
   { name: 'Selimiye Kışlası', ll: [29.0165, 41.0074], r: 1.0, top: 1.4, make: barracks, rot: 0.35 },
-  { name: 'Fatih Camii', ll: [28.9498, 41.0197], r: 1.1, top: 2.6, make: (P, S) => mosque(P, S, { wall: '#dbd3c0', minarets: [[-0.72, 0.7, 2.4, 2], [0.72, 0.7, 2.4, 2]] }), rot: QIBLA, s: 0.8 },
+  { name: 'Fatih Camii', ll: [28.9498, 41.0197], r: 1.42, oz: -0.6, top: 2.6, make: (P, S) => mosque(P, S, { wall: '#dbd3c0', minarets: [[-0.72, 0.7, 2.4, 2], [0.72, 0.7, 2.4, 2]] }), rot: QIBLA, s: 0.72 },
   { name: 'Beylerbeyi Sarayı', ll: [29.04, 41.0427], r: 0.85, top: 1.1, make: dolmabahce, shore: true, s: 0.7 },
   { name: 'Çırağan Sarayı', ll: [29.0153, 41.0435], r: 0.85, top: 1.1, make: dolmabahce, shore: true, s: 0.7 },
-  { name: 'Beyazıt Kulesi', ll: [28.9649, 41.0128], r: 0.32, top: 3.0, make: tower },
+  { name: 'Beyazıt Kulesi', ll: [28.9649, 41.0128], r: 0.34, top: 3.0, make: tower, s: 0.75 },
   { name: 'Mihrimah Sultan', ll: [29.016, 41.0268], r: 0.75, top: 2.4, make: (P, S) => mosque(P, S, { wall: '#dbd3c0', semis: 2, court: false, minarets: [[-0.72, 0.7, 2.2, 1], [0.72, 0.7, 2.2, 1]] }), rot: QIBLA, s: 0.72 },
 ];
 /** bridges, shore to shore (from the OpenStreetMap ways) */
@@ -475,7 +478,7 @@ type City = {
 
 function buildCity(g: Grid, S: Shapes, map: MapData): City {
   const n = g.n, P = new Parts();
-  const k = 1.14 * Math.min(1.5, Math.sqrt(n / 25)); // landmarks are drawn large, as on a tourist map, and grow a little with the code
+  const k = 0.95 * Math.min(1.5, Math.sqrt(n / 25)); // landmarks are drawn larger than life, as on a tourist map, and grow a little with the code
   const X = (c: number) => c - n / 2 + 0.5, Z = (r: number) => r - n / 2 + 0.5;
   const world = ([lon, lat]: LL): [number, number] => [((lon - LON0) / (LON1 - LON0)) * n - n / 2, ((LAT1 - lat) / (LAT1 - LAT0)) * n - n / 2];
   const sd = (x: number, z: number) => mapAt(map, x, z, n)[0];
@@ -492,22 +495,34 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
       m.x += (gx / l) * 0.08; m.z += (gz / l) * 0.08;
     }
   };
-  for (let it = 0; it < 12; it++) for (let i = 0; i < marks.length; i++) for (let j = i + 1; j < marks.length; j++) {
-    const a = marks[i], b = marks[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1e-3, want = (a.r * a.s + b.r * b.s) * 0.9;
-    if (d < want) { const push = (want - d) / 2 / d; a.x -= dx * push; a.z -= dz * push; b.x += dx * push; b.z += dz * push; }
+  const spans = BRIDGES.map((b) => [world(b.a), world(b.b)]);
+  for (let round = 0; round < 4; round++) {
+    // no two in each other's ground…
+    for (let it = 0; it < 14; it++) for (let i = 0; i < marks.length; i++) for (let j = i + 1; j < marks.length; j++) {
+      const a = marks[i], b = marks[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1e-3, want = a.r * a.s + b.r * b.s + 0.1;
+      if (d < want) { const push = (want - d) / 2 / d; a.x -= dx * push; a.z -= dz * push; b.x += dx * push; b.z += dz * push; }
+    }
+    // …none under a bridge…
+    for (const m of marks) for (const [a, b] of spans) {
+      const ex = b[0] - a[0], ez = b[1] - a[1], t = Math.max(0, Math.min(1, ((m.x - a[0]) * ex + (m.z - a[1]) * ez) / (ex * ex + ez * ez)));
+      const px = a[0] + ex * t, pz = a[1] + ez * t, d = Math.hypot(m.x - px, m.z - pz) || 1e-3, want = m.r * m.s + 0.35;
+      if (d < want) { m.x += ((m.x - px) / d) * (want - d); m.z += ((m.z - pz) / d) * (want - d); }
+    }
+    // …all inside the map, and on land unless they belong in the water
+    for (const m of marks) {
+      const lim = n / 2 - m.r * m.s - 0.2;
+      m.x = Math.max(-lim, Math.min(lim, m.x)); m.z = Math.max(-lim, Math.min(lim, m.z));
+      if (!m.sea) ashore(m, m.shore ? 0.3 : 0.45);
+    }
   }
   for (const m of marks) {
-    // inside the map, with room for its own footprint
-    const lim = n / 2 - m.r * m.s - 0.2;
-    m.x = Math.max(-lim, Math.min(lim, m.x)); m.z = Math.max(-lim, Math.min(lim, m.z));
-    if (!m.sea) ashore(m, m.shore ? 0.3 : 0.45);
     m.y = m.sea ? 0.02 : height(m.x, m.z);
     if (m.shore) { // palaces and stations face the water
       const gx = sd(m.x + 0.3, m.z) - sd(m.x - 0.3, m.z), gz = sd(m.x, m.z + 0.3) - sd(m.x, m.z - 0.3);
       m.rot = Math.atan2(-gx, -gz);
     }
   }
-  const taken = (x: number, z: number) => marks.some((m) => Math.hypot(x - m.x, z - m.z) < m.r * m.s + 0.15);
+  const taken = (x: number, z: number) => marks.some((m) => Math.hypot(x - m.x, z - m.z) < m.r * m.s + 0.3);
 
   const pick = <T,>(list: T[], v: number) => list[Math.floor(v * list.length) % list.length];
   const tree = (x: number, z: number, v: number, s = 1) => {
@@ -544,6 +559,11 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
       use[r * n + c] = 1;
       if (h1 < 0.22) { tree(0.3, 0.3, h2, 0.8); if (h3 < 0.5) tree(-0.3, 0.32, h3 * 2, 0.75); }
       else if (h1 < 0.32) tulips(-0.26, -0.26, h2, 5); // a planter on the square
+      if (d0 < 1.1) for (let i = 0; i < 3; i++) { // by the water: parasols, in summer (kind 31)
+        const ux = hash(r + i * 3, c + 61) * 0.7 - 0.35, uz = hash(r + 67, c + i * 5) * 0.7 - 0.35;
+        P.add(S.box, ux, 0, uz, 0.02, 0.2, 0.02, '#f4efe4', 31);
+        P.add(S.cone, ux, 0.17, uz, 0.3, 0.1, 0.3, pick(['#e0252b', '#f2c230', '#2f86ad', '#ffffff', '#ff7a2a'], hash(r + i, c + 71)), 31);
+      }
       continue;
     }
     use[r * n + c] = 2;
@@ -582,8 +602,9 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
 
   const labels: City['labels'] = [];
   for (const m of marks) {
-    P.at(m.x, m.y!, m.z, m.rot ?? 0, m.s, 0.55);
-    if (!m.sea && !m.shore) P.add(S.oct, 0, -0.9, 0, m.r * 1.75, 0.9, m.r * 1.75, '#e6dcc5', 4); // a low terrace, level on the slope
+    const rot = m.rot ?? 0, oz = (m.oz ?? 0) * m.s;
+    P.at(m.x + Math.sin(rot) * oz, m.y!, m.z + Math.cos(rot) * oz, rot, m.s, 0.55);
+    if (!m.sea && !m.shore) P.add(S.oct, 0, -0.9, -(m.oz ?? 0), m.r * 1.9, 0.9, m.r * 1.9, '#e6dcc5', 4); // a low terrace, level on the slope
     m.make(P, S);
     labels.push({ name: m.name, x: m.x, y: m.y! + m.top * m.s, z: m.z });
   }
@@ -685,7 +706,7 @@ vec2 mapAt(vec2 m) { vec3 t = texture2D(uMap, m / uN).rgb; return vec2((t.r * 25
 const VERT = /* glsl */ `
 attribute vec3 aCol, aFlat;
 attribute vec3 aMisc; // kind, rise delay, the height it stands at
-uniform float uGrow, uFlat, uNight, uSpring;
+uniform float uGrow, uFlat, uNight, uSpring, uAutumn, uSnow;
 uniform mat4 uInv; // world → city
 varying vec3 vN, vCol, vFlat; varying vec2 vUv, vM; varying float vY, vKind;
 void main() {
@@ -693,13 +714,15 @@ void main() {
   g = 1.0 - pow(1.0 - g, 3.0);
   vec3 p = position;
   vY = p.y - aMisc.z;
-  p.y = aMisc.z + (p.y - aMisc.z) * g * (aMisc.x > 29.5 ? uSpring : 1.0); // tulips come up in spring
+  // tulips come up in spring (kind 30), parasols open in summer (31)
+  float inSeason = aMisc.x > 30.5 ? clamp(1.0 - uSpring - uAutumn - uSnow, 0.0, 1.0) : aMisc.x > 29.5 ? uSpring : 1.0;
+  p.y = aMisc.z + (p.y - aMisc.z) * g * inSeason;
   vN = normal; vUv = uv; vCol = aCol; vFlat = aFlat; vKind = aMisc.x;
   vec4 w = modelMatrix * vec4(p, 1.0);
   vM = (uInv * w).xz;
   gl_Position = projectionMatrix * viewMatrix * w;
   if (abs(aMisc.x - 5.0) < 0.1 && uNight * (1.0 - uFlat) < 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // lamps: only at night
-  if (aMisc.x > 29.5 && uSpring < 0.02) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  if (inSeason < 0.02) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 }`;
 const FRAG = COMMON + /* glsl */ `
 uniform vec3 uGlass, uLit;
@@ -713,12 +736,16 @@ void main() {
   float win = 0.0, lit = 0.0, tw = 1.0;
   bool house = k < 0.5, arcade = abs(k - 2.0) < 0.1, lead = abs(k - 3.0) < 0.1, stone = abs(k - 4.0) < 0.1, round_ = abs(k - 6.0) < 0.1, hall = abs(k - 7.0) < 0.1;
   bool upright = abs(n.y) < 0.5;
+  float summer = clamp(1.0 - uSpring - uAutumn - uSnow, 0.0, 1.0);
+  if (abs(k - 9.0) < 0.1) col = mix(col, col * vec3(0.8, 0.9, 0.8), summer);
   if (abs(k - 8.0) < 0.1) {
     // leaves: Judas-tree pink among fresh green in spring, the turning colours in autumn, bare wood in winter
     float h = hash(floor(vM * 2.3) + 0.5);
     vec3 turned = h < 0.4 ? vec3(0.69, 0.22, 0.03) : h < 0.72 ? vec3(0.46, 0.04, 0.02) : vec3(0.76, 0.45, 0.04);
     col = mix(col, turned * (0.8 + 0.4 * vCol.g), uAutumn);
-    col = mix(col, h > 0.68 ? vec3(0.72, 0.13, 0.36) : col * vec3(1.05, 1.3, 0.8), uSpring);
+    // spring: half the trees in blossom, pink and white, the rest in pale new leaf; summer: deep, heavy green
+    col = mix(col, h > 0.74 ? vec3(0.9, 0.82, 0.86) : h > 0.44 ? vec3(0.76, 0.16, 0.4) : col * vec3(1.5, 1.75, 0.7), uSpring);
+    col = mix(col, col * vec3(0.62, 0.8, 0.6), summer);
     col = mix(col, vec3(0.13, 0.1, 0.08), uSnow * 0.85);
   }
   // snow lies on whatever faces the sky
@@ -752,7 +779,8 @@ void main() {
   }
   // day: a warm low sun, cool sky in the shade, a little darker towards the street
   float lam = max(dot(n, uSun), 0.0);
-  vec3 day = col * (vec3(0.5, 0.56, 0.68) * (0.92 + 0.3 * n.y) + vec3(1.08, 0.98, 0.82) * lam * 0.78);
+  // (a hard high-summer sun; a soft, even light in spring)
+  vec3 day = col * (vec3(0.5, 0.56, 0.68) * (0.92 + 0.3 * n.y) * (1.0 + 0.14 * uSpring - 0.08 * summer) + vec3(1.08, 0.98, 0.82) * lam * (0.78 + 0.2 * summer - 0.16 * uSpring));
   if (abs(k - 5.0) > 0.1 && upright) day *= 0.86 + 0.14 * smoothstep(0.0, 0.3, vY);
   if (lead) {
     // lead: the seams of the sheets running down the dome, a soft shine where the sun sits on it
@@ -785,6 +813,7 @@ void main() {
   vec4 here = cellAt(m);
   vec2 mp = mapAt(m);
   float sd = mp.x, land = smoothstep(-0.04, 0.04, sd), park = smoothstep(0.35, 0.65, mp.y);
+  float summer = clamp(1.0 - uSpring - uAutumn - uSnow, 0.0, 1.0);
   vec3 col;
   if (vN.y > 0.2) {
     // ---- land: paving (sand by the water, grass in the parks), the lie of the hills, house shadows, lamps at night
@@ -794,7 +823,8 @@ void main() {
     pave = mix(pave, vec3(0.9, 0.82, 0.62), smoothstep(0.13, 0.0, sd) * 0.8);
     vec3 grass = vec3(0.4, 0.6, 0.27) * (0.88 + 0.24 * hash(floor(m * 5.0)));
     grass = mix(grass, vec3(0.52, 0.47, 0.2) * (0.85 + 0.3 * hash(floor(m * 5.0))), uAutumn);
-    grass = mix(grass, vec3(0.36, 0.68, 0.24) * (0.9 + 0.2 * hash(floor(m * 5.0))), uSpring);
+    grass = mix(grass, vec3(0.34, 0.74, 0.2) * (0.9 + 0.2 * hash(floor(m * 5.0))), uSpring);
+    grass = mix(grass, vec3(0.56, 0.55, 0.24) * (0.85 + 0.3 * hash(floor(m * 5.0))), summer * 0.6); // sun-dried by August
     // tulips in the parks in spring, fallen leaves in autumn
     vec2 bed = m * 5.0, bc = floor(bed);
     float dot_ = 1.0 - smoothstep(0.3, 0.44, length(fract(bed) - 0.5)), pick = hash(bc);
@@ -808,7 +838,8 @@ void main() {
     float lam = max(dot(normalize(vN), uSun), 0.0);
     vec2 s = normalize(uSun.xz);
     float shade = max(cellAt(m + s * 0.42).g, 0.6 * cellAt(m + s * 0.84).g) * (1.0 - here.g);
-    vec3 landDay = ground * (0.74 + 0.42 * lam) * mix(vec3(1.0), vec3(0.66, 0.7, 0.84), shade);
+    vec3 landDay = ground * (0.74 + 0.42 * lam) * mix(vec3(1.0), vec3(0.66, 0.7, 0.84) * (1.0 - 0.22 * summer), shade * (1.0 - 0.45 * uSpring));
+    landDay *= 1.0 + 0.05 * summer;
     vec3 landDusk = ground * vec3(0.13, 0.16, 0.29) * (0.8 + 0.3 * lam);
     vec2 q = fract(m * 0.5 + 0.25) - 0.5;
     landDusk += vec3(1.0, 0.7, 0.36) * exp(-dot(q, q) * 30.0) * step(0.4, hash(floor(m * 0.5 + 0.25))) * 0.42 * (1.0 - park);
@@ -820,6 +851,8 @@ void main() {
     float ripple = smoothstep(0.55, 1.0, sin(out_ * 15.0 - uTime * 1.3)) * exp(-out_ * 2.2) * 0.35;
     vec3 seaDay = mix(vec3(0.34, 0.76, 0.8), uSea, depth) * (0.95 + 0.09 * wave) * (here.r > 0.5 ? 0.95 : 1.03) + glint * 0.16;
     seaDay = mix(seaDay, vec3(dot(seaDay, vec3(0.3, 0.5, 0.2))) * vec3(0.78, 0.86, 0.95), uSnow * 0.6 + uAutumn * 0.22); // a greyer sea out of season
+    seaDay = mix(seaDay, vec3(0.62, 0.88, 0.86), uSpring * 0.3);          // paler in spring
+    seaDay = seaDay * mix(vec3(1.0), vec3(0.78, 0.92, 1.1), summer) + glint * 0.22 * summer; // deep blue and glittering in summer
     seaDay = mix(seaDay, vec3(0.93, 0.98, 0.98), max(foam * 0.75, ripple));
     vec3 seaDusk = vec3(0.03, 0.07, 0.15) * (here.r > 0.5 ? 0.88 : 1.08) + vec3(0.9, 0.75, 0.5) * glint * 0.07 + vec3(0.2, 0.26, 0.4) * max(foam, ripple) * 0.4;
     // ---- the code: the lightness of the module, the hue of what is really there
