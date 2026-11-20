@@ -514,6 +514,16 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
     if (v < 0.4) P.add(S.cone, x, 0, z, 0.24 * s, (0.8 + v) * s, 0.24 * s, CYPRESS, 9, 0.9 + v * 0.4);
     else { P.add(S.tube, x, 0, z, 0.06 * s, 0.22 * s, 0.06 * s, '#6b4a33'); P.add(S.ball, x, 0.16 * s, z, 0.42 * s, 0.46 * s, 0.42 * s, v > 0.75 ? '#6aa04a' : GREEN, 8, 0.85 + v * 0.3); }
   };
+  // a bed of tulips, drawn far larger than life so they can be seen: they stand only in spring (kind 30)
+  const TULIPS = ['#e0252b', '#f2c230', '#e8609a', '#9a48c0', '#ff7a2a', '#fff3ea'];
+  const tulips = (x: number, z: number, v: number, count = 6) => {
+    const c = pick(TULIPS, v);
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 + v * 6, rr = i ? 0.19 + 0.05 * hash(i, v * 99) : 0, tx = x + Math.cos(a) * rr, tz = z + Math.sin(a) * rr, th = 0.16 + 0.08 * hash(i + 3, v * 57);
+      P.add(S.box, tx, 0, tz, 0.035, th, 0.035, '#3f8a3a', 30);
+      P.add(S.oct, tx, th, tz, 0.17, 0.2, 0.17, c, 30, 0.9 + 0.2 * hash(i, v * 31));
+    }
+  };
   const chimneys: number[][] = [];
   // per module, for the shaders and the traffic: 1 a street, 2 a building
   const use = new Uint8Array(n * n);
@@ -527,11 +537,13 @@ function buildCity(g: Grid, S: Shapes, map: MapData): City {
     P.at(x, y, z, 0, 1, d);
     if (park > 0.5) { // a real park: a grove, denser on the dark modules
       for (let i = 0; i < (g.dark(r, c) ? 5 : 3); i++) tree(hash(r + i, c + 2) * 0.76 - 0.38, hash(r + 2, c + i) * 0.76 - 0.38, hash(r + i * 5, c + 1), 1.05);
+      for (let i = 0; i < 3; i++) tulips(hash(r + i * 7, c + 31) * 0.6 - 0.3, hash(r + 41, c + i * 5) * 0.6 - 0.3, hash(r + i, c + 23));
       continue;
     }
     if (!g.dark(r, c)) { // a street or a square, some of them lined with trees
       use[r * n + c] = 1;
       if (h1 < 0.22) { tree(0.3, 0.3, h2, 0.8); if (h3 < 0.5) tree(-0.3, 0.32, h3 * 2, 0.75); }
+      else if (h1 < 0.32) tulips(-0.26, -0.26, h2, 5); // a planter on the square
       continue;
     }
     use[r * n + c] = 2;
@@ -673,7 +685,7 @@ vec2 mapAt(vec2 m) { vec3 t = texture2D(uMap, m / uN).rgb; return vec2((t.r * 25
 const VERT = /* glsl */ `
 attribute vec3 aCol, aFlat;
 attribute vec3 aMisc; // kind, rise delay, the height it stands at
-uniform float uGrow, uFlat, uNight;
+uniform float uGrow, uFlat, uNight, uSpring;
 uniform mat4 uInv; // world → city
 varying vec3 vN, vCol, vFlat; varying vec2 vUv, vM; varying float vY, vKind;
 void main() {
@@ -681,19 +693,20 @@ void main() {
   g = 1.0 - pow(1.0 - g, 3.0);
   vec3 p = position;
   vY = p.y - aMisc.z;
-  p.y = aMisc.z + (p.y - aMisc.z) * g;
+  p.y = aMisc.z + (p.y - aMisc.z) * g * (aMisc.x > 29.5 ? uSpring : 1.0); // tulips come up in spring
   vN = normal; vUv = uv; vCol = aCol; vFlat = aFlat; vKind = aMisc.x;
   vec4 w = modelMatrix * vec4(p, 1.0);
   vM = (uInv * w).xz;
   gl_Position = projectionMatrix * viewMatrix * w;
   if (abs(aMisc.x - 5.0) < 0.1 && uNight * (1.0 - uFlat) < 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // lamps: only at night
+  if (aMisc.x > 29.5 && uSpring < 0.02) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 }`;
 const FRAG = COMMON + /* glsl */ `
 uniform vec3 uGlass, uLit;
 varying vec3 vN, vCol, vFlat; varying vec2 vUv, vM; varying float vY, vKind;
 void main() {
   vec3 n = normalize(vN);
-  float glow = step(9.5, vKind);
+  float glow = step(9.5, vKind) * step(vKind, 19.5);
   float k = vKind - 10.0 * glow;
   float nf = uNight * (1.0 - uFlat);
   vec3 col = vCol;
@@ -783,12 +796,12 @@ void main() {
     grass = mix(grass, vec3(0.52, 0.47, 0.2) * (0.85 + 0.3 * hash(floor(m * 5.0))), uAutumn);
     grass = mix(grass, vec3(0.36, 0.68, 0.24) * (0.9 + 0.2 * hash(floor(m * 5.0))), uSpring);
     // tulips in the parks in spring, fallen leaves in autumn
-    vec2 bed = m * 13.0, bc = floor(bed);
-    float dot_ = 1.0 - smoothstep(0.16, 0.3, length(fract(bed) - 0.5)), pick = hash(bc);
+    vec2 bed = m * 5.0, bc = floor(bed);
+    float dot_ = 1.0 - smoothstep(0.3, 0.44, length(fract(bed) - 0.5)), pick = hash(bc);
     vec3 tulip = pick > 0.93 ? vec3(0.8, 0.05, 0.06) : pick > 0.86 ? vec3(0.9, 0.62, 0.04) : vec3(0.8, 0.2, 0.45);
-    grass = mix(grass, tulip, dot_ * step(0.8, pick) * uSpring);
+    grass = mix(grass, tulip, dot_ * step(0.72, pick) * uSpring * 0.85);
     vec3 litter = pick > 0.9 ? vec3(0.6, 0.2, 0.03) : vec3(0.72, 0.42, 0.05);
-    grass = mix(grass, litter, dot_ * step(0.72, pick) * uAutumn);
+    grass = mix(grass, litter, dot_ * step(0.84, pick) * uAutumn * 0.75);
     pave = mix(pave, litter, dot_ * step(0.93, pick) * uAutumn * 0.8);
     vec3 ground = mix(pave, grass, park);
     ground = mix(ground, vec3(0.86, 0.9, 0.97) * (0.93 + 0.07 * hash(floor(m * 9.0))), uSnow * (0.9 - 0.3 * (1.0 - park) * (1.0 - smoothstep(0.1, 0.42, max(a.x, a.y)))));
