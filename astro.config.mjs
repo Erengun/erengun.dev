@@ -26,6 +26,8 @@ export default defineConfig({
   // the repo's existing Pages workflow uploads dist/client
   outDir: 'dist/client',
   integrations: [devTestPages],
+  // the stylesheets are a few kB each: in the page itself they cost no extra request before the first paint
+  build: { inlineStylesheets: 'always' },
   vite: {
     plugins: [tailwindcss()],
     build: {

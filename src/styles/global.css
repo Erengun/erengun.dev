@@ -1,3 +1,4 @@
+@import "./fonts.css";
 /* Design tokens: B · field notes (Space Grotesk + IBM Plex Mono, paper/ink, one signal accent). */
 :root {
   --font-sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -111,9 +112,10 @@ html[data-lite] #app > canvas { visibility: hidden; }
 /* ---------- preloader ---------- */
 .preloader {
   position: fixed; inset: 0; z-index: 10000; background: var(--c-paper); color: var(--c-ink);
-  transition: opacity 500ms var(--ease-out), visibility 500ms var(--ease-out);
+  transition: opacity 500ms var(--ease-out);
 }
-.preloader[data-exiting] { opacity: 0; visibility: hidden; }
+/* fades on opacity alone (the compositor can do that by itself); the script sets [hidden] when it is over */
+.preloader[data-exiting] { opacity: 0; pointer-events: none; }
 .preloader[hidden] { display: none; }
 .pl-top {
   height: 4.5rem; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: center; position: relative;
@@ -234,7 +236,8 @@ html[data-lite] #app > canvas { visibility: hidden; }
   padding-bottom: calc(3rem + var(--safe-b));
   visibility: hidden; opacity: 0; transition: opacity 200ms var(--ease-out), visibility 200ms var(--ease-out);
 }
-body.is--intro .intro__grid { visibility: visible; opacity: 1; }
+/* appearing: visible at once (no visibility animation, which can't be composited); leaving keeps the delayed hide */
+body.is--intro .intro__grid { visibility: visible; opacity: 1; transition: opacity 200ms var(--ease-out); }
 .intro__name { grid-column: span 3; display: flex; flex-direction: column; font-weight: 700; font-size: clamp(5rem, 11.5vw, 13rem); line-height: .82; letter-spacing: -.055em; }
 .intro__side { display: flex; flex-direction: column; gap: 1.25rem; padding-bottom: .5rem; }
 .intro__para { font-size: 1.125rem; line-height: 1.4; }

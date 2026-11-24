@@ -1,5 +1,6 @@
 ---
 // Plain, fast reading pages: no WebGL, one small stylesheet, same type as the journey (Space Grotesk + IBM Plex Mono).
+import '../styles/fonts.css';
 import { SITE } from '../lib/content';
 
 interface Props {
@@ -50,9 +51,7 @@ const fullTitle = `${title} — ${SITE.name}`;
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="preload" href="/fonts/space-grotesk-400-700-latin.woff2" as="font" type="font/woff2" crossorigin />
     {alternates.length > 0 && <link rel="alternate" hreflang={lang} href={url} />}
     {alternates.map((a) => <link rel="alternate" hreflang={a.lang} href={URL_BASE + a.path} />)}
     {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}

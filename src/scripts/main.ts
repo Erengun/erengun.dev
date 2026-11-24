@@ -11,6 +11,7 @@ import { initMenu } from './menu';
 import { initTilt } from './tilt';
 import { guard, lower, session, type Tier } from './guard';
 import { createLite } from './lite';
+import { probeGpu, SOFTWARE_GPU } from './gpu';
 
 const $ = <T extends Element = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const $$ = <T extends Element = HTMLElement>(s: string, r: ParentNode = document) => [...r.querySelectorAll(s)] as T[];
@@ -522,6 +523,10 @@ async function boot() {
   if (guard.cap === 'lite') {
     console.warn('[lab] stills mode', guard.log.join('; '));
     lite.show();
+  } else if (!bootParams.has('quality') && SOFTWARE_GPU.test(probeGpu())) {
+    // no usable GPU: the scene would refuse to start (scene/app.ts), so its ~350 kB aren't downloaded at all
+    console.warn('[lab] stills mode: software renderer', probeGpu());
+    lite.show();
   } else {
     try {
       const { createApp } = await import('../scene/app');
@@ -554,7 +559,9 @@ function tryGate() {
   openGate();
 }
 $preloader.subscribe(() => tryGate());
-boot();
+// the loader goes on screen first: asking for a graphics context (and, on a software renderer, everything after
+// it) can hold the browser's first frame back. A hidden tab draws no frames, hence the timer.
+new Promise<void>((go) => { requestAnimationFrame(() => setTimeout(go)); setTimeout(go, 500); }).then(boot);
 
 (window as any).__lab = { snap, lenis, $route, scroll, scrollToVp, STAGES, TRANSITIONS, TOTAL_VP };
 if (reducedMq.matches) body.classList.add('is--reduced');
